@@ -1,16 +1,19 @@
 import Foundation
 import SwiftSoup
 
-/// A minimal XPath subset evaluator against a SwiftSoup DOM: `/`/`//` axes, tag/`*`/`text()`/`@attr`
-/// node tests, and the predicate forms real book sources actually use (`[N]`, `[last()]`,
-/// `[position()>N]`, `[position()<N]`, `[@attr]`, `[@attr="v"]`, `[text()="v"]`). Not a general
-/// XPath 1.0 implementation — no other axes, no functions beyond `position()`/`last()`, no boolean
-/// operators in predicates. Unsupported syntax throws `.notYetImplemented` rather than silently
-/// mis-selecting, matching the rest of this engine's philosophy.
+/// A minimal XPath subset evaluator against a SwiftSoup DOM: `/`/`//` axes plus the explicit
+/// `following-sibling::` axis (confirmed real-world usage, not a guess — found in multiple real
+/// book sources' `chapterList` rules), tag/`*`/`text()`/`@attr` node tests, and the predicate
+/// forms real book sources actually use (`[N]`, `[last()]`, `[position()>N]`, `[position()<N]`,
+/// `[@attr]`, `[@attr="v"]`, `[text()="v"]`). Not a general XPath 1.0 implementation — no other
+/// axes, no functions beyond `position()`/`last()`, no boolean operators in predicates.
+/// Unsupported syntax throws `.notYetImplemented` rather than silently mis-selecting, matching
+/// the rest of this engine's philosophy.
 public enum XPathEvaluator {
     enum Axis {
         case child
         case descendantOrSelf
+        case followingSibling
     }
 
     enum NodeTest: Equatable {
@@ -88,6 +91,8 @@ public enum XPathEvaluator {
                 candidates.append(contentsOf: matchingChildren(step.nodeTest, of: el))
             case .descendantOrSelf:
                 candidates.append(contentsOf: try matchingDescendants(step.nodeTest, of: el))
+            case .followingSibling:
+                candidates.append(contentsOf: matchingFollowingSiblings(step.nodeTest, of: el))
             }
         }
         return try applyPredicates(step.predicates, to: candidates)
@@ -110,6 +115,23 @@ public enum XPathEvaluator {
             return try element.getElementsByTag(name).array()
         case .wildcard:
             return try element.select("*").array()
+        case .text, .attribute:
+            return []
+        }
+    }
+
+    /// XPath's `following-sibling::` axis: all siblings (same parent) that appear *after* the
+    /// current element in document order — not just the immediate next one.
+    private static func matchingFollowingSiblings(_ nodeTest: NodeTest, of element: Element) -> [Element] {
+        guard let parent = element.parent() else { return [] }
+        let siblings = parent.children().array()
+        guard let selfIndex = siblings.firstIndex(where: { $0 === element }) else { return [] }
+        let following = siblings[(selfIndex + 1)...]
+        switch nodeTest {
+        case .tag(let name):
+            return following.filter { $0.tagName().lowercased() == name.lowercased() }
+        case .wildcard:
+            return Array(following)
         case .text, .attribute:
             return []
         }
@@ -144,10 +166,20 @@ public enum XPathEvaluator {
 
     static func parse(_ path: String) throws -> [Step] {
         try splitSteps(path.trimmingCharacters(in: .whitespacesAndNewlines)).map { axis, text in
-            let (base, predicateTexts) = extractBracketGroups(text)
+            // An explicit axis like "following-sibling::" appears *within* a step's text (after
+            // the "/"-based split above), not as a step separator -- it overrides whatever axis
+            // the leading "/"/"//" implied.
+            var effectiveAxis = axis
+            var stepText = text
+            if stepText.hasPrefix("following-sibling::") {
+                effectiveAxis = .followingSibling
+                stepText = String(stepText.dropFirst("following-sibling::".count))
+            }
+
+            let (base, predicateTexts) = extractBracketGroups(stepText)
             let nodeTest = try parseNodeTest(base)
             let predicates = try predicateTexts.map(parsePredicate)
-            return Step(axis: axis, nodeTest: nodeTest, predicates: predicates)
+            return Step(axis: effectiveAxis, nodeTest: nodeTest, predicates: predicates)
         }
     }
 

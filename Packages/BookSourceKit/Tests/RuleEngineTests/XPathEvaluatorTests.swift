@@ -138,6 +138,37 @@ final class XPathEvaluatorTests: XCTestCase {
         XCTAssertEqual(items.array().count, 2)
     }
 
+    // MARK: - following-sibling:: axis (confirmed real usage: multiple real sources' chapterList
+    // rules use "//*[@id=\"list\"]//dt[2]/following-sibling::dd/a" -- found via a smoke test over
+    // 189 real downloaded book sources, not invented)
+
+    func testFollowingSiblingAxisSelectsAllLaterSiblingsNotJustTheNext() throws {
+        let html = """
+        <div id="list">
+          <dt>Header 1</dt>
+          <dd><a href="/c/1">Ignored (before dt[2])</a></dd>
+          <dt>Header 2</dt>
+          <dd><a href="/c/2">Chapter A</a></dd>
+          <dd><a href="/c/3">Chapter B</a></dd>
+        </div>
+        """
+        let items = try XPathEvaluator.extractElements(
+            "//*[@id=\"list\"]//dt[2]/following-sibling::dd/a", root: root(html)
+        )
+        XCTAssertEqual(items.array().count, 2)
+
+        let hrefs = try XPathEvaluator.extractStrings(
+            "//*[@id=\"list\"]//dt[2]/following-sibling::dd/a/@href", root: root(html)
+        )
+        XCTAssertEqual(hrefs, ["/c/2", "/c/3"])
+    }
+
+    func testFollowingSiblingAxisWithWildcardNodeTest() throws {
+        let html = "<div><p>first</p><span>a</span><span>b</span></div>"
+        let items = try XPathEvaluator.extractElements("//p/following-sibling::*", root: root(html))
+        XCTAssertEqual(items.array().count, 2)
+    }
+
     // MARK: - Unsupported syntax fails loudly rather than mis-selecting
 
     func testUnsupportedPredicateFunctionThrows() {
