@@ -8,9 +8,18 @@ import SwiftSoup
 public enum RuleContent {
     case html(Elements)
     case json(JSONValue)
+    /// One AllInOne regex match: index 0 is the whole match, index N is capture group N (empty
+    /// string for a group that didn't participate in the match) — mirrors the real
+    /// `List<String>` row shape a sibling `"$1"`/`"$2"` rule indexes into.
+    case regexRow([String])
 
     var isJSON: Bool {
         if case .json = self { return true }
+        return false
+    }
+
+    var isRegexRow: Bool {
+        if case .regexRow = self { return true }
         return false
     }
 
@@ -18,6 +27,24 @@ public enum RuleContent {
         let elements = Elements()
         elements.add(rootElement)
         return .html(elements)
+    }
+
+    /// A textual view of this content for the AllInOne regex extractor to scan. For HTML this is
+    /// the parsed DOM re-serialized back to markup (`outerHtml()`) rather than the original raw
+    /// response bytes — this engine doesn't carry the pre-parse source string through per-item
+    /// narrowing, so regex patterns that depend on exact original whitespace/attribute-ordering
+    /// quirks (rather than just tag/attribute structure) may not match identically to the real
+    /// app. Real-world AllInOne patterns match structural tag boundaries, not raw-byte quirks, so
+    /// this is a reasonable v1 trade-off, not a silent-wrong-answer risk.
+    func rawText() throws -> String {
+        switch self {
+        case .html(let elements):
+            return try elements.outerHtml()
+        case .json(let value):
+            return value.stringValue ?? ""
+        case .regexRow(let row):
+            return row.first ?? ""
+        }
     }
 }
 

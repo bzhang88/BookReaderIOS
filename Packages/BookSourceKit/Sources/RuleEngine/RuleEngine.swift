@@ -57,6 +57,15 @@ public enum RuleEngine {
             }
             let values = JSONPathEvaluator.extractValues(parsed.selector, from: root)
             return values.map { RuleContent.json($0) }
+
+        case .allInOneRegex:
+            let rows = try AllInOneRegex.extractRows(pattern: parsed.selector, from: try content.rawText())
+            return rows.map { RuleContent.regexRow($0) }
+
+        case .regexTemplate:
+            throw RuleEngineError.invalidRule(
+                "A bare \"$N\" rule reads a sibling AllInOne match's capture groups -- it doesn't produce a list of items itself"
+            )
         }
     }
 
@@ -78,6 +87,15 @@ public enum RuleEngine {
                 throw RuleEngineError.invalidRule("JSON rule applied to non-JSON content")
             }
             return JSONPathEvaluator.extractStrings(selector, from: root)
+        case .regexTemplate:
+            guard case .regexRow(let row) = content else {
+                throw RuleEngineError.invalidRule("\"$N\" rule applied to content that isn't an AllInOne regex match row")
+            }
+            return [RegexRowTemplate.substitute(selector, row: row)]
+        case .allInOneRegex:
+            throw RuleEngineError.invalidRule(
+                "AllInOne (':'-prefixed) rules only apply to bookList/chapterList/init -- use extractItems, not a single-value extraction"
+            )
         }
     }
 

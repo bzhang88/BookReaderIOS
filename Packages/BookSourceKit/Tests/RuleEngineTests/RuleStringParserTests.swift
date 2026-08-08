@@ -49,10 +49,21 @@ final class RuleStringParserTests: XCTestCase {
         XCTAssertEqual(parsed.regexSuffix?.pattern, "ad.*")
     }
 
-    func testAllInOneThrowsUnsupported() {
-        XCTAssertThrowsError(try RuleStringParser.parse(":<li>(.*?)</li>")) { error in
-            XCTAssertEqual(error as? RuleEngineError, .unsupportedFeature(.allInOne))
-        }
+    func testAllInOneColonPrefixDetected() throws {
+        let parsed = try RuleStringParser.parse(":<li>(.*?)</li>")
+        XCTAssertEqual(parsed.mode, .allInOneRegex)
+        XCTAssertEqual(parsed.selector, "<li>(.*?)</li>")
+    }
+
+    func testBareRegexRowReferenceDetected() throws {
+        let parsed = try RuleStringParser.parse("$2")
+        XCTAssertEqual(parsed.mode, .regexTemplate)
+        XCTAssertEqual(parsed.selector, "$2")
+    }
+
+    func testEmbeddedRegexRowReferenceInTemplateTextDetected() throws {
+        let parsed = try RuleStringParser.parse("prefix-$1-suffix")
+        XCTAssertEqual(parsed.mode, .regexTemplate)
     }
 
     func testWebJsThrowsUnsupported() {

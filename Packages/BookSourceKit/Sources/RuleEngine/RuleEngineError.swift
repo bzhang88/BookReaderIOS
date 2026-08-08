@@ -5,7 +5,6 @@ import Foundation
 /// instead of a generic error or, worse, a silently wrong empty result.
 public enum UnsupportedRuleFeature: String, Equatable, Sendable {
     case webJs
-    case allInOne
     case putGetSyntax
     case interleaveCombinator
     case javaAjaxOrConnect
