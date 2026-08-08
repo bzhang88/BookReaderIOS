@@ -18,19 +18,31 @@ struct SourceLibraryView: View {
                         "还没有书源", systemImage: "tray",
                         description: Text("点右上角 + 导入一个书源 JSON 文件")
                     )
+                } else {
+                    Text("点一个书源可以启用/停用它——只有启用的书源才会参与搜索")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 ForEach(sources) { source in
-                    NavigationLink {
-                        SearchView(source: source)
+                    Button {
+                        toggleEnabled(source)
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(source.bookSourceName).font(.headline)
-                            Text(source.bookSourceUrl)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(source.bookSourceName)
+                                    .font(.headline)
+                                    .foregroundStyle(source.enabled ? .primary : .secondary)
+                                Text(source.bookSourceUrl)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: source.enabled ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(source.enabled ? .green : .secondary)
                         }
                     }
+                    .buttonStyle(.plain)
                 }
                 .onDelete(perform: delete)
             }
@@ -64,6 +76,13 @@ struct SourceLibraryView: View {
 
     private func reload() async {
         sources = (try? await env.bookSourceStore.all()) ?? []
+    }
+
+    private func toggleEnabled(_ source: BookSource) {
+        Task {
+            try? await env.bookSourceStore.setEnabled(bookSourceUrl: source.bookSourceUrl, enabled: !source.enabled)
+            await reload()
+        }
     }
 
     private func delete(at offsets: IndexSet) {

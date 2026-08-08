@@ -16,7 +16,8 @@ public enum SearchService {
         guard !bookListRule.isEmpty else { return [] }
 
         let built = try SearchURLBuilder.build(
-            searchUrl: searchUrlTemplate, keyword: keyword, page: page, baseHeaders: source.parsedHeaders()
+            searchUrl: searchUrlTemplate, keyword: keyword, page: page, baseHeaders: source.parsedHeaders(),
+            resolveAgainst: source.bookSourceUrl
         )
         let response = try await httpClient.fetch(HTTPRequest(
             url: built.url, method: built.method, headers: built.headers,

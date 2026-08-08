@@ -12,7 +12,7 @@ struct ShelfView: View {
                 if books.isEmpty {
                     ContentUnavailableView(
                         "书架是空的", systemImage: "books.vertical",
-                        description: Text("去书源库搜索一本书，加入书架")
+                        description: Text("点右上角搜索图标找一本书，加入书架")
                     )
                 }
                 ForEach(books) { book in
@@ -35,6 +35,15 @@ struct ShelfView: View {
                 .onDelete(perform: delete)
             }
             .navigationTitle("书架")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        GlobalSearchView()
+                    } label: {
+                        Label("搜索", systemImage: "magnifyingglass")
+                    }
+                }
+            }
             .task { await reload() }
             .refreshable { await reload() }
         }

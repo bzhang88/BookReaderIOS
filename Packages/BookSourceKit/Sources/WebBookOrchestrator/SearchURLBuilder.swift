@@ -19,18 +19,18 @@ public enum SearchURLBuilder {
     }
 
     public static func build(
-        searchUrl: String, keyword: String, page: Int, baseHeaders: [String: String]
+        searchUrl: String, keyword: String, page: Int, baseHeaders: [String: String], resolveAgainst baseURL: String
     ) throws -> BuiltRequest {
         let bindings = ["key": keyword, "page": String(page)]
 
         guard let optionsRange = searchUrl.range(of: ",{") else {
-            let url = try substitute(searchUrl, bindings: bindings)
+            let url = URLResolver.resolve(try substitute(searchUrl, bindings: bindings), against: baseURL)
             return BuiltRequest(url: url, method: "GET", body: nil, headers: baseHeaders)
         }
 
         let urlPart = String(searchUrl[..<optionsRange.lowerBound])
         let optionsPart = String(searchUrl[searchUrl.index(after: optionsRange.lowerBound)...])
-        let url = try substitute(urlPart, bindings: bindings)
+        let url = URLResolver.resolve(try substitute(urlPart, bindings: bindings), against: baseURL)
         let resolvedOptionsJSON = try substitute(optionsPart, bindings: bindings)
 
         guard let data = resolvedOptionsJSON.data(using: .utf8),
