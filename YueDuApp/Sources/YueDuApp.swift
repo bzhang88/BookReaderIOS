@@ -2,9 +2,12 @@ import SwiftUI
 
 @main
 struct YueDuApp: App {
+    @StateObject private var environment = AppEnvironment()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            SourceLibraryView()
+                .environmentObject(environment)
         }
     }
 }
