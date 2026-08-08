@@ -13,6 +13,7 @@ struct SourceLibraryView: View {
     @State private var errorMessage: String?
     @State private var editingSource: BookSource?
     @State private var isCreatingSource = false
+    @State private var debuggingSource: BookSource?
 
     var body: some View {
         NavigationStack {
@@ -65,6 +66,18 @@ struct SourceLibraryView: View {
                         }
                         .tint(.blue)
                     }
+                    .contextMenu {
+                        Button {
+                            editingSource = source
+                        } label: {
+                            Label("编辑", systemImage: "pencil")
+                        }
+                        Button {
+                            debuggingSource = source
+                        } label: {
+                            Label("调试", systemImage: "ladybug")
+                        }
+                    }
                 }
                 .onDelete(perform: delete)
             }
@@ -103,6 +116,9 @@ struct SourceLibraryView: View {
             }
             .sheet(isPresented: $isCreatingSource, onDismiss: { Task { await reload() } }) {
                 BookSourceEditView(source: nil)
+            }
+            .navigationDestination(item: $debuggingSource) { source in
+                SourceDebugView(source: source)
             }
             .alert("导入完成", isPresented: .constant(importSummary != nil)) {
                 Button("好") { importSummary = nil }
