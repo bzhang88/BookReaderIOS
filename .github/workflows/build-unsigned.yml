@@ -46,6 +46,20 @@ jobs:
           cp -r "$APP_PATH" build/Payload/
           cd build && zip -r YueDu-unsigned.ipa Payload
 
+      - name: Validate IPA structure
+        run: |
+          rm -rf build/verify
+          mkdir -p build/verify
+          unzip -q build/YueDu-unsigned.ipa -d build/verify
+          APP="build/verify/Payload/YueDu.app"
+          test -d "$APP" || { echo "::error::Payload/YueDu.app missing from IPA"; exit 1; }
+          test -f "$APP/Info.plist" || { echo "::error::Info.plist missing"; exit 1; }
+          test -f "$APP/YueDu" || { echo "::error::YueDu executable missing"; exit 1; }
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          echo "Bundle ID: $BUNDLE_ID"
+          test "$BUNDLE_ID" = "com.bzhang88.yuedu" || { echo "::error::unexpected bundle id $BUNDLE_ID"; exit 1; }
+          echo "IPA structure OK"
+
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
