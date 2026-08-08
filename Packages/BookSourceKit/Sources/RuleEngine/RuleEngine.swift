@@ -2,9 +2,9 @@ import Foundation
 import SwiftSoup
 
 /// Top-level façade: mode-detect (JSON-content-aware) → combinator-split → per-branch evaluate →
-/// combine → apply trailing regex suffix. XPath is detected but throws; `<js>`/`@js:`/`{{ }}` are
-/// detected in `RuleStringParser` and throw `.notYetImplemented` until Phase 2's JS work lands
-/// (blocked on JavaScriptCore, which only exists on Apple platforms — see `JSRuntime`).
+/// combine → apply trailing regex suffix. `<js>`/`@js:`/`{{ }}` are detected in
+/// `RuleStringParser` and throw `.notYetImplemented` until Phase 2's JS work lands (blocked on
+/// JavaScriptCore, which only exists on Apple platforms — see `JSRuntime`).
 public enum RuleEngine {
     /// Extracts a list of strings from `content` for a single rule field.
     public static func extractStringList(_ rule: String, from content: RuleContent) throws -> [String] {
@@ -32,15 +32,20 @@ public enum RuleEngine {
         let parsed = try RuleStringParser.parse(rule, contentIsJSON: content.isJSON)
 
         switch parsed.mode {
-        case .defaultChain, .cssSingle:
+        case .defaultChain, .cssSingle, .xpath:
             guard case .html(let root) = content else {
-                throw RuleEngineError.invalidRule("Default/CSS rule applied to non-HTML content")
+                throw RuleEngineError.invalidRule("Default/CSS/XPath rule applied to non-HTML content")
             }
             let (combinator, parts) = CombinatorSplitter.split(parsed.selector)
             var branches: [Elements] = []
             for part in parts {
-                let selectorText = elementsSelector(for: parsed.mode, rawPart: part)
-                let matched = try CSSChainEvaluator.evaluateElements(selectorText, root: root)
+                let matched: Elements
+                if parsed.mode == .xpath {
+                    matched = try XPathEvaluator.extractElements(part, root: root)
+                } else {
+                    let selectorText = elementsSelector(for: parsed.mode, rawPart: part)
+                    matched = try CSSChainEvaluator.evaluateElements(selectorText, root: root)
+                }
                 branches.append(matched)
                 if combinator == .firstNonEmpty && !matched.array().isEmpty { break }
             }
@@ -52,9 +57,6 @@ public enum RuleEngine {
             }
             let values = JSONPathEvaluator.extractValues(parsed.selector, from: root)
             return values.map { RuleContent.json($0) }
-
-        case .xpath:
-            throw RuleEngineError.unsupportedFeature(.xpath)
         }
     }
 
@@ -62,20 +64,20 @@ public enum RuleEngine {
 
     private static func evaluateBranch(mode: RuleMode, selector: String, content: RuleContent) throws -> [String] {
         switch mode {
-        case .defaultChain, .cssSingle:
+        case .defaultChain, .cssSingle, .xpath:
             guard case .html(let root) = content else {
-                throw RuleEngineError.invalidRule("Default/CSS rule applied to non-HTML content")
+                throw RuleEngineError.invalidRule("Default/CSS/XPath rule applied to non-HTML content")
             }
-            return mode == .cssSingle
-                ? try CSSChainEvaluator.extractStrings(cssSingle: selector, root: root)
-                : try CSSChainEvaluator.extractStrings(chain: selector, root: root)
+            switch mode {
+            case .cssSingle: return try CSSChainEvaluator.extractStrings(cssSingle: selector, root: root)
+            case .xpath: return try XPathEvaluator.extractStrings(selector, root: root)
+            default: return try CSSChainEvaluator.extractStrings(chain: selector, root: root)
+            }
         case .json:
             guard case .json(let root) = content else {
                 throw RuleEngineError.invalidRule("JSON rule applied to non-JSON content")
             }
             return JSONPathEvaluator.extractStrings(selector, from: root)
-        case .xpath:
-            throw RuleEngineError.unsupportedFeature(.xpath)
         }
     }
 

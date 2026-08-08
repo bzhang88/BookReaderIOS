@@ -4,7 +4,6 @@ import Foundation
 /// other failures so the app can show "this book source uses an unsupported rule feature"
 /// instead of a generic error or, worse, a silently wrong empty result.
 public enum UnsupportedRuleFeature: String, Equatable, Sendable {
-    case xpath
     case webJs
     case allInOne
     case putGetSyntax
