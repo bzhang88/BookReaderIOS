@@ -22,6 +22,11 @@ struct SettingsView: View {
                 } label: {
                     Label("AI 服务商", systemImage: "sparkles")
                 }
+                NavigationLink {
+                    HighlightRuleListView()
+                } label: {
+                    Label("高亮规则", systemImage: "highlighter")
+                }
             }
             .navigationTitle("设置")
         }

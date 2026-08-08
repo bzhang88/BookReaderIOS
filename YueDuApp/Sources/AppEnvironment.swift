@@ -11,6 +11,7 @@ final class AppEnvironment: ObservableObject {
     let replaceRuleStore: ReplaceRuleStore
     let rssSourceStore: RssSourceStore
     let aiProviderStore: AIProviderStore
+    let highlightRuleStore: HighlightRuleStore
     let httpClient: any HTTPClient
 
     init() {
@@ -20,6 +21,7 @@ final class AppEnvironment: ObservableObject {
         replaceRuleStore = ReplaceRuleStore(fileURL: appSupport.appendingPathComponent("replace_rules.json"))
         rssSourceStore = RssSourceStore(fileURL: appSupport.appendingPathComponent("rss_sources.json"))
         aiProviderStore = AIProviderStore(fileURL: appSupport.appendingPathComponent("ai_providers.json"))
+        highlightRuleStore = HighlightRuleStore(fileURL: appSupport.appendingPathComponent("highlight_rules.json"))
         httpClient = URLSessionHTTPClient()
     }
 }

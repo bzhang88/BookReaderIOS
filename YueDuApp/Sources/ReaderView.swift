@@ -17,6 +17,7 @@ struct ReaderView: View {
     @State private var errorMessage: String?
     @State private var isShowingSettings = false
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
+    @State private var highlightRules: [HighlightRule] = []
     @StateObject private var readAloud = ReadAloudController()
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
@@ -41,10 +42,9 @@ struct ReaderView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                    Text(paragraph)
+                    highlightedText(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
-                        .foregroundStyle(theme.textColor)
                         .padding(.horizontal, 4)
                         .background(
                             readAloud.isSpeaking && index == readAloud.currentParagraphIndex
@@ -176,6 +176,21 @@ struct ReaderView: View {
         currentIndex = index
     }
 
+    /// Builds one paragraph's flowing text as a concatenation of styled `Text` runs -- SwiftUI's
+    /// `Text + Text` only carries text-level attributes (color/weight/etc.) across the join, not
+    /// view-level ones like `.background()`, so highlighted spans are set apart with color+bold
+    /// rather than a literal background tint.
+    private func highlightedText(_ paragraph: String) -> Text {
+        let segments = HighlightRuleApplier.segments(highlightRules, in: paragraph)
+        return segments.reduce(Text("")) { partial, segment in
+            if segment.isHighlighted {
+                return partial + Text(segment.text).foregroundStyle(.orange).bold()
+            } else {
+                return partial + Text(segment.text).foregroundStyle(theme.textColor)
+            }
+        }
+    }
+
     private func load() async {
         isLoading = true
         errorMessage = nil
@@ -183,6 +198,7 @@ struct ReaderView: View {
             let content = try await ContentService.fetchContent(source: source, chapter: chapter, httpClient: env.httpClient)
             let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
             text = ReplaceRuleApplier.apply(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+            highlightRules = (try? await env.highlightRuleStore.enabled()) ?? []
             try? await env.shelfStore.updateProgress(
                 bookUrl: bookUrl, chapterIndex: chapter.index, chapterTitle: chapter.title, characterOffset: 0
             )
