@@ -20,12 +20,23 @@ public struct GroupedSearchResult: Identifiable, Equatable {
     public var intro: String? { entries.compactMap(\.intro).max(by: { $0.count < $1.count }) }
     public var lastChapter: String? { entries.lazy.compactMap(\.lastChapter).first }
     public var coverUrl: String? { entries.lazy.compactMap(\.coverUrl).first }
+    public var wordCount: String? { entries.lazy.compactMap(\.wordCount).first }
     public var sourceCount: Int { entries.count }
 
     static func groupKey(for result: SearchResult) -> String {
         let name = result.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let author = (result.author ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(name)|\(author)"
+    }
+}
+
+extension Array where Element == GroupedSearchResult {
+    /// Ranks settled search results the way a merged multi-source list should read: books
+    /// confirmed by more sources first (more likely a real, correctly-matched title rather than a
+    /// stray one-off hit), source count descending, otherwise preserving arrival order -- Swift's
+    /// `sorted(by:)` is a stable sort, so ties keep whichever order they streamed in.
+    public func rankedBySourceCount() -> [GroupedSearchResult] {
+        sorted { $0.sourceCount > $1.sourceCount }
     }
 }
 

@@ -28,28 +28,7 @@ struct GlobalSearchView: View {
                 NavigationLink {
                     destination(for: group)
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(group.name).font(.headline)
-                        HStack(spacing: 6) {
-                            if let author = group.author, !author.isEmpty {
-                                Text(author)
-                            }
-                            if let lastChapter = group.lastChapter, !lastChapter.isEmpty {
-                                Text(lastChapter)
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        if group.sourceCount > 1 {
-                            Text("共 \(group.sourceCount) 个源")
-                                .font(.caption2)
-                                .foregroundStyle(.blue)
-                        } else {
-                            Text(group.entries[0].bookSourceName)
-                                .font(.caption2)
-                                .foregroundStyle(.blue)
-                        }
-                    }
+                    SearchResultRow(group: group)
                 }
             }
         }
@@ -131,13 +110,81 @@ struct GlobalSearchView: View {
                 completedCount += 1
                 if outcome.errorDescription != nil { failedCount += 1 }
             }
+            // Ranking only happens once results settle -- re-sorting on every incremental arrival
+            // would make rows jump around mid-search, which reads as broken rather than "ranked."
+            groups = groups.rankedBySourceCount()
             isSearching = false
         }
     }
 
     private func stopSearching() {
         searchTask?.cancel()
+        groups = groups.rankedBySourceCount()
         isSearching = false
+    }
+}
+
+/// One search result card: cover, name, author, word count, latest chapter, a short intro, and
+/// which/how-many sources found it -- the fields real book-source readers typically show on a
+/// search results screen (word count instead of a chapter count, which would need fetching each
+/// result's full table of contents -- far too expensive to do for every search hit).
+private struct SearchResultRow: View {
+    let group: GroupedSearchResult
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AsyncImage(url: group.coverUrl.flatMap(URL.init(string:))) { phase in
+                if let image = phase.image {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    Rectangle()
+                        .fill(.quaternary)
+                        .overlay { Image(systemName: "book.closed").foregroundStyle(.secondary) }
+                }
+            }
+            .frame(width: 60, height: 84)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(group.name).font(.headline).lineLimit(1)
+
+                HStack(spacing: 6) {
+                    if let author = group.author, !author.isEmpty {
+                        Text(author)
+                    }
+                    if let wordCount = group.wordCount, !wordCount.isEmpty {
+                        Text(wordCount)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let lastChapter = group.lastChapter, !lastChapter.isEmpty {
+                    Text("最新: \(lastChapter)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if let intro = group.intro, !intro.isEmpty {
+                    Text(intro)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                if group.sourceCount > 1 {
+                    Text("共 \(group.sourceCount) 个源")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                } else {
+                    Text(group.entries[0].bookSourceName)
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

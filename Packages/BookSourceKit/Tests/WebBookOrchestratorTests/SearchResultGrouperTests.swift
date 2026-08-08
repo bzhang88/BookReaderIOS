@@ -4,11 +4,12 @@ import XCTest
 final class SearchResultGrouperTests: XCTestCase {
     private func result(
         source: String, name: String, author: String? = "Author A", intro: String? = nil,
-        lastChapter: String? = nil, coverUrl: String? = nil
+        lastChapter: String? = nil, coverUrl: String? = nil, wordCount: String? = nil
     ) -> SearchResult {
         SearchResult(
             bookSourceUrl: "https://\(source).example.com", bookSourceName: source, name: name, author: author,
-            intro: intro, lastChapter: lastChapter, bookUrl: "https://\(source).example.com/book/1", coverUrl: coverUrl
+            intro: intro, lastChapter: lastChapter, bookUrl: "https://\(source).example.com/book/1", coverUrl: coverUrl,
+            wordCount: wordCount
         )
     }
 
@@ -72,5 +73,31 @@ final class SearchResultGrouperTests: XCTestCase {
         let groups = SearchResultGrouper.merge([a, b], into: [])
 
         XCTAssertEqual(groups.count, 1, "whitespace differences alone shouldn't split what's really the same book")
+    }
+
+    func testWordCountFallsBackToFirstEntryThatHasOne() {
+        let noWordCount = result(source: "SiteA", name: "Book", wordCount: nil)
+        let withWordCount = result(source: "SiteB", name: "Book", wordCount: "120万字")
+
+        let groups = SearchResultGrouper.merge([noWordCount, withWordCount], into: [])
+
+        XCTAssertEqual(groups[0].wordCount, "120万字")
+    }
+
+    func testRankedBySourceCountPutsMultiSourceBooksFirstButKeepsOrderAmongTies() {
+        let soloA = result(source: "SiteA", name: "Solo Book A")
+        let soloB = result(source: "SiteA", name: "Solo Book B")
+        let popularHit1 = result(source: "SiteA", name: "Popular Book")
+        let popularHit2 = result(source: "SiteB", name: "Popular Book")
+
+        // Arrival order: Solo A, Solo B, Popular (1 source so far) -- Popular only becomes
+        // multi-source on a later merge, matching how results actually stream in live.
+        var groups = SearchResultGrouper.merge([soloA, soloB, popularHit1], into: [])
+        groups = SearchResultGrouper.merge([popularHit2], into: groups)
+
+        let ranked = groups.rankedBySourceCount()
+
+        XCTAssertEqual(ranked.map(\.name), ["Popular Book", "Solo Book A", "Solo Book B"])
+        XCTAssertEqual(ranked[0].sourceCount, 2)
     }
 }
