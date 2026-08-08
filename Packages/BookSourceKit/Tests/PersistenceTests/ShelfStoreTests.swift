@@ -49,6 +49,30 @@ final class ShelfStoreTests: XCTestCase {
         XCTAssertTrue(all.isEmpty)
     }
 
+    func testSetGroupsAppliesBatchAndSkipsBooksNotInTheMap() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.addOrUpdate(sampleBook(url: "https://example.com/book/1"))
+        try await store.addOrUpdate(sampleBook(url: "https://example.com/book/2"))
+
+        try await store.setGroups(["https://example.com/book/1": "玄幻"])
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first { $0.bookUrl == "https://example.com/book/1" }?.group, "玄幻")
+        XCTAssertNil(all.first { $0.bookUrl == "https://example.com/book/2" }?.group)
+    }
+
+    func testSetGroupsCanClearAGroupWithExplicitNil() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.group = "玄幻"
+        try await store.addOrUpdate(book)
+
+        try await store.setGroups(["https://example.com/book/1": nil])
+
+        let all = try await store.all()
+        XCTAssertNil(all.first?.group)
+    }
+
     // MARK: - Phase 5 acceptance scenario: force-quit, relaunch days later, resume exactly
 
     func testProgressSurvivesSimulatedAppRelaunch() async throws {

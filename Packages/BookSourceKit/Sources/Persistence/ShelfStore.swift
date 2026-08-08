@@ -35,6 +35,18 @@ public actor ShelfStore {
         return books
     }
 
+    /// Applies a batch of tag-group matches (bookUrl -> group name) in one save rather than one
+    /// `addOrUpdate` round-trip per book -- matters once a shelf has dozens of books.
+    public func setGroups(_ groups: [String: String?]) async throws {
+        var books = try await all()
+        for idx in books.indices {
+            if let newGroup = groups[books[idx].bookUrl] {
+                books[idx].group = newGroup
+            }
+        }
+        try await store.save(books)
+    }
+
     /// Records exact resume position — the one piece of state Phase 5's acceptance test
     /// (force-quit, relaunch days later, resume exactly where left off) actually depends on.
     public func updateProgress(

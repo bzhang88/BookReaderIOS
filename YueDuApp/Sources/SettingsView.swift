@@ -28,6 +28,11 @@ struct SettingsView: View {
                     Label("高亮规则", systemImage: "highlighter")
                 }
                 NavigationLink {
+                    TagGroupRuleListView()
+                } label: {
+                    Label("分组规则", systemImage: "tag")
+                }
+                NavigationLink {
                     AboutView()
                 } label: {
                     Label("关于", systemImage: "info.circle")

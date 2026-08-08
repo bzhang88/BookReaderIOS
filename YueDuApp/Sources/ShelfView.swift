@@ -7,6 +7,7 @@ struct ShelfView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var books: [ShelfBook] = []
     @State private var changeSourceTarget: ShelfBook?
+    @State private var isAutoGrouping = false
 
     var body: some View {
         NavigationStack {
@@ -22,7 +23,17 @@ struct ShelfView: View {
                         ShelfBookResumeView(book: book)
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(book.name).font(.headline)
+                            HStack(spacing: 6) {
+                                Text(book.name).font(.headline)
+                                if let group = book.group, !group.isEmpty {
+                                    Text(group)
+                                        .font(.caption2)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
                             if let author = book.author, !author.isEmpty {
                                 Text(author).font(.subheadline).foregroundStyle(.secondary)
                             }
@@ -53,6 +64,18 @@ struct ShelfView: View {
                         Label("搜索", systemImage: "magnifyingglass")
                     }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await autoGroup() }
+                    } label: {
+                        if isAutoGrouping {
+                            ProgressView()
+                        } else {
+                            Label("自动分组", systemImage: "tag")
+                        }
+                    }
+                    .disabled(isAutoGrouping || books.isEmpty)
+                }
             }
             .task { await reload() }
             .refreshable { await reload() }
@@ -71,6 +94,24 @@ struct ShelfView: View {
     private func reload() async {
         let all = (try? await env.shelfStore.all()) ?? []
         books = all.sorted { ($0.lastReadAt ?? $0.addedAt) > ($1.lastReadAt ?? $1.addedAt) }
+    }
+
+    /// Matches every shelf book against the user's enabled tag-group rules and saves the results in
+    /// one batch. Manual/on-demand rather than automatic-on-reload -- running regexes over every
+    /// shelf book on every launch would be wasted work for a shelf that rarely changes.
+    private func autoGroup() async {
+        isAutoGrouping = true
+        defer { isAutoGrouping = false }
+        let rules = (try? await env.tagGroupRuleStore.enabled()) ?? []
+        guard !rules.isEmpty else { return }
+        var groups: [String: String?] = [:]
+        for book in books {
+            groups[book.bookUrl] = TagGroupRuleApplier.matchGroup(
+                rules, name: book.name, author: book.author, intro: book.intro
+            )
+        }
+        try? await env.shelfStore.setGroups(groups)
+        await reload()
     }
 
     private func delete(at offsets: IndexSet) {

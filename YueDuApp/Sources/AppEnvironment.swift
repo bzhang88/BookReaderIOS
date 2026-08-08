@@ -12,6 +12,7 @@ final class AppEnvironment: ObservableObject {
     let rssSourceStore: RssSourceStore
     let aiProviderStore: AIProviderStore
     let highlightRuleStore: HighlightRuleStore
+    let tagGroupRuleStore: TagGroupRuleStore
     let httpClient: any HTTPClient
 
     init() {
@@ -22,6 +23,7 @@ final class AppEnvironment: ObservableObject {
         rssSourceStore = RssSourceStore(fileURL: appSupport.appendingPathComponent("rss_sources.json"))
         aiProviderStore = AIProviderStore(fileURL: appSupport.appendingPathComponent("ai_providers.json"))
         highlightRuleStore = HighlightRuleStore(fileURL: appSupport.appendingPathComponent("highlight_rules.json"))
+        tagGroupRuleStore = TagGroupRuleStore(fileURL: appSupport.appendingPathComponent("tag_group_rules.json"))
         httpClient = URLSessionHTTPClient()
     }
 }

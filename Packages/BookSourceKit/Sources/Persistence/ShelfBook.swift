@@ -12,6 +12,10 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
     public var tocUrl: String
     public var lastChapterTitle: String?
     public var addedAt: Date
+    /// Display group assigned by a `TagGroupRule` match (or manually, in a future increment) --
+    /// optional and defaulted so it decodes fine from shelf.json files saved before this field
+    /// existed.
+    public var group: String?
 
     /// Exact resume position: which chapter, and a character offset within that chapter's
     /// extracted text — coarser than a scroll-position (which needs the actual rendered layout,
@@ -26,8 +30,8 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
     public init(
         bookSourceUrl: String, bookUrl: String, name: String, author: String? = nil,
         coverUrl: String? = nil, intro: String? = nil, tocUrl: String, lastChapterTitle: String? = nil,
-        addedAt: Date = Date(), lastReadChapterIndex: Int? = nil, lastReadChapterTitle: String? = nil,
-        lastReadCharacterOffset: Int = 0, lastReadAt: Date? = nil
+        addedAt: Date = Date(), group: String? = nil, lastReadChapterIndex: Int? = nil,
+        lastReadChapterTitle: String? = nil, lastReadCharacterOffset: Int = 0, lastReadAt: Date? = nil
     ) {
         self.bookSourceUrl = bookSourceUrl
         self.bookUrl = bookUrl
@@ -38,6 +42,7 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         self.tocUrl = tocUrl
         self.lastChapterTitle = lastChapterTitle
         self.addedAt = addedAt
+        self.group = group
         self.lastReadChapterIndex = lastReadChapterIndex
         self.lastReadChapterTitle = lastReadChapterTitle
         self.lastReadCharacterOffset = lastReadCharacterOffset
