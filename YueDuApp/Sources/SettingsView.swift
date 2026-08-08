@@ -17,6 +17,11 @@ struct SettingsView: View {
                 } label: {
                     Label("净化规则", systemImage: "wand.and.stars")
                 }
+                NavigationLink {
+                    AIProviderListView()
+                } label: {
+                    Label("AI 服务商", systemImage: "sparkles")
+                }
             }
             .navigationTitle("设置")
         }

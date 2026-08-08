@@ -10,6 +10,7 @@ final class AppEnvironment: ObservableObject {
     let shelfStore: ShelfStore
     let replaceRuleStore: ReplaceRuleStore
     let rssSourceStore: RssSourceStore
+    let aiProviderStore: AIProviderStore
     let httpClient: any HTTPClient
 
     init() {
@@ -18,6 +19,7 @@ final class AppEnvironment: ObservableObject {
         shelfStore = ShelfStore(fileURL: appSupport.appendingPathComponent("shelf.json"))
         replaceRuleStore = ReplaceRuleStore(fileURL: appSupport.appendingPathComponent("replace_rules.json"))
         rssSourceStore = RssSourceStore(fileURL: appSupport.appendingPathComponent("rss_sources.json"))
+        aiProviderStore = AIProviderStore(fileURL: appSupport.appendingPathComponent("ai_providers.json"))
         httpClient = URLSessionHTTPClient()
     }
 }
