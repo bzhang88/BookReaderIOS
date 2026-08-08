@@ -9,6 +9,7 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
+    @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
 
     @Environment(\.dismiss) private var dismiss
 
@@ -36,6 +37,13 @@ struct ReaderSettingsSheet: View {
                     VStack(alignment: .leading) {
                         Text("段间距: \(Int(paragraphSpacing))")
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
+                    }
+                }
+
+                Section("朗读") {
+                    VStack(alignment: .leading) {
+                        Text("语速: \(Int(readAloudRate * 100))%")
+                        Slider(value: $readAloudRate, in: 0.1...1.0)
                     }
                 }
 

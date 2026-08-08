@@ -40,4 +40,7 @@ enum ReaderSettingsKey {
     static let paragraphSpacing = "reader.paragraphSpacing"
     static let theme = "reader.theme"
     static let keepScreenOn = "reader.keepScreenOn"
+    /// 0.0...1.0, matches `AVSpeechUtterance.rate`'s range (`AVSpeechUtteranceDefaultSpeechRate`
+    /// is 0.5) -- stored as a plain Double since `@AppStorage` doesn't support Float directly.
+    static let readAloudRate = "reader.readAloudRate"
 }

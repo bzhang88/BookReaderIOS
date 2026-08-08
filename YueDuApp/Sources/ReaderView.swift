@@ -24,6 +24,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
+    @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
 
     init(source: BookSource, bookUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
         self.source = source
@@ -116,6 +117,7 @@ struct ReaderView: View {
                         if readAloud.isSpeaking {
                             readAloud.stop()
                         } else {
+                            readAloud.setRate(Float(readAloudRate))
                             readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title)
                         }
                     } label: {
@@ -154,6 +156,11 @@ struct ReaderView: View {
         }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
+        }
+        .onChange(of: readAloudRate) { _, newValue in
+            // AVSpeechSynthesizer can't change an utterance's rate mid-speech -- this takes effect
+            // starting with the next paragraph, not a jarring restart of the current one.
+            readAloud.setRate(Float(newValue))
         }
         .onChange(of: currentIndex) { _, _ in
             // Chapter navigation (prev/next buttons, or a lock-screen "next track" tap while at the
