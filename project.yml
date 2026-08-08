@@ -30,6 +30,11 @@ targets:
         # our networking code even runs.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        # Lets read-aloud (AVSpeechSynthesizer) keep speaking and respond to lock-screen/Control
+        # Center transport controls after the app backgrounds -- without this, TTS playback and
+        # MPRemoteCommandCenter commands stop the moment the screen locks.
+        UIBackgroundModes:
+          - audio
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bzhang88.yuedu

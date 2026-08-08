@@ -17,6 +17,7 @@ struct ReaderView: View {
     @State private var errorMessage: String?
     @State private var isShowingSettings = false
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
+    @StateObject private var readAloud = ReadAloudController()
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
@@ -38,11 +39,16 @@ struct ReaderView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
-                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
                     Text(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
                         .foregroundStyle(theme.textColor)
+                        .padding(.horizontal, 4)
+                        .background(
+                            readAloud.isSpeaking && index == readAloud.currentParagraphIndex
+                                ? Color.accentColor.opacity(0.15) : Color.clear
+                        )
                 }
             }
             .padding()
@@ -69,6 +75,33 @@ struct ReaderView: View {
                 Text("第 \(currentIndex + 1) / \(chapters.count) 章")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if readAloud.isSpeaking {
+                    HStack(spacing: 20) {
+                        Button {
+                            readAloud.previousParagraph()
+                        } label: {
+                            Image(systemName: "backward.end")
+                        }
+                        Button {
+                            readAloud.togglePause()
+                        } label: {
+                            Image(systemName: readAloud.isPaused ? "play.fill" : "pause.fill")
+                        }
+                        Button {
+                            readAloud.nextParagraph()
+                        } label: {
+                            Image(systemName: "forward.end")
+                        }
+                        Button(role: .destructive) {
+                            readAloud.stop()
+                        } label: {
+                            Image(systemName: "stop.fill")
+                        }
+                    }
+                    .font(.title3)
+                }
+
                 HStack {
                     Button {
                         goTo(currentIndex - 1)
@@ -78,6 +111,16 @@ struct ReaderView: View {
                     .disabled(currentIndex <= 0)
 
                     Spacer()
+
+                    Button {
+                        if readAloud.isSpeaking {
+                            readAloud.stop()
+                        } else {
+                            readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title)
+                        }
+                    } label: {
+                        Image(systemName: readAloud.isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
+                    }
 
                     Button {
                         isShowingSettings = true
@@ -105,9 +148,19 @@ struct ReaderView: View {
             ReaderSettingsSheet()
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            readAloud.stop()
+        }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
+        }
+        .onChange(of: currentIndex) { _, _ in
+            // Chapter navigation (prev/next buttons, or a lock-screen "next track" tap while at the
+            // chapter's last paragraph in a future increment) invalidates whatever was being read
+            // from the old chapter's text -- stopping is simpler and safer than trying to carry
+            // read-aloud state across a chapter reload for this first version.
+            readAloud.stop()
         }
     }
 
