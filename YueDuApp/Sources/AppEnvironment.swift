@@ -9,6 +9,7 @@ final class AppEnvironment: ObservableObject {
     let bookSourceStore: BookSourceStore
     let shelfStore: ShelfStore
     let replaceRuleStore: ReplaceRuleStore
+    let rssSourceStore: RssSourceStore
     let httpClient: any HTTPClient
 
     init() {
@@ -16,6 +17,7 @@ final class AppEnvironment: ObservableObject {
         bookSourceStore = BookSourceStore(fileURL: appSupport.appendingPathComponent("book_sources.json"))
         shelfStore = ShelfStore(fileURL: appSupport.appendingPathComponent("shelf.json"))
         replaceRuleStore = ReplaceRuleStore(fileURL: appSupport.appendingPathComponent("replace_rules.json"))
+        rssSourceStore = RssSourceStore(fileURL: appSupport.appendingPathComponent("rss_sources.json"))
         httpClient = URLSessionHTTPClient()
     }
 }
