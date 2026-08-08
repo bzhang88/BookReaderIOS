@@ -27,6 +27,11 @@ struct SettingsView: View {
                 } label: {
                     Label("高亮规则", systemImage: "highlighter")
                 }
+                NavigationLink {
+                    AboutView()
+                } label: {
+                    Label("关于", systemImage: "info.circle")
+                }
             }
             .navigationTitle("设置")
         }
