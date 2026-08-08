@@ -6,7 +6,7 @@ struct YueDuApp: App {
 
     var body: some Scene {
         WindowGroup {
-            SourceLibraryView()
+            RootView()
                 .environmentObject(environment)
         }
     }

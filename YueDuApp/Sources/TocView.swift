@@ -8,11 +8,16 @@ struct TocView: View {
     let tocURL: String
     let bookUrl: String
     let bookTitle: String
+    /// When set (from the shelf's "resume reading" entry point) and valid once chapters load,
+    /// auto-navigates straight into the reader at this chapter instead of leaving the user to
+    /// re-browse the whole table of contents.
+    var resumeChapterIndex: Int? = nil
 
     @EnvironmentObject private var env: AppEnvironment
     @State private var chapters: [BookChapter] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var shouldPresentResume = false
 
     var body: some View {
         List(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
@@ -35,6 +40,12 @@ struct TocView: View {
         }
         .navigationTitle("目录")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $shouldPresentResume) {
+            ReaderView(
+                source: source, bookUrl: bookUrl, chapters: chapters,
+                currentIndex: resumeChapterIndex ?? 0, bookTitle: bookTitle
+            )
+        }
         .task { await load() }
     }
 
@@ -43,6 +54,9 @@ struct TocView: View {
         errorMessage = nil
         do {
             chapters = try await TocService.fetchChapterList(source: source, tocURL: tocURL, httpClient: env.httpClient)
+            if let resumeChapterIndex, chapters.indices.contains(resumeChapterIndex) {
+                shouldPresentResume = true
+            }
         } catch {
             errorMessage = "\(error)"
         }
