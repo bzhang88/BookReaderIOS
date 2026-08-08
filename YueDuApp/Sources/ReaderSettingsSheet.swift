@@ -17,12 +17,14 @@ struct ReaderSettingsSheet: View {
         NavigationStack {
             Form {
                 Section("主题") {
-                    Picker("主题", selection: $theme) {
-                        ForEach(ReaderTheme.allCases) { option in
-                            Text(option.displayName).tag(option)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 20) {
+                            ForEach(ReaderTheme.allCases) { option in
+                                themeSwatch(option)
+                            }
                         }
+                        .padding(.vertical, 4)
                     }
-                    .pickerStyle(.segmented)
                 }
 
                 Section("字体") {
@@ -60,5 +62,33 @@ struct ReaderSettingsSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func themeSwatch(_ option: ReaderTheme) -> some View {
+        let isSelected = theme == option
+        return Button {
+            theme = option
+        } label: {
+            VStack(spacing: 6) {
+                Circle()
+                    .fill(option.backgroundColor)
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Text("阅")
+                            .font(.caption2)
+                            .foregroundStyle(option.textColor)
+                    )
+                    .overlay(
+                        Circle().strokeBorder(
+                            isSelected ? Color.accentColor : Color.gray.opacity(0.3),
+                            lineWidth: isSelected ? 3 : 1
+                        )
+                    )
+                Text(option.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
