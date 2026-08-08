@@ -3,3 +3,7 @@
 *.xcodeproj/xcuserdata/
 DerivedData/
 .DS_Store
+
+# xcodegen-generated project -- project.yml is the source of truth, committed instead
+*.xcodeproj/
+build/

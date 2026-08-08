@@ -1,0 +1,54 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["master"]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Show available SDKs
+        run: xcodebuild -showsdks
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild build \
+            -project YueDu.xcodeproj \
+            -scheme YueDu \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS=""
+
+      - name: Package IPA
+        run: |
+          APP_PATH=$(find build/DerivedData -name "YueDu.app" -maxdepth 6 | head -n1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Could not find YueDu.app in build output"
+            find build/DerivedData -maxdepth 6 -name "*.app"
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          mkdir -p build/Payload
+          cp -r "$APP_PATH" build/Payload/
+          cd build && zip -r YueDu-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YueDu-unsigned-ipa
+          path: build/YueDu-unsigned.ipa
+          retention-days: 14

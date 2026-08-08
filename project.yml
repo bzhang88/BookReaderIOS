@@ -1,0 +1,43 @@
+name: YueDu
+options:
+  bundleIdPrefix: com.bzhang88.yuedu
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  BookSourceKit:
+    path: Packages/BookSourceKit
+
+targets:
+  YueDu:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: YueDuApp/Sources
+    info:
+      path: YueDuApp/Info.plist
+      properties:
+        UILaunchScreen: {}
+        CFBundleDisplayName: YueDu
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bzhang88.yuedu
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - package: BookSourceKit
+        product: BookSourceModel
+      - package: BookSourceKit
+        product: RuleEngine
+      - package: BookSourceKit
+        product: NetworkClient
+      - package: BookSourceKit
+        product: WebBookOrchestrator
+      - package: BookSourceKit
+        product: Persistence
