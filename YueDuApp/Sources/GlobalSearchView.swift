@@ -12,7 +12,7 @@ struct GlobalSearchView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var keyword: String = ""
     @State private var sources: [BookSource] = []
-    @State private var results: [SearchResult] = []
+    @State private var groups: [GroupedSearchResult] = []
     @State private var completedCount = 0
     @State private var failedCount = 0
     @State private var isSearching = false
@@ -24,20 +24,31 @@ struct GlobalSearchView: View {
             if isSearching || hasSearchedOnce {
                 statusRow
             }
-            ForEach(results) { result in
+            ForEach(groups) { group in
                 NavigationLink {
-                    BookDetailView(source: resolveSource(for: result), searchResult: result)
+                    destination(for: group)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(result.name).font(.headline)
+                        Text(group.name).font(.headline)
                         HStack(spacing: 6) {
-                            if let author = result.author, !author.isEmpty {
+                            if let author = group.author, !author.isEmpty {
                                 Text(author)
                             }
-                            Text(result.bookSourceName).foregroundStyle(.blue)
+                            if let lastChapter = group.lastChapter, !lastChapter.isEmpty {
+                                Text(lastChapter)
+                            }
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        if group.sourceCount > 1 {
+                            Text("共 \(group.sourceCount) 个源")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        } else {
+                            Text(group.entries[0].bookSourceName)
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        }
                     }
                 }
             }
@@ -48,7 +59,7 @@ struct GlobalSearchView: View {
                     "没有已启用的书源", systemImage: "tray",
                     description: Text("去书源库导入并启用至少一个书源")
                 )
-            } else if hasSearchedOnce && !isSearching && results.isEmpty {
+            } else if hasSearchedOnce && !isSearching && groups.isEmpty {
                 ContentUnavailableView.search(text: keyword)
             }
         }
@@ -56,6 +67,19 @@ struct GlobalSearchView: View {
         .searchable(text: $keyword, prompt: "搜索所有已启用的书源")
         .onSubmit(of: .search) { startSearching() }
         .task { sources = (try? await env.bookSourceStore.enabled()) ?? [] }
+    }
+
+    /// A book found by only one source goes straight to its detail page; a book multiple sources
+    /// agree on (same name + author) goes to a picker first, mirroring Legado's "共 N 个源" search
+    /// entries -- since which of those sources is actually still working/fastest isn't known until
+    /// you try one.
+    @ViewBuilder
+    private func destination(for group: GroupedSearchResult) -> some View {
+        if group.sourceCount > 1 {
+            BookSourcePickerView(group: group, resolveSource: resolveSource)
+        } else {
+            BookDetailView(source: resolveSource(group.entries[0]), searchResult: group.entries[0])
+        }
     }
 
     @ViewBuilder
@@ -79,11 +103,11 @@ struct GlobalSearchView: View {
 
     private var summaryText: String {
         failedCount > 0
-            ? "共找到 \(results.count) 个结果（\(failedCount) 个书源搜索失败）"
-            : "共找到 \(results.count) 个结果"
+            ? "共找到 \(groups.count) 本书（\(failedCount) 个书源搜索失败）"
+            : "共找到 \(groups.count) 本书"
     }
 
-    private func resolveSource(for result: SearchResult) -> BookSource {
+    private func resolveSource(_ result: SearchResult) -> BookSource {
         sources.first { $0.bookSourceUrl == result.bookSourceUrl }
             ?? BookSource(bookSourceUrl: result.bookSourceUrl, bookSourceName: result.bookSourceName)
     }
@@ -93,7 +117,7 @@ struct GlobalSearchView: View {
         guard !trimmed.isEmpty, !sources.isEmpty else { return }
 
         searchTask?.cancel()
-        results = []
+        groups = []
         completedCount = 0
         failedCount = 0
         isSearching = true
@@ -103,7 +127,7 @@ struct GlobalSearchView: View {
             let stream = MultiSourceSearchService.search(sources: sources, keyword: trimmed, httpClient: env.httpClient)
             for await outcome in stream {
                 if Task.isCancelled { break }
-                results.append(contentsOf: outcome.results)
+                groups = SearchResultGrouper.merge(outcome.results, into: groups)
                 completedCount += 1
                 if outcome.errorDescription != nil { failedCount += 1 }
             }
@@ -114,5 +138,29 @@ struct GlobalSearchView: View {
     private func stopSearching() {
         searchTask?.cancel()
         isSearching = false
+    }
+}
+
+/// Lets the user pick which of several sources to open a book from, when search found the same
+/// book (by name + author) on more than one.
+struct BookSourcePickerView: View {
+    let group: GroupedSearchResult
+    let resolveSource: (SearchResult) -> BookSource
+
+    var body: some View {
+        List(group.entries) { entry in
+            NavigationLink {
+                BookDetailView(source: resolveSource(entry), searchResult: entry)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.bookSourceName).font(.headline)
+                    if let lastChapter = entry.lastChapter, !lastChapter.isEmpty {
+                        Text(lastChapter).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .navigationTitle(group.name)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
