@@ -1,10 +1,12 @@
 import SwiftUI
 import BookSourceModel
+import WebBookOrchestrator
 import Persistence
 
 struct ShelfView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var books: [ShelfBook] = []
+    @State private var changeSourceTarget: ShelfBook?
 
     var body: some View {
         NavigationStack {
@@ -31,6 +33,14 @@ struct ShelfView: View {
                             }
                         }
                     }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            changeSourceTarget = book
+                        } label: {
+                            Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .tint(.orange)
+                    }
                 }
                 .onDelete(perform: delete)
             }
@@ -46,6 +56,15 @@ struct ShelfView: View {
             }
             .task { await reload() }
             .refreshable { await reload() }
+            .sheet(item: $changeSourceTarget) { book in
+                NavigationStack {
+                    ChangeSourceView(
+                        currentBookSourceUrl: book.bookSourceUrl, bookName: book.name, bookAuthor: book.author
+                    ) { newSource, match in
+                        await switchSource(of: book, to: newSource, match: match)
+                    }
+                }
+            }
         }
     }
 
@@ -62,6 +81,33 @@ struct ShelfView: View {
             }
             await reload()
         }
+    }
+
+    /// Swaps a shelf entry to a different source for the same book. The chapter *index* carries
+    /// over as a best-effort approximation (chapter numbering is usually close enough across
+    /// sources for the same book), but the character offset resets to 0 -- the old offset was
+    /// measured against the old source's own text extraction, which won't line up with the new
+    /// source's formatting/pagination of the same content.
+    private func switchSource(of oldBook: ShelfBook, to newSource: BookSource, match: SearchResult) async {
+        let bookInfo = try? await BookInfoService.fetchBookInfo(source: newSource, bookURL: match.bookUrl, httpClient: env.httpClient)
+        let newBook = ShelfBook(
+            bookSourceUrl: newSource.bookSourceUrl,
+            bookUrl: match.bookUrl,
+            name: bookInfo?.name ?? match.name,
+            author: bookInfo?.author ?? match.author,
+            coverUrl: bookInfo?.coverUrl ?? match.coverUrl,
+            intro: bookInfo?.intro ?? match.intro,
+            tocUrl: bookInfo?.tocUrl ?? match.bookUrl,
+            lastChapterTitle: bookInfo?.lastChapter ?? match.lastChapter,
+            addedAt: oldBook.addedAt,
+            lastReadChapterIndex: oldBook.lastReadChapterIndex,
+            lastReadChapterTitle: oldBook.lastReadChapterTitle,
+            lastReadCharacterOffset: 0,
+            lastReadAt: oldBook.lastReadAt
+        )
+        try? await env.shelfStore.remove(bookUrl: oldBook.bookUrl)
+        try? await env.shelfStore.addOrUpdate(newBook)
+        await reload()
     }
 }
 
