@@ -11,6 +11,8 @@ struct SourceLibraryView: View {
     @State private var isImporterPresented = false
     @State private var importSummary: String?
     @State private var errorMessage: String?
+    @State private var editingSource: BookSource?
+    @State private var isCreatingSource = false
 
     var body: some View {
         NavigationStack {
@@ -55,6 +57,14 @@ struct SourceLibraryView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            editingSource = source
+                        } label: {
+                            Label("编辑", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
                 }
                 .onDelete(perform: delete)
             }
@@ -77,16 +87,22 @@ struct SourceLibraryView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button("全部启用") { setAllEnabled(true) }
-                        Button("全部停用") { setAllEnabled(false) }
+                        Button("新建书源") { isCreatingSource = true }
+                        Button("全部启用") { setAllEnabled(true) }.disabled(sources.isEmpty)
+                        Button("全部停用") { setAllEnabled(false) }.disabled(sources.isEmpty)
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
-                    .disabled(sources.isEmpty)
                 }
             }
             .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.json]) { result in
                 Task { await handleImport(result) }
+            }
+            .sheet(item: $editingSource, onDismiss: { Task { await reload() } }) { source in
+                BookSourceEditView(source: source)
+            }
+            .sheet(isPresented: $isCreatingSource, onDismiss: { Task { await reload() } }) {
+                BookSourceEditView(source: nil)
             }
             .alert("导入完成", isPresented: .constant(importSummary != nil)) {
                 Button("好") { importSummary = nil }
