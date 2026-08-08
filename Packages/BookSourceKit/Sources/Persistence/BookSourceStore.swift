@@ -52,6 +52,14 @@ public actor BookSourceStore {
         try await store.save(sources)
     }
 
+    /// Bulk enable/disable every source at once -- e.g. "disable all, then turn back on just the
+    /// ones you actually use" is a much faster workflow than tapping through a hundred rows.
+    public func setAllEnabled(_ enabled: Bool) async throws {
+        var sources = try await all()
+        for i in sources.indices { sources[i].enabled = enabled }
+        try await store.save(sources)
+    }
+
     public func remove(bookSourceUrl: String) async throws {
         var sources = try await all()
         sources.removeAll { $0.bookSourceUrl == bookSourceUrl }

@@ -58,6 +58,26 @@ final class BookSourceStoreTests: XCTestCase {
         XCTAssertEqual(all.first?.enabled, false)
     }
 
+    func testSetAllEnabledTogglesEveryPersistedSource() async throws {
+        let fileURL = tempFileURL()
+        let store = BookSourceStore(fileURL: fileURL)
+        try await store.importSources([
+            source(url: "https://a.com", name: "A", enabled: true),
+            source(url: "https://b.com", name: "B", enabled: false),
+            source(url: "https://c.com", name: "C", enabled: true)
+        ])
+
+        try await store.setAllEnabled(false)
+        let reloaded1 = BookSourceStore(fileURL: fileURL)
+        let allDisabled = try await reloaded1.all()
+        XCTAssertTrue(allDisabled.allSatisfy { !$0.enabled })
+
+        try await store.setAllEnabled(true)
+        let reloaded2 = BookSourceStore(fileURL: fileURL)
+        let allEnabled = try await reloaded2.all()
+        XCTAssertTrue(allEnabled.allSatisfy(\.enabled))
+    }
+
     func testRemove() async throws {
         let store = BookSourceStore(fileURL: tempFileURL())
         try await store.importSources([source(url: "https://a.com", name: "A")])

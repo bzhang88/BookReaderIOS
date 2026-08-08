@@ -75,6 +75,15 @@ struct SourceLibraryView: View {
                     }
                     .disabled(sources.isEmpty)
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("全部启用") { setAllEnabled(true) }
+                        Button("全部停用") { setAllEnabled(false) }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .disabled(sources.isEmpty)
+                }
             }
             .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.json]) { result in
                 Task { await handleImport(result) }
@@ -105,6 +114,13 @@ struct SourceLibraryView: View {
     private func toggleEnabled(_ source: BookSource) {
         Task {
             try? await env.bookSourceStore.setEnabled(bookSourceUrl: source.bookSourceUrl, enabled: !source.enabled)
+            await reload()
+        }
+    }
+
+    private func setAllEnabled(_ enabled: Bool) {
+        Task {
+            try? await env.bookSourceStore.setAllEnabled(enabled)
             await reload()
         }
     }
