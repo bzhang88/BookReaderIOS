@@ -1,0 +1,54 @@
+name: UI Screenshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["master"]
+
+jobs:
+  screenshot:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for simulator
+        run: |
+          xcodebuild build \
+            -project YueDu.xcodeproj \
+            -scheme YueDu \
+            -sdk iphonesimulator \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Boot simulator, install, launch, screenshot
+        run: |
+          set -e
+          DEVICE_ID=$(xcrun simctl list devices available -j | jq -r '.devices | to_entries[] | .value[] | select(.name | test("iPhone")) | .udid' | head -n1)
+          echo "Using simulator: $DEVICE_ID"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+
+          APP_PATH=$(find build/DerivedData -name "YueDu.app" | head -n1)
+          echo "App path: $APP_PATH"
+          test -n "$APP_PATH" || { echo "::error::YueDu.app not found in build output"; exit 1; }
+
+          xcrun simctl install "$DEVICE_ID" "$APP_PATH"
+          xcrun simctl launch "$DEVICE_ID" com.bzhang88.yuedu
+          sleep 8
+
+          mkdir -p screenshots
+          xcrun simctl io "$DEVICE_ID" screenshot screenshots/01-launch.png
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: screenshots/
+          retention-days: 14
