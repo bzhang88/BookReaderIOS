@@ -1,6 +1,7 @@
 import SwiftUI
 import BookSourceModel
 import WebBookOrchestrator
+import NetworkClient
 
 struct SearchView: View {
     let source: BookSource
@@ -15,13 +16,17 @@ struct SearchView: View {
     var body: some View {
         List {
             ForEach(results) { result in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(result.name).font(.headline)
-                    if let author = result.author, !author.isEmpty {
-                        Text(author).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    if let lastChapter = result.lastChapter, !lastChapter.isEmpty {
-                        Text(lastChapter).font(.caption).foregroundStyle(.secondary)
+                NavigationLink {
+                    BookDetailView(source: source, searchResult: result)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(result.name).font(.headline)
+                        if let author = result.author, !author.isEmpty {
+                            Text(author).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        if let lastChapter = result.lastChapter, !lastChapter.isEmpty {
+                            Text(lastChapter).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

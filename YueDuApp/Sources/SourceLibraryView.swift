@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import BookSourceModel
+import Persistence
 
 struct SourceLibraryView: View {
     @EnvironmentObject private var env: AppEnvironment
