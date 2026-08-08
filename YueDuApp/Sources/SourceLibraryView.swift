@@ -1,11 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import BookSourceModel
+import RuleEngine
 import Persistence
 
 struct SourceLibraryView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var sources: [BookSource] = []
+    @State private var capabilityReports: [String: SourceCapabilityReport] = [:]
     @State private var isImporterPresented = false
     @State private var importSummary: String?
     @State private var errorMessage: String?
@@ -29,9 +31,19 @@ struct SourceLibraryView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(source.bookSourceName)
-                                    .font(.headline)
-                                    .foregroundStyle(source.enabled ? .primary : .secondary)
+                                HStack(spacing: 4) {
+                                    Text(source.bookSourceName)
+                                        .font(.headline)
+                                        .foregroundStyle(source.enabled ? .primary : .secondary)
+                                    if let report = capabilityReports[source.bookSourceUrl], !report.isFullyCompatible {
+                                        Text("\(report.issues.count) 项不支持")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(.orange.opacity(0.2), in: Capsule())
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
                                 Text(source.bookSourceUrl)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -83,7 +95,11 @@ struct SourceLibraryView: View {
     }
 
     private func reload() async {
-        sources = (try? await env.bookSourceStore.all()) ?? []
+        let all = (try? await env.bookSourceStore.all()) ?? []
+        sources = all
+        capabilityReports = Dictionary(
+            uniqueKeysWithValues: CapabilityScanner.scan(all).map { ($0.sourceUrl, $0) }
+        )
     }
 
     private func toggleEnabled(_ source: BookSource) {
