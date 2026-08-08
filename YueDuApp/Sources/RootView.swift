@@ -7,6 +7,8 @@ struct RootView: View {
                 .tabItem { Label("书架", systemImage: "books.vertical") }
             SourceLibraryView()
                 .tabItem { Label("书源库", systemImage: "tray.full") }
+            SettingsView()
+                .tabItem { Label("设置", systemImage: "gearshape") }
         }
     }
 }
