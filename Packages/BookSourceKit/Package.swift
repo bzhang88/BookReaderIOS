@@ -51,7 +51,7 @@ let package = Package(
         ),
         .testTarget(
             name: "RuleEngineTests",
-            dependencies: ["RuleEngine", "SwiftSoup"]
+            dependencies: ["RuleEngine", "SwiftSoup", "BookSourceModel"]
         ),
         .testTarget(
             name: "WebBookOrchestratorTests",
