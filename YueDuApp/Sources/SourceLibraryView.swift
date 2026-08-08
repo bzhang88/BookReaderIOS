@@ -55,6 +55,14 @@ struct SourceLibraryView: View {
                         Label("导入", systemImage: "plus")
                     }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        SourceCheckView(sources: sources)
+                    } label: {
+                        Label("检测书源", systemImage: "checkmark.shield")
+                    }
+                    .disabled(sources.isEmpty)
+                }
             }
             .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.json]) { result in
                 Task { await handleImport(result) }
