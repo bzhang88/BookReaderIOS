@@ -40,11 +40,17 @@ jobs:
           test -n "$APP_PATH" || { echo "::error::YueDu.app not found in build output"; exit 1; }
 
           xcrun simctl install "$DEVICE_ID" "$APP_PATH"
-          xcrun simctl launch "$DEVICE_ID" com.bzhang88.yuedu
-          sleep 8
-
           mkdir -p screenshots
-          xcrun simctl io "$DEVICE_ID" screenshot screenshots/01-launch.png
+
+          declare -a TABS=("0:shelf" "1:sources" "2:rss" "3:settings")
+          for entry in "${TABS[@]}"; do
+            INDEX="${entry%%:*}"
+            NAME="${entry##*:}"
+            xcrun simctl terminate "$DEVICE_ID" com.bzhang88.yuedu || true
+            xcrun simctl launch "$DEVICE_ID" com.bzhang88.yuedu -selectedTabIndex "$INDEX"
+            sleep 6
+            xcrun simctl io "$DEVICE_ID" screenshot "screenshots/${INDEX}-${NAME}.png"
+          done
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
