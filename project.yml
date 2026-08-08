@@ -23,6 +23,13 @@ targets:
         CFBundleDisplayName: YueDu
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # Book sources are arbitrary user-supplied third-party sites, many of them plain HTTP with
+        # no TLS at all (common for older/small Chinese novel sites) -- iOS blocks all cleartext
+        # HTTP by default (App Transport Security), which isn't testable on Windows since ATS only
+        # exists on Apple platforms. Without this, every plain-HTTP source fails outright before
+        # our networking code even runs.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bzhang88.yuedu
