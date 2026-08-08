@@ -117,8 +117,13 @@ struct SourceLibraryView: View {
             .sheet(isPresented: $isCreatingSource, onDismiss: { Task { await reload() } }) {
                 BookSourceEditView(source: nil)
             }
-            .navigationDestination(item: $debuggingSource) { source in
-                SourceDebugView(source: source)
+            .navigationDestination(isPresented: Binding(
+                get: { debuggingSource != nil },
+                set: { if !$0 { debuggingSource = nil } }
+            )) {
+                if let debuggingSource {
+                    SourceDebugView(source: debuggingSource)
+                }
             }
             .alert("导入完成", isPresented: .constant(importSummary != nil)) {
                 Button("好") { importSummary = nil }
