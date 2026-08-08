@@ -8,12 +8,14 @@ import Persistence
 final class AppEnvironment: ObservableObject {
     let bookSourceStore: BookSourceStore
     let shelfStore: ShelfStore
+    let replaceRuleStore: ReplaceRuleStore
     let httpClient: any HTTPClient
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         bookSourceStore = BookSourceStore(fileURL: appSupport.appendingPathComponent("book_sources.json"))
         shelfStore = ShelfStore(fileURL: appSupport.appendingPathComponent("shelf.json"))
+        replaceRuleStore = ReplaceRuleStore(fileURL: appSupport.appendingPathComponent("replace_rules.json"))
         httpClient = URLSessionHTTPClient()
     }
 }

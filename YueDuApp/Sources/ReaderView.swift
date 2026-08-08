@@ -181,7 +181,8 @@ struct ReaderView: View {
         errorMessage = nil
         do {
             let content = try await ContentService.fetchContent(source: source, chapter: chapter, httpClient: env.httpClient)
-            text = content.text
+            let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
+            text = ReplaceRuleApplier.apply(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
             try? await env.shelfStore.updateProgress(
                 bookUrl: bookUrl, chapterIndex: chapter.index, chapterTitle: chapter.title, characterOffset: 0
             )
