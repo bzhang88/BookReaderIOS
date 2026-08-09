@@ -52,6 +52,14 @@ jobs:
             xcrun simctl io "$DEVICE_ID" screenshot "screenshots/${INDEX}-${NAME}.png"
           done
 
+          # Reader screen: not a root tab, so it needs a screen-specific launch argument (see
+          # RootView.uiTestingScreen) with a hardcoded sample book rather than -selectedTabIndex --
+          # this is the first screenshot all session to actually show what reading text looks like.
+          xcrun simctl terminate "$DEVICE_ID" com.bzhang88.yuedu || true
+          xcrun simctl launch "$DEVICE_ID" com.bzhang88.yuedu -uiTestingScreen localReader
+          sleep 6
+          xcrun simctl io "$DEVICE_ID" screenshot "screenshots/4-reader.png"
+
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
         with:
