@@ -36,6 +36,52 @@ enum ReaderTheme: String, CaseIterable, Identifiable {
     }
 }
 
+/// Horizontally scrollable row of circular color swatches for picking a `ReaderTheme` -- shared by
+/// `ReaderSettingsSheet` and `LocalReaderSettingsSheet` so the two readers' settings sheets stay
+/// visually identical without duplicating this view.
+struct ThemeSwatchPicker: View {
+    @Binding var theme: ReaderTheme
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 20) {
+                ForEach(ReaderTheme.allCases) { option in
+                    swatch(option)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func swatch(_ option: ReaderTheme) -> some View {
+        let isSelected = theme == option
+        return Button {
+            theme = option
+        } label: {
+            VStack(spacing: 6) {
+                Circle()
+                    .fill(option.backgroundColor)
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Text("阅")
+                            .font(.caption2)
+                            .foregroundStyle(option.textColor)
+                    )
+                    .overlay(
+                        Circle().strokeBorder(
+                            isSelected ? Color.accentColor : Color.gray.opacity(0.3),
+                            lineWidth: isSelected ? 3 : 1
+                        )
+                    )
+                Text(option.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Keys shared verbatim between `ReaderView` and `ReaderSettingsSheet` so both stay in sync via
 /// plain `@AppStorage` (same UserDefaults key, no custom ObservableObject needed -- avoids the
 /// well-known gotcha where `@AppStorage` inside a hand-rolled ObservableObject doesn't actually

@@ -65,4 +65,27 @@ final class CharsetDetectorTests: XCTestCase {
         XCTAssertFalse(result.isEmpty)
     }
     #endif
+
+    // MARK: - Autodetecting decode (local file import, no header/meta-tag signal available)
+
+    func testAutodetectDecodesValidUTF8Bytes() {
+        let text = "第一章 开始\n这是正文内容。"
+        let data = Data(text.utf8)
+        XCTAssertEqual(CharsetDetector.decodeAutodetectingBytes(data), text)
+    }
+
+    #if canImport(CoreFoundation)
+    func testAutodetectDecodesGBKBytesOnApplePlatforms() {
+        // GBK encoding of "中文": 0xD6D0 0xCEC4 -- not a valid UTF-8 byte sequence, so strict
+        // UTF-8 decoding fails and the GB18030 fallback should kick in.
+        let gbkBytes = Data([0xD6, 0xD0, 0xCE, 0xC4])
+        XCTAssertEqual(CharsetDetector.decodeAutodetectingBytes(gbkBytes), "中文")
+    }
+    #else
+    func testAutodetectDegradesGracefullyWithoutCoreFoundation() {
+        let gbkBytes = Data([0xD6, 0xD0, 0xCE, 0xC4])
+        let result = CharsetDetector.decodeAutodetectingBytes(gbkBytes)
+        XCTAssertFalse(result.isEmpty)
+    }
+    #endif
 }

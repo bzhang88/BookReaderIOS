@@ -76,6 +76,13 @@ struct ShelfView: View {
                     }
                     .disabled(isAutoGrouping || books.isEmpty)
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        LocalBookListView()
+                    } label: {
+                        Label("本地书籍", systemImage: "doc.text")
+                    }
+                }
             }
             .task { await reload() }
             .refreshable { await reload() }

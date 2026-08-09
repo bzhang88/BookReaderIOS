@@ -13,6 +13,7 @@ final class AppEnvironment: ObservableObject {
     let aiProviderStore: AIProviderStore
     let highlightRuleStore: HighlightRuleStore
     let tagGroupRuleStore: TagGroupRuleStore
+    let localBookStore: LocalBookStore
     let httpClient: any HTTPClient
 
     init() {
@@ -24,6 +25,7 @@ final class AppEnvironment: ObservableObject {
         aiProviderStore = AIProviderStore(fileURL: appSupport.appendingPathComponent("ai_providers.json"))
         highlightRuleStore = HighlightRuleStore(fileURL: appSupport.appendingPathComponent("highlight_rules.json"))
         tagGroupRuleStore = TagGroupRuleStore(fileURL: appSupport.appendingPathComponent("tag_group_rules.json"))
+        localBookStore = LocalBookStore(fileURL: appSupport.appendingPathComponent("local_books.json"))
         httpClient = URLSessionHTTPClient()
     }
 }

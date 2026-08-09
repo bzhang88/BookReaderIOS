@@ -36,6 +36,23 @@ public enum CharsetDetector {
         }
     }
 
+    /// Decodes raw bytes with no external metadata to consult (no HTTP header, no `<meta
+    /// charset>` tag) -- for local file import, where the only signal available is the bytes
+    /// themselves. Tries strict UTF-8 first: a real GBK-encoded novel of any real length almost
+    /// never happens to also be valid UTF-8 (GBK's high-byte lead/trail pairs essentially never
+    /// form valid UTF-8 continuation sequences by chance), so a *successful strict* decode is a
+    /// reliable signal the bytes really are UTF-8. Falls back to GB18030, then a lossy UTF-8
+    /// decode as the last resort so this always returns something rather than throwing.
+    public static func decodeAutodetectingBytes(_ data: Data) -> String {
+        if let strictUTF8 = String(data: data, encoding: .utf8) {
+            return strictUTF8
+        }
+        if let gb = decodeGB18030(data) {
+            return gb
+        }
+        return decodeUTF8Lossy(data)
+    }
+
     private static func decodeUTF8Lossy(_ data: Data) -> String {
         String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
     }
