@@ -180,37 +180,61 @@ struct ShelfView: View {
     }
 }
 
-/// Resolves a shelf entry's originating book source, then hands off to `TocView` with a resume
-/// index so tapping a shelf book jumps straight back into reading rather than re-browsing the TOC.
+/// Resolves a shelf entry's originating book source and fetches its chapter list directly, then
+/// hands off straight to `ReaderView` -- deliberately does *not* route through `TocView`'s own List
+/// UI (unlike the "查看目录"/"立即阅读" entry points elsewhere, which legitimately want to show a
+/// browsable list). Real-device feedback was that tapping a shelf book felt like it went "through"
+/// the table of contents before landing in the reader; fetching chapters here and rendering
+/// `ReaderView` the moment they're ready means that list is never constructed at all for this path,
+/// not just hidden behind a loading overlay.
 struct ShelfBookResumeView: View {
     let book: ShelfBook
 
     @EnvironmentObject private var env: AppEnvironment
     @State private var source: BookSource?
+    @State private var chapters: [BookChapter] = []
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
-            if let source {
-                TocView(
-                    source: source, tocURL: book.tocUrl, bookUrl: book.bookUrl, bookTitle: book.name,
-                    resumeChapterIndex: book.lastReadChapterIndex
+            if let source, !chapters.isEmpty {
+                ReaderView(
+                    source: source, bookUrl: book.bookUrl, chapters: chapters, currentIndex: resumeIndex,
+                    bookTitle: book.name
                 )
             } else if let errorMessage {
                 ContentUnavailableView("无法打开", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             } else {
-                ProgressView()
+                ProgressView("正在打开…")
             }
         }
         .task { await load() }
     }
 
+    /// Falls back to the first chapter both when this book has never been read (`lastReadChapterIndex
+    /// == nil`) and when a stored index no longer lines up with a freshly-fetched chapter list (the
+    /// source's chapter count can shift between visits) -- either way, landing in the reader at
+    /// chapter 1 is more useful than an error.
+    private var resumeIndex: Int {
+        book.lastReadChapterIndex.flatMap { chapters.indices.contains($0) ? $0 : nil } ?? 0
+    }
+
     private func load() async {
         let sources = (try? await env.bookSourceStore.all()) ?? []
-        if let match = sources.first(where: { $0.bookSourceUrl == book.bookSourceUrl }) {
-            source = match
-        } else {
+        guard let match = sources.first(where: { $0.bookSourceUrl == book.bookSourceUrl }) else {
             errorMessage = "找不到这本书对应的书源，可能已被删除"
+            return
+        }
+        source = match
+        do {
+            let fetched = try await TocService.fetchChapterList(source: match, tocURL: book.tocUrl, httpClient: env.httpClient)
+            if fetched.isEmpty {
+                errorMessage = "没有找到章节"
+            } else {
+                chapters = fetched
+            }
+        } catch {
+            errorMessage = "\(error)"
         }
     }
 }
