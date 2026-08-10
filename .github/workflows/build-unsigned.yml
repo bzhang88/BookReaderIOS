@@ -5,6 +5,9 @@ on:
   push:
     branches: ["master"]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
@@ -21,6 +24,10 @@ jobs:
         run: xcodebuild -showsdks
 
       - name: Build unsigned app
+        # MARKETING_VERSION/CURRENT_PROJECT_VERSION are overridden per-run (not the static
+        # "0.1.0"/"1" baked into project.yml) so every build produces a distinct version string --
+        # AltStore's update check compares this against what's already installed, so a version that
+        # never changes would mean it never detects a new build as an update.
         run: |
           xcodebuild build \
             -project YueDu.xcodeproj \
@@ -31,7 +38,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS=""
+            CODE_SIGN_ENTITLEMENTS="" \
+            MARKETING_VERSION="0.1.${{ github.run_number }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
 
       - name: Package IPA
         run: |
@@ -66,3 +75,54 @@ jobs:
           name: YueDu-unsigned-ipa
           path: build/YueDu-unsigned.ipa
           retention-days: 14
+
+      - name: Generate AltStore source (apps.json)
+        # AltStore polls a "source" URL for version metadata to offer in-app updates -- this has to
+        # be a plain, permanently-stable, unauthenticated URL (unlike the Actions artifact above,
+        # which expires in 14 days and needs a GitHub login to download), which is why this gets
+        # published to a GitHub Release further down rather than as another workflow artifact.
+        run: |
+          VERSION="0.1.${{ github.run_number }}"
+          BUILD="${{ github.run_number }}"
+          SIZE=$(stat -f%z build/YueDu-unsigned.ipa)
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat > apps.json << EOF
+          {
+            "name": "YueDu 更新源",
+            "subtitle": "YueDu 自动构建更新源",
+            "description": "YueDu 的 AltStore 更新源，每次推送到 master 分支后由 CI 自动更新，用来在 AltStore 里检测新版本。",
+            "apps": [
+              {
+                "name": "YueDu",
+                "bundleIdentifier": "com.bzhang88.yuedu",
+                "developerName": "bzhang88",
+                "subtitle": "书源阅读器",
+                "localizedDescription": "从零开始写的书源阅读器，兼容 Legado 的书源规则格式。",
+                "versions": [
+                  {
+                    "version": "$VERSION",
+                    "buildVersion": "$BUILD",
+                    "date": "$DATE",
+                    "localizedDescription": "自动构建版本 #$BUILD",
+                    "downloadURL": "https://github.com/${{ github.repository }}/releases/download/latest/YueDu-unsigned.ipa",
+                    "size": $SIZE
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          cat apps.json
+
+      - name: Publish IPA + source to a stable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view latest --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload latest build/YueDu-unsigned.ipa apps.json --clobber --repo "${{ github.repository }}"
+          else
+            gh release create latest build/YueDu-unsigned.ipa apps.json \
+              --title "YueDu 最新构建（自动更新）" \
+              --notes "每次推送到 master 都会自动覆盖更新。把下面这个地址加到 AltStore 的更新源里：https://github.com/${{ github.repository }}/releases/download/latest/apps.json" \
+              --repo "${{ github.repository }}"
+          fi
