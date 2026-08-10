@@ -21,6 +21,16 @@ targets:
       properties:
         UILaunchScreen: {}
         CFBundleDisplayName: 拾光
+        # xcodegen defaults these two keys to a hardcoded "1.0"/"1" when they're absent from this
+        # properties block -- it does NOT automatically wire them to the MARKETING_VERSION/
+        # CURRENT_PROJECT_VERSION build settings below just because those settings exist. Writing
+        # the $(...) build-setting reference explicitly is what makes Xcode's "Process Info.plist"
+        # build phase substitute in the real value at build time, honoring the CI's
+        # per-run-number xcodebuild command-line override instead of silently ignoring it (this
+        # was live-broken: real-device install failed with a version mismatch traced back to
+        # CFBundleShortVersionString still reading Xcode's own literal "1.0" default).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         # Book sources are arbitrary user-supplied third-party sites, many of them plain HTTP with
