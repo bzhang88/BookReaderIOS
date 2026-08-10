@@ -7,6 +7,7 @@ struct ShelfView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var books: [ShelfBook] = []
     @State private var changeSourceTarget: ShelfBook?
+    @State private var detailTarget: ShelfBook?
     @State private var isAutoGrouping = false
 
     var body: some View {
@@ -52,6 +53,18 @@ struct ShelfView: View {
                         }
                         .tint(.orange)
                     }
+                    .contextMenu {
+                        Button {
+                            detailTarget = book
+                        } label: {
+                            Label("详情", systemImage: "info.circle")
+                        }
+                        Button {
+                            changeSourceTarget = book
+                        } label: {
+                            Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
                 }
                 .onDelete(perform: delete)
             }
@@ -86,6 +99,14 @@ struct ShelfView: View {
             }
             .task { await reload() }
             .refreshable { await reload() }
+            .navigationDestination(isPresented: Binding(
+                get: { detailTarget != nil },
+                set: { if !$0 { detailTarget = nil } }
+            )) {
+                if let detailTarget {
+                    ShelfBookDetailView(book: detailTarget)
+                }
+            }
             .sheet(item: $changeSourceTarget) { book in
                 NavigationStack {
                     ChangeSourceView(
@@ -175,6 +196,39 @@ struct ShelfBookResumeView: View {
                     source: source, tocURL: book.tocUrl, bookUrl: book.bookUrl, bookTitle: book.name,
                     resumeChapterIndex: book.lastReadChapterIndex
                 )
+            } else if let errorMessage {
+                ContentUnavailableView("无法打开", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
+            } else {
+                ProgressView()
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        let sources = (try? await env.bookSourceStore.all()) ?? []
+        if let match = sources.first(where: { $0.bookSourceUrl == book.bookSourceUrl }) {
+            source = match
+        } else {
+            errorMessage = "找不到这本书对应的书源，可能已被删除"
+        }
+    }
+}
+
+/// Same source-resolution as `ShelfBookResumeView`, but hands off to `BookDetailView` instead of
+/// jumping straight into reading -- reachable via a shelf row's long-press menu ("详情"), matching
+/// Legado's own shelf context menu.
+struct ShelfBookDetailView: View {
+    let book: ShelfBook
+
+    @EnvironmentObject private var env: AppEnvironment
+    @State private var source: BookSource?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let source {
+                BookDetailView(source: source, shelfBook: book)
             } else if let errorMessage {
                 ContentUnavailableView("无法打开", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             } else {
