@@ -16,6 +16,7 @@ struct ReaderView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var isShowingSettings = false
+    @State private var isChromeVisible = true
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @State private var highlightRules: [HighlightRule] = []
     @StateObject private var readAloud = ReadAloudController()
@@ -53,7 +54,11 @@ struct ReaderView: View {
                 }
             }
             .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isChromeVisible.toggle()
+            }
         }
         .background(theme.backgroundColor)
         .overlay {
@@ -64,87 +69,91 @@ struct ReaderView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    Image(systemName: "sun.min")
-                    Slider(value: $screenBrightness, in: 0...1)
-                        .onChange(of: screenBrightness) { _, newValue in
-                            UIScreen.main.brightness = CGFloat(newValue)
-                        }
-                    Image(systemName: "sun.max")
-                }
-                Text("第 \(currentIndex + 1) / \(chapters.count) 章")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if isChromeVisible {
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sun.min")
+                        Slider(value: $screenBrightness, in: 0...1)
+                            .onChange(of: screenBrightness) { _, newValue in
+                                UIScreen.main.brightness = CGFloat(newValue)
+                            }
+                        Image(systemName: "sun.max")
+                    }
+                    Text("第 \(currentIndex + 1) / \(chapters.count) 章")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                if readAloud.isSpeaking {
-                    HStack(spacing: 20) {
+                    if readAloud.isSpeaking {
+                        HStack(spacing: 20) {
+                            Button {
+                                readAloud.previousParagraph()
+                            } label: {
+                                Image(systemName: "backward.end")
+                            }
+                            Button {
+                                readAloud.togglePause()
+                            } label: {
+                                Image(systemName: readAloud.isPaused ? "play.fill" : "pause.fill")
+                            }
+                            Button {
+                                readAloud.nextParagraph()
+                            } label: {
+                                Image(systemName: "forward.end")
+                            }
+                            Button(role: .destructive) {
+                                readAloud.stop()
+                            } label: {
+                                Image(systemName: "stop.fill")
+                            }
+                        }
+                        .font(.title3)
+                    }
+
+                    HStack {
                         Button {
-                            readAloud.previousParagraph()
+                            goTo(currentIndex - 1)
                         } label: {
-                            Image(systemName: "backward.end")
+                            Label("上一章", systemImage: "chevron.left")
                         }
+                        .disabled(currentIndex <= 0)
+
+                        Spacer()
+
                         Button {
-                            readAloud.togglePause()
+                            if readAloud.isSpeaking {
+                                readAloud.stop()
+                            } else {
+                                readAloud.setRate(Float(readAloudRate))
+                                readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title)
+                            }
                         } label: {
-                            Image(systemName: readAloud.isPaused ? "play.fill" : "pause.fill")
+                            Image(systemName: readAloud.isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
                         }
+
                         Button {
-                            readAloud.nextParagraph()
+                            isShowingSettings = true
                         } label: {
-                            Image(systemName: "forward.end")
+                            Image(systemName: "textformat.size")
                         }
-                        Button(role: .destructive) {
-                            readAloud.stop()
+
+                        Spacer()
+
+                        Button {
+                            goTo(currentIndex + 1)
                         } label: {
-                            Image(systemName: "stop.fill")
+                            Label("下一章", systemImage: "chevron.right")
                         }
+                        .disabled(currentIndex >= chapters.count - 1)
                     }
-                    .font(.title3)
                 }
-
-                HStack {
-                    Button {
-                        goTo(currentIndex - 1)
-                    } label: {
-                        Label("上一章", systemImage: "chevron.left")
-                    }
-                    .disabled(currentIndex <= 0)
-
-                    Spacer()
-
-                    Button {
-                        if readAloud.isSpeaking {
-                            readAloud.stop()
-                        } else {
-                            readAloud.setRate(Float(readAloudRate))
-                            readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title)
-                        }
-                    } label: {
-                        Image(systemName: readAloud.isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
-                    }
-
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "textformat.size")
-                    }
-
-                    Spacer()
-
-                    Button {
-                        goTo(currentIndex + 1)
-                    } label: {
-                        Label("下一章", systemImage: "chevron.right")
-                    }
-                    .disabled(currentIndex >= chapters.count - 1)
-                }
+                .padding()
+                .background(.bar)
             }
-            .padding()
-            .background(.bar)
         }
         .navigationTitle(chapter.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(isChromeVisible ? .visible : .hidden, for: .navigationBar)
+        .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
         .task(id: currentIndex) { await load() }
         .sheet(isPresented: $isShowingSettings) {
             ReaderSettingsSheet()
