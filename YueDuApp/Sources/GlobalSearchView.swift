@@ -2,6 +2,7 @@ import SwiftUI
 import BookSourceModel
 import WebBookOrchestrator
 import NetworkClient
+import Persistence
 
 /// Searches every *enabled* book source concurrently (not one picked ahead of time), streaming
 /// results in per-source as they arrive, with a visible way to stop early -- matches how these
@@ -18,9 +19,15 @@ struct GlobalSearchView: View {
     @State private var isSearching = false
     @State private var hasSearchedOnce = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var sortMode: SearchSortMode = .sourceCount
+    @State private var searchHistory: [String] = []
+    @State private var shelfKeys: Set<String> = []
 
     var body: some View {
         List {
+            if keyword.isEmpty {
+                historySection
+            }
             if isSearching || hasSearchedOnce {
                 statusRow
             }
@@ -28,7 +35,9 @@ struct GlobalSearchView: View {
                 NavigationLink {
                     destination(for: group)
                 } label: {
-                    SearchResultRow(group: group)
+                    SearchResultRow(group: group, isInShelf: shelfKeys.contains(
+                        GroupedSearchResult.groupKey(name: group.name, author: group.author)
+                    ))
                 }
             }
         }
@@ -45,7 +54,57 @@ struct GlobalSearchView: View {
         .navigationTitle("搜索")
         .searchable(text: $keyword, prompt: "搜索所有已启用的书源")
         .onSubmit(of: .search) { startSearching() }
-        .task { sources = (try? await env.bookSourceStore.enabled()) ?? [] }
+        .toolbar {
+            if hasSearchedOnce && !groups.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        ForEach(SearchSortMode.allCases) { mode in
+                            Button {
+                                sortMode = mode
+                            } label: {
+                                if sortMode == mode {
+                                    Label(mode.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.displayName)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                }
+            }
+        }
+        .onChange(of: sortMode) { _, _ in applyRanking() }
+        .task {
+            sources = (try? await env.bookSourceStore.enabled()) ?? []
+            await reloadHistory()
+            await reloadShelfKeys()
+        }
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        if !searchHistory.isEmpty {
+            Section {
+                FlowChips(items: searchHistory) { term in
+                    keyword = term
+                    startSearching()
+                }
+            } header: {
+                HStack {
+                    Text("最近搜索")
+                    Spacer()
+                    Button("清空记录") {
+                        Task {
+                            try? await env.searchHistoryStore.clear()
+                            await reloadHistory()
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+        }
     }
 
     /// A book found by only one source goes straight to its detail page; a book multiple sources
@@ -91,6 +150,27 @@ struct GlobalSearchView: View {
             ?? BookSource(bookSourceUrl: result.bookSourceUrl, bookSourceName: result.bookSourceName)
     }
 
+    private func reloadHistory() async {
+        searchHistory = (try? await env.searchHistoryStore.recent()) ?? []
+    }
+
+    private func reloadShelfKeys() async {
+        let shelfBooks = (try? await env.shelfStore.all()) ?? []
+        shelfKeys = Set(shelfBooks.map { GroupedSearchResult.groupKey(name: $0.name, author: $0.author) })
+    }
+
+    /// Re-applies the current sort mode to whatever's already been collected -- called both once
+    /// results settle and whenever the user changes `sortMode`, so switching sort order doesn't
+    /// require re-running the search.
+    private func applyRanking() {
+        switch sortMode {
+        case .sourceCount:
+            groups = groups.rankedBySourceCount()
+        case .relevance:
+            groups = groups.rankedByRelevance(query: keyword)
+        }
+    }
+
     private func startSearching() {
         let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !sources.isEmpty else { return }
@@ -102,6 +182,11 @@ struct GlobalSearchView: View {
         isSearching = true
         hasSearchedOnce = true
 
+        Task {
+            try? await env.searchHistoryStore.record(trimmed)
+            await reloadHistory()
+        }
+
         searchTask = Task {
             let stream = MultiSourceSearchService.search(sources: sources, keyword: trimmed, httpClient: env.httpClient)
             for await outcome in stream {
@@ -112,15 +197,60 @@ struct GlobalSearchView: View {
             }
             // Ranking only happens once results settle -- re-sorting on every incremental arrival
             // would make rows jump around mid-search, which reads as broken rather than "ranked."
-            groups = groups.rankedBySourceCount()
+            applyRanking()
             isSearching = false
         }
     }
 
     private func stopSearching() {
         searchTask?.cancel()
-        groups = groups.rankedBySourceCount()
+        applyRanking()
         isSearching = false
+    }
+}
+
+/// Which order search results are displayed in -- by-source-count surfaces titles multiple sites
+/// agree on (more likely a correctly-matched real book), but that alone buries a book that only
+/// exists on one source, however well it matches the query; relevance mode fixes that by ranking
+/// on title-match closeness first, source count only as a tiebreaker.
+enum SearchSortMode: String, CaseIterable, Identifiable {
+    case sourceCount, relevance
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .sourceCount: return "源数量"
+        case .relevance: return "相关度"
+        }
+    }
+}
+
+/// Wrapping row of tappable keyword chips (Legado's "最近搜索" style). SwiftUI has no built-in
+/// flow-wrap container, and a custom `Layout` conformance is more machinery than a capped-length
+/// history list warrants -- an adaptive `LazyVGrid` approximates the same "wrap to the next row"
+/// look with none of that, close enough for a handful of short keyword chips.
+private struct FlowChips: View {
+    let items: [String]
+    let onTap: (String) -> Void
+
+    private let columns = [GridItem(.adaptive(minimum: 60), spacing: 8, alignment: .leading)]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(items, id: \.self) { item in
+                Button {
+                    onTap(item)
+                } label: {
+                    Text(item)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 
@@ -130,10 +260,34 @@ struct GlobalSearchView: View {
 /// result's full table of contents -- far too expensive to do for every search hit).
 private struct SearchResultRow: View {
     let group: GroupedSearchResult
+    var isInShelf: Bool = false
+
+    var body: some View {
+        BookResultCard(
+            name: group.name, author: group.author, coverUrl: group.coverUrl, wordCount: group.wordCount,
+            lastChapter: group.lastChapter, intro: group.intro,
+            trailingLabel: group.sourceCount > 1 ? "共 \(group.sourceCount) 个源" : group.entries[0].bookSourceName,
+            isInShelf: isInShelf
+        )
+    }
+}
+
+/// Shared card layout for a book result -- used both by the main search list (one card per grouped
+/// title) and the per-source picker (one card per source's own copy of a title), so the two don't
+/// duplicate the same cover/author/wordcount/intro layout.
+struct BookResultCard: View {
+    let name: String
+    let author: String?
+    let coverUrl: String?
+    let wordCount: String?
+    let lastChapter: String?
+    let intro: String?
+    let trailingLabel: String
+    var isInShelf: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AsyncImage(url: group.coverUrl.flatMap(URL.init(string:))) { phase in
+            AsyncImage(url: coverUrl.flatMap(URL.init(string:))) { phase in
                 if let image = phase.image {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } else {
@@ -146,42 +300,46 @@ private struct SearchResultRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(group.name).font(.headline).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(name).font(.headline).lineLimit(1)
+                    if isInShelf {
+                        Text("已在书架")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.green)
+                    }
+                }
 
                 HStack(spacing: 6) {
-                    if let author = group.author, !author.isEmpty {
+                    if let author, !author.isEmpty {
                         Text(author)
                     }
-                    if let wordCount = group.wordCount, !wordCount.isEmpty {
+                    if let wordCount, !wordCount.isEmpty {
                         Text(wordCount)
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                if let lastChapter = group.lastChapter, !lastChapter.isEmpty {
+                if let lastChapter, !lastChapter.isEmpty {
                     Text("最新: \(lastChapter)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                if let intro = group.intro, !intro.isEmpty {
+                if let intro, !intro.isEmpty {
                     Text(intro)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
 
-                if group.sourceCount > 1 {
-                    Text("共 \(group.sourceCount) 个源")
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
-                } else {
-                    Text(group.entries[0].bookSourceName)
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
-                }
+                Text(trailingLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
             }
         }
         .padding(.vertical, 4)
@@ -189,7 +347,9 @@ private struct SearchResultRow: View {
 }
 
 /// Lets the user pick which of several sources to open a book from, when search found the same
-/// book (by name + author) on more than one.
+/// book (by name + author) on more than one -- each row shows that source's own cover/author/intro
+/// rather than just its name, since different sources sometimes have better covers or more
+/// complete descriptions for the same book.
 struct BookSourcePickerView: View {
     let group: GroupedSearchResult
     let resolveSource: (SearchResult) -> BookSource
@@ -199,12 +359,10 @@ struct BookSourcePickerView: View {
             NavigationLink {
                 BookDetailView(source: resolveSource(entry), searchResult: entry)
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.bookSourceName).font(.headline)
-                    if let lastChapter = entry.lastChapter, !lastChapter.isEmpty {
-                        Text(lastChapter).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+                BookResultCard(
+                    name: entry.name, author: entry.author, coverUrl: entry.coverUrl, wordCount: entry.wordCount,
+                    lastChapter: entry.lastChapter, intro: entry.intro, trailingLabel: entry.bookSourceName
+                )
             }
         }
         .navigationTitle(group.name)

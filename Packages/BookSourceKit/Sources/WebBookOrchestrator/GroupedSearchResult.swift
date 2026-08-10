@@ -24,9 +24,17 @@ public struct GroupedSearchResult: Identifiable, Equatable {
     public var sourceCount: Int { entries.count }
 
     static func groupKey(for result: SearchResult) -> String {
-        let name = result.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let author = (result.author ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(name)|\(author)"
+        groupKey(name: result.name, author: result.author)
+    }
+
+    /// Same (name, author) normalization as the merge key above, exposed so callers outside this
+    /// module (e.g. checking whether a search result is already on the shelf) can compute a
+    /// matching key from any name/author pair -- a `ShelfBook` included -- without needing to
+    /// construct a throwaway `SearchResult` just to reuse the trimming rule.
+    public static func groupKey(name: String, author: String?) -> String {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAuthor = (author ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(trimmedName)|\(trimmedAuthor)"
     }
 }
 
@@ -37,6 +45,28 @@ extension Array where Element == GroupedSearchResult {
     /// `sorted(by:)` is a stable sort, so ties keep whichever order they streamed in.
     public func rankedBySourceCount() -> [GroupedSearchResult] {
         sorted { $0.sourceCount > $1.sourceCount }
+    }
+
+    /// Ranks by how closely each title matches `query`, not by how many sources carry it -- a book
+    /// that only exists on one source (and so always loses a by-source-count sort, however well it
+    /// matches) still needs a way to surface near the top. Tiers: exact title match, then prefix
+    /// match, then substring match, then everything else; source count only breaks ties within a
+    /// tier, so a well-matched single-source book still outranks a poorly-matched multi-source one.
+    public func rankedByRelevance(query: String) -> [GroupedSearchResult] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        func tier(_ group: GroupedSearchResult) -> Int {
+            let name = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name == normalizedQuery { return 0 }
+            if name.hasPrefix(normalizedQuery) { return 1 }
+            if name.contains(normalizedQuery) { return 2 }
+            return 3
+        }
+        return sorted { lhs, rhs in
+            let lhsTier = tier(lhs)
+            let rhsTier = tier(rhs)
+            if lhsTier != rhsTier { return lhsTier < rhsTier }
+            return lhs.sourceCount > rhs.sourceCount
+        }
     }
 }
 

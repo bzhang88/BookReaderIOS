@@ -14,6 +14,7 @@ final class AppEnvironment: ObservableObject {
     let highlightRuleStore: HighlightRuleStore
     let tagGroupRuleStore: TagGroupRuleStore
     let localBookStore: LocalBookStore
+    let searchHistoryStore: SearchHistoryStore
     let httpClient: any HTTPClient
 
     init() {
@@ -26,6 +27,7 @@ final class AppEnvironment: ObservableObject {
         highlightRuleStore = HighlightRuleStore(fileURL: appSupport.appendingPathComponent("highlight_rules.json"))
         tagGroupRuleStore = TagGroupRuleStore(fileURL: appSupport.appendingPathComponent("tag_group_rules.json"))
         localBookStore = LocalBookStore(fileURL: appSupport.appendingPathComponent("local_books.json"))
+        searchHistoryStore = SearchHistoryStore(fileURL: appSupport.appendingPathComponent("search_history.json"))
         httpClient = URLSessionHTTPClient()
     }
 }
