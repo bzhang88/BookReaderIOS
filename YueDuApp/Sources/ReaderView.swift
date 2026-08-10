@@ -5,10 +5,15 @@ import WebBookOrchestrator
 import Persistence
 
 struct ReaderView: View {
-    let source: BookSource
-    let bookUrl: String
-    let chapters: [BookChapter]
-    let bookTitle: String
+    // These start as constructor params but can change in place when the user switches source
+    // mid-read (see `switchSource`) -- kept as @State rather than the `let`s this started as so the
+    // reader itself can adopt a new source/book/chapter-list without popping back and re-pushing a
+    // whole new ReaderView (which would need a shared NavigationPath this view doesn't have access
+    // to, given how deeply it's already nested under Shelf/Toc navigation).
+    @State private var source: BookSource
+    @State private var bookUrl: String
+    @State private var chapters: [BookChapter]
+    @State private var bookTitle: String
     @State private var currentIndex: Int
 
     @EnvironmentObject private var env: AppEnvironment
@@ -16,6 +21,7 @@ struct ReaderView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var isShowingSettings = false
+    @State private var isShowingChangeSource = false
     @State private var isChromeVisible = true
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @State private var highlightRules: [HighlightRule] = []
@@ -29,10 +35,10 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
 
     init(source: BookSource, bookUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
-        self.source = source
-        self.bookUrl = bookUrl
-        self.chapters = chapters
-        self.bookTitle = bookTitle
+        self._source = State(initialValue: source)
+        self._bookUrl = State(initialValue: bookUrl)
+        self._chapters = State(initialValue: chapters)
+        self._bookTitle = State(initialValue: bookTitle)
         self._currentIndex = State(initialValue: currentIndex)
     }
 
@@ -131,6 +137,12 @@ struct ReaderView: View {
                         }
 
                         Button {
+                            isShowingChangeSource = true
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+
+                        Button {
                             isShowingSettings = true
                         } label: {
                             Image(systemName: "textformat.size")
@@ -154,9 +166,21 @@ struct ReaderView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(isChromeVisible ? .visible : .hidden, for: .navigationBar)
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
-        .task(id: currentIndex) { await load() }
+        // Keyed on source+index (not just index) so switching source always triggers a reload even
+        // on the rare occasion the new chapter index happens to numerically match the old one --
+        // `.task(id:)` only refires when its id value actually changes.
+        .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
         .sheet(isPresented: $isShowingSettings) {
             ReaderSettingsSheet()
+        }
+        .sheet(isPresented: $isShowingChangeSource) {
+            NavigationStack {
+                ChangeSourceView(
+                    currentBookSourceUrl: source.bookSourceUrl, bookName: bookTitle, bookAuthor: nil
+                ) { newSource, match in
+                    await switchSource(to: newSource, match: match)
+                }
+            }
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
         .onDisappear {
@@ -183,6 +207,49 @@ struct ReaderView: View {
     private func goTo(_ index: Int) {
         guard chapters.indices.contains(index) else { return }
         currentIndex = index
+    }
+
+    /// Adopts a different source for the book currently being read, in place -- fetches the new
+    /// source's own table of contents, carries the chapter *index* over as a best-effort
+    /// approximation (same convention `ShelfView.switchSource` already uses: chapter numbering is
+    /// usually close enough across sources for the same book, clamped if the new list is shorter),
+    /// and updates the shelf entry too if this book happens to be shelved -- reading a book doesn't
+    /// require it to be on the shelf (e.g. reached via "立即阅读" from the detail page), so that part
+    /// is skipped when there's nothing to update.
+    private func switchSource(to newSource: BookSource, match: SearchResult) async {
+        let oldBookUrl = bookUrl
+        let bookInfo = try? await BookInfoService.fetchBookInfo(source: newSource, bookURL: match.bookUrl, httpClient: env.httpClient)
+        guard let tocUrl = bookInfo?.tocUrl else { return }
+        let newChapters = (try? await TocService.fetchChapterList(source: newSource, tocURL: tocUrl, httpClient: env.httpClient)) ?? []
+        guard !newChapters.isEmpty else { return }
+
+        let newIndex = min(currentIndex, newChapters.count - 1)
+        source = newSource
+        bookUrl = match.bookUrl
+        chapters = newChapters
+        bookTitle = bookInfo?.name ?? match.name
+        currentIndex = newIndex
+
+        if let existing = try? await env.shelfStore.book(bookUrl: oldBookUrl) {
+            let updated = ShelfBook(
+                bookSourceUrl: newSource.bookSourceUrl,
+                bookUrl: match.bookUrl,
+                name: bookInfo?.name ?? match.name,
+                author: bookInfo?.author ?? match.author,
+                coverUrl: bookInfo?.coverUrl ?? match.coverUrl,
+                intro: bookInfo?.intro ?? match.intro,
+                tocUrl: tocUrl,
+                lastChapterTitle: bookInfo?.lastChapter ?? match.lastChapter,
+                addedAt: existing.addedAt,
+                group: existing.group,
+                lastReadChapterIndex: newIndex,
+                lastReadChapterTitle: newChapters[newIndex].title,
+                lastReadCharacterOffset: 0,
+                lastReadAt: existing.lastReadAt
+            )
+            try? await env.shelfStore.remove(bookUrl: oldBookUrl)
+            try? await env.shelfStore.addOrUpdate(updated)
+        }
     }
 
     /// Builds one paragraph's flowing text as a concatenation of styled `Text` runs -- SwiftUI's
