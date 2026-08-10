@@ -81,11 +81,22 @@ jobs:
         # be a plain, permanently-stable, unauthenticated URL (unlike the Actions artifact above,
         # which expires in 14 days and needs a GitHub login to download), which is why this gets
         # published to a GitHub Release further down rather than as another workflow artifact.
+        #
+        # The .ipa itself gets a version-specific filename (YueDu-0.1.N.ipa), never reused, rather
+        # than a fixed name repeatedly overwritten via --clobber -- real-device testing hit
+        # "downloaded data couldn't be read" partway through a download, which points at GitHub's
+        # release-asset CDN serving stale/mismatched cached bytes for a filename that gets
+        # overwritten many times in quick succession (this repo overwrote the same filename 5 times
+        # within about an hour while iterating on this workflow). apps.json's own filename stays
+        # fixed since AltStore needs a stable, unchanging source URL to poll.
         run: |
           VERSION="0.1.${{ github.run_number }}"
           BUILD="${{ github.run_number }}"
-          SIZE=$(stat -f%z build/YueDu-unsigned.ipa)
+          IPA_NAME="YueDu-$VERSION.ipa"
+          cp build/YueDu-unsigned.ipa "build/$IPA_NAME"
+          SIZE=$(stat -f%z "build/$IPA_NAME")
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
           cat > apps.json << EOF
           {
             "name": "拾光 更新源",
@@ -106,7 +117,7 @@ jobs:
                     "buildVersion": "$BUILD",
                     "date": "$DATE",
                     "localizedDescription": "自动构建版本 #$BUILD",
-                    "downloadURL": "https://github.com/${{ github.repository }}/releases/download/latest/YueDu-unsigned.ipa",
+                    "downloadURL": "https://github.com/${{ github.repository }}/releases/download/latest/$IPA_NAME",
                     "size": $SIZE
                   }
                 ]
@@ -121,9 +132,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view latest --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload latest build/YueDu-unsigned.ipa apps.json --clobber --repo "${{ github.repository }}"
+            gh release upload latest "build/$IPA_NAME" apps.json --clobber --repo "${{ github.repository }}"
           else
-            gh release create latest build/YueDu-unsigned.ipa apps.json \
+            gh release create latest "build/$IPA_NAME" apps.json \
               --title "YueDu 最新构建（自动更新）" \
               --notes "每次推送到 master 都会自动覆盖更新。把下面这个地址加到 AltStore 的更新源里：https://github.com/${{ github.repository }}/releases/download/latest/apps.json" \
               --repo "${{ github.repository }}"
