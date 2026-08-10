@@ -88,18 +88,18 @@ jobs:
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cat > apps.json << EOF
           {
-            "name": "YueDu 更新源",
-            "subtitle": "YueDu 自动构建更新源",
-            "description": "YueDu 的 AltStore 更新源，每次推送到 master 分支后由 CI 自动更新，用来在 AltStore 里检测新版本。",
+            "name": "拾光 更新源",
+            "subtitle": "拾光自动构建更新源",
+            "description": "拾光的 AltStore 更新源，每次推送到 master 分支后由 CI 自动更新，用来在 AltStore 里检测新版本。",
             "apps": [
               {
-                "name": "YueDu",
+                "name": "拾光",
                 "bundleIdentifier": "com.bzhang88.yuedu",
                 "developerName": "bzhang88",
                 "subtitle": "书源阅读器",
                 "localizedDescription": "从零开始写的书源阅读器，兼容 Legado 的书源规则格式。",
                 "iconURL": "https://raw.githubusercontent.com/${{ github.repository }}/master/YueDuApp/AppIcon.png",
-                "tintColor": "2962D6",
+                "tintColor": "2A5258",
                 "versions": [
                   {
                     "version": "$VERSION",

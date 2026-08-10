@@ -20,7 +20,7 @@ targets:
       path: YueDuApp/Info.plist
       properties:
         UILaunchScreen: {}
-        CFBundleDisplayName: YueDu
+        CFBundleDisplayName: 拾光
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         # Book sources are arbitrary user-supplied third-party sites, many of them plain HTTP with

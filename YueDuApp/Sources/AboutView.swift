@@ -15,7 +15,7 @@ struct AboutView: View {
                     Image(systemName: "book.pages")
                         .font(.system(size: 48))
                         .foregroundStyle(.blue)
-                    Text("阅读 YueDu")
+                    Text("拾光")
                         .font(.title2.bold())
                     Text("版本 \(version) (\(build))")
                         .font(.caption)
