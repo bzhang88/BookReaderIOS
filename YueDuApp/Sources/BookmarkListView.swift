@@ -82,7 +82,7 @@ private struct BookmarkResumeView: View {
                     ProgressView()
                 }
             } else if let source, !chapters.isEmpty {
-                ReaderView(
+                BookOpenerView(
                     source: source, bookUrl: bookmark.bookIdentifier, tocUrl: bookmark.tocUrl ?? "",
                     chapters: chapters, currentIndex: min(bookmark.chapterIndex, chapters.count - 1),
                     bookTitle: bookmark.bookTitle

@@ -477,7 +477,7 @@ struct ShelfBookResumeView: View {
     var body: some View {
         Group {
             if let source, !chapters.isEmpty {
-                ReaderView(
+                BookOpenerView(
                     source: source, bookUrl: book.bookUrl, tocUrl: book.tocUrl, chapters: chapters,
                     currentIndex: resumeIndex, bookTitle: book.name
                 )

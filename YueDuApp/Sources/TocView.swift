@@ -22,7 +22,7 @@ struct TocView: View {
     var body: some View {
         List(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
             NavigationLink {
-                ReaderView(
+                BookOpenerView(
                     source: source, bookUrl: bookUrl, tocUrl: tocURL, chapters: chapters, currentIndex: index,
                     bookTitle: bookTitle
                 )
@@ -42,7 +42,7 @@ struct TocView: View {
         .navigationTitle("目录")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $shouldPresentResume) {
-            ReaderView(
+            BookOpenerView(
                 source: source, bookUrl: bookUrl, tocUrl: tocURL, chapters: chapters,
                 currentIndex: resumeChapterIndex ?? 0, bookTitle: bookTitle
             )
