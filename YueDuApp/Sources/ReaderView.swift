@@ -30,6 +30,7 @@ struct ReaderView: View {
     // to false on every chapter change, flips true after a short grace period.
     @State private var canAutoAdvance = false
     @State private var isCurrentChapterBookmarked = false
+    @State private var matchedReplaceRules: [ReplaceRule] = []
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @State private var highlightRules: [HighlightRule] = []
     @StateObject private var readAloud = ReadAloudController()
@@ -193,7 +194,7 @@ struct ReaderView: View {
         // `.task(id:)` only refires when its id value actually changes.
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
         .sheet(isPresented: $isShowingSettings) {
-            ReaderSettingsSheet()
+            ReaderSettingsSheet(matchedRules: matchedReplaceRules)
         }
         .sheet(isPresented: $isShowingChangeSource) {
             NavigationStack {
@@ -313,7 +314,9 @@ struct ReaderView: View {
                 content = try await ContentService.fetchContent(source: source, chapter: chapter, httpClient: env.httpClient)
             }
             let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
-            text = ReplaceRuleApplier.apply(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+            let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+            text = purified.result
+            matchedReplaceRules = purified.matchedRules
             highlightRules = (try? await env.highlightRuleStore.enabled()) ?? []
             try? await env.shelfStore.updateProgress(
                 bookUrl: bookUrl, chapterIndex: chapter.index, chapterTitle: chapter.title, characterOffset: 0

@@ -1,9 +1,15 @@
 import SwiftUI
+import BookSourceModel
 
 /// Reading typography/theme settings. Shares its `@AppStorage` keys directly with `ReaderView` --
 /// no separate settings object to keep in sync, changes here are visible live behind the sheet
 /// since both views read the same UserDefaults-backed keys.
 struct ReaderSettingsSheet: View {
+    /// Which of the user's purification rules actually fired on the chapter currently on screen --
+    /// passed in rather than recomputed here, since the sheet has no access to the chapter text
+    /// itself (only `ReaderView`/`LocalReaderView` do, right after fetching/loading it).
+    var matchedRules: [ReplaceRule] = []
+
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
@@ -44,6 +50,16 @@ struct ReaderSettingsSheet: View {
 
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
+                }
+
+                Section("本章生效的净化规则") {
+                    if matchedRules.isEmpty {
+                        Text("本章没有命中任何净化规则").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(matchedRules) { rule in
+                            Text(rule.name)
+                        }
+                    }
                 }
             }
             .navigationTitle("阅读设置")

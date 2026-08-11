@@ -51,4 +51,32 @@ final class ReplaceRuleApplierTests: XCTestCase {
         let result = ReplaceRuleApplier.apply(rules, to: "a", sourceUrl: "https://any.example.com")
         XCTAssertEqual(result, "c")
     }
+
+    func testApplyReportingMatchesOnlyListsRulesThatActuallyHit() {
+        let hit = ReplaceRule(name: "Strip ad", pattern: "广告", replacement: "")
+        let miss = ReplaceRule(name: "No hit", pattern: "不存在的文字", replacement: "")
+        let outcome = ReplaceRuleApplier.applyReportingMatches([hit, miss], to: "正文广告结尾", sourceUrl: "https://any.example.com")
+        XCTAssertEqual(outcome.result, "正文结尾")
+        XCTAssertEqual(outcome.matchedRules.map(\.name), ["Strip ad"])
+    }
+
+    func testApplyReportingMatchesSkipsDisabledAndOutOfScopeRules() {
+        let disabled = ReplaceRule(name: "Off", pattern: "x", replacement: "y", enabled: false)
+        let wrongScope = ReplaceRule(name: "Other source", pattern: "x", replacement: "y", scopeSourceUrl: "https://b.example.com")
+        let outcome = ReplaceRuleApplier.applyReportingMatches(
+            [disabled, wrongScope], to: "xxx", sourceUrl: "https://a.example.com"
+        )
+        XCTAssertEqual(outcome.result, "xxx")
+        XCTAssertTrue(outcome.matchedRules.isEmpty)
+    }
+
+    func testApplyReportingMatchesEvaluatesEachRuleAgainstPriorRulesOutput() {
+        let rules = [
+            ReplaceRule(name: "First", pattern: "a", replacement: "b"),
+            ReplaceRule(name: "Second", pattern: "b", replacement: "c")
+        ]
+        let outcome = ReplaceRuleApplier.applyReportingMatches(rules, to: "a", sourceUrl: "https://any.example.com")
+        XCTAssertEqual(outcome.result, "c")
+        XCTAssertEqual(outcome.matchedRules.map(\.name), ["First", "Second"], "Second's own pattern 'b' only appears after First already ran")
+    }
 }

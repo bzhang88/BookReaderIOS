@@ -15,6 +15,7 @@ struct LocalReaderView: View {
     @State private var currentIndex: Int
     @State private var isShowingSettings = false
     @State private var isCurrentChapterBookmarked = false
+    @State private var matchedReplaceRules: [ReplaceRule] = []
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
@@ -94,7 +95,7 @@ struct LocalReaderView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: currentIndex) { await load() }
         .sheet(isPresented: $isShowingSettings) {
-            LocalReaderSettingsSheet()
+            LocalReaderSettingsSheet(matchedRules: matchedReplaceRules)
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
@@ -110,7 +111,9 @@ struct LocalReaderView: View {
 
     private func load() async {
         let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
-        purifiedText = ReplaceRuleApplier.apply(replaceRules, to: chapter.text, sourceUrl: "")
+        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: chapter.text, sourceUrl: "")
+        purifiedText = purified.result
+        matchedReplaceRules = purified.matchedRules
         try? await env.localBookStore.updateProgress(id: book.id, chapterIndex: currentIndex)
         isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
             bookIdentifier: book.id, chapterIndex: currentIndex
@@ -136,6 +139,8 @@ struct LocalReaderView: View {
 /// has no read-aloud button in this increment, and showing a rate slider with nothing to control
 /// would look like a broken feature rather than an absent one.
 struct LocalReaderSettingsSheet: View {
+    var matchedRules: [ReplaceRule] = []
+
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
@@ -168,6 +173,16 @@ struct LocalReaderSettingsSheet: View {
 
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
+                }
+
+                Section("本章生效的净化规则") {
+                    if matchedRules.isEmpty {
+                        Text("本章没有命中任何净化规则").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(matchedRules) { rule in
+                            Text(rule.name)
+                        }
+                    }
                 }
             }
             .navigationTitle("阅读设置")
