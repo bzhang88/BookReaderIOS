@@ -119,4 +119,46 @@ final class WebDAVClientTests: XCTestCase {
             // expected
         }
     }
+
+    func testListDirectorySendsPROPFINDWithDepthOneAndFiltersOutTheFolderItself() async throws {
+        let xml = """
+        <D:multistatus xmlns:D="DAV:">
+          <D:response>
+            <D:href>/YueDu/Books/</D:href>
+            <D:propstat><D:prop><D:displayname>Books</D:displayname>
+              <D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>
+          </D:response>
+          <D:response>
+            <D:href>/YueDu/Books/novel.txt</D:href>
+            <D:propstat><D:prop><D:displayname>novel.txt</D:displayname>
+              <D:resourcetype/></D:prop></D:propstat>
+          </D:response>
+        </D:multistatus>
+        """
+        let client = RecordingStubHTTPClient(responses: [
+            "https://dav.example.com/YueDu/Books": HTTPResponse(finalURL: "x", statusCode: 207, body: xml)
+        ])
+        let webdav = WebDAVClient(httpClient: client, config: config)
+
+        let items = try await webdav.listDirectory(path: "Books")
+
+        XCTAssertEqual(items.map(\.name), ["novel.txt"])
+        let recorded = await client.recorded
+        XCTAssertEqual(recorded[0].method, "PROPFIND")
+        XCTAssertEqual(recorded[0].headers["Depth"], "1")
+    }
+
+    func testListDirectoryThrowsOnNonSuccessStatus() async throws {
+        let client = RecordingStubHTTPClient(responses: [
+            "https://dav.example.com/YueDu/Books": HTTPResponse(finalURL: "x", statusCode: 404, body: "")
+        ])
+        let webdav = WebDAVClient(httpClient: client, config: config)
+
+        do {
+            _ = try await webdav.listDirectory(path: "Books")
+            XCTFail("expected unexpectedStatus to be thrown")
+        } catch WebDAVClientError.unexpectedStatus(let code) {
+            XCTAssertEqual(code, 404)
+        }
+    }
 }

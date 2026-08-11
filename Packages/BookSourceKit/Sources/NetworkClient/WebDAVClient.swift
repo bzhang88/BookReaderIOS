@@ -51,6 +51,39 @@ public struct WebDAVClient {
         return response.body
     }
 
+    /// Lists a directory's immediate children (`Depth: 1`) -- used for browsing a WebDAV folder to
+    /// pick a book file to import, distinct from `download`/`upload` which already know the exact
+    /// path they want. Filters out the queried directory's own entry: PROPFIND(Depth: 1) returns
+    /// the collection itself as the first `<response>` alongside its children, and a browse UI only
+    /// wants the children.
+    public func listDirectory(path: String) async throws -> [WebDAVItem] {
+        let url = try resolvedURL(path)
+        var headers = authHeaders()
+        headers["Depth"] = "1"
+        headers["Content-Type"] = "application/xml; charset=utf-8"
+        let propfindBody = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <D:propfind xmlns:D="DAV:"><D:prop><D:displayname/><D:resourcetype/></D:prop></D:propfind>
+        """
+        let response = try await httpClient.fetch(HTTPRequest(
+            url: url, method: "PROPFIND", headers: headers, body: Data(propfindBody.utf8)
+        ))
+        guard (200..<300).contains(response.statusCode) else {
+            throw WebDAVClientError.unexpectedStatus(response.statusCode)
+        }
+        let allItems = try WebDAVPropfindParser.parse(Data(response.body.utf8))
+        let requestedName = path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).split(separator: "/").last
+            .map(String.init)
+        return allItems.filter { item in
+            guard item.isDirectory, let requestedName else { return true }
+            let itemTrailingSegment = item.href
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                .split(separator: "/").last
+                .map { ($0.removingPercentEncoding ?? String($0)) }
+            return itemTrailingSegment != requestedName
+        }
+    }
+
     /// Idempotent -- a WebDAV server reports 405 (Method Not Allowed) for MKCOL on a directory
     /// that already exists, which is a success case here, not an error to propagate.
     public func makeDirectoryIfNeeded(path: String) async throws {

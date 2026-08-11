@@ -66,6 +66,13 @@ struct LocalBookListView: View {
                 }
                 .disabled(isImporting)
             }
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink {
+                    WebDAVBookImportView()
+                } label: {
+                    Label("WebDAV 导入", systemImage: "externaldrive")
+                }
+            }
         }
         .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.plainText]) { result in
             Task { await handleImport(result) }
