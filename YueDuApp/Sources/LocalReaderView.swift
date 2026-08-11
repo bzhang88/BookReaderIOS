@@ -17,6 +17,7 @@ struct LocalReaderView: View {
     @State private var isCurrentChapterBookmarked = false
     @State private var matchedReplaceRules: [ReplaceRule] = []
     @State private var isShowingContentSearch = false
+    @State private var isShowingAISummary = false
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
@@ -104,6 +105,13 @@ struct LocalReaderView: View {
                     Image(systemName: "magnifyingglass")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingAISummary = true
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+            }
         }
         .task(id: currentIndex) { await load() }
         .sheet(isPresented: $isShowingSettings) {
@@ -116,6 +124,9 @@ struct LocalReaderView: View {
                 },
                 onSelect: { index in goTo(index) }
             )
+        }
+        .sheet(isPresented: $isShowingAISummary) {
+            AIChapterSummaryView(chapterTitle: chapter.title, chapterText: purifiedText)
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }

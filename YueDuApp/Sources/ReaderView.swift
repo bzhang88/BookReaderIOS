@@ -26,6 +26,7 @@ struct ReaderView: View {
     @State private var isShowingChapterSourceSwitch = false
     @State private var isShowingToc = false
     @State private var isShowingContentSearch = false
+    @State private var isShowingAISummary = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
     // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
@@ -242,6 +243,13 @@ struct ReaderView: View {
                     Image(systemName: "magnifyingglass")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingAISummary = true
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
         // Keyed on source+index (not just index) so switching source always triggers a reload even
@@ -278,6 +286,9 @@ struct ReaderView: View {
                 onSelect: { index in goTo(index) },
                 scopeNotice: "仅搜索已下载缓存的章节，未下载的章节不在搜索范围内"
             )
+        }
+        .sheet(isPresented: $isShowingAISummary) {
+            AIChapterSummaryView(chapterTitle: chapter.title, chapterText: text)
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
         .onDisappear {

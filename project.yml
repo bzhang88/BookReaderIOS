@@ -74,3 +74,5 @@ targets:
         product: WebBookOrchestrator
       - package: BookSourceKit
         product: Persistence
+      - package: BookSourceKit
+        product: AIService

@@ -12,7 +12,8 @@ let package = Package(
         .library(name: "RuleEngine", targets: ["RuleEngine"]),
         .library(name: "NetworkClient", targets: ["NetworkClient"]),
         .library(name: "WebBookOrchestrator", targets: ["WebBookOrchestrator"]),
-        .library(name: "Persistence", targets: ["Persistence"])
+        .library(name: "Persistence", targets: ["Persistence"]),
+        .library(name: "AIService", targets: ["AIService"])
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.0")
@@ -46,6 +47,13 @@ let package = Package(
                 "WebBookOrchestrator"
             ]
         ),
+        .target(
+            name: "AIService",
+            dependencies: [
+                "BookSourceModel",
+                "NetworkClient"
+            ]
+        ),
         .testTarget(
             name: "BookSourceModelTests",
             dependencies: ["BookSourceModel"]
@@ -65,6 +73,10 @@ let package = Package(
         .testTarget(
             name: "PersistenceTests",
             dependencies: ["Persistence", "BookSourceModel", "WebBookOrchestrator"]
+        ),
+        .testTarget(
+            name: "AIServiceTests",
+            dependencies: ["AIService", "BookSourceModel", "NetworkClient"]
         )
     ]
 )
