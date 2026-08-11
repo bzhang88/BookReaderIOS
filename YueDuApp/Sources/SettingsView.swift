@@ -53,6 +53,11 @@ struct SettingsView: View {
                     Label("书签", systemImage: "bookmark")
                 }
                 NavigationLink {
+                    AppLockSettingsView()
+                } label: {
+                    Label("本地密码锁", systemImage: "lock")
+                }
+                NavigationLink {
                     AboutView()
                 } label: {
                     Label("关于", systemImage: "info.circle")

@@ -16,11 +16,23 @@ struct RootView: View {
     // tab's list/empty state.
     private let uiTestingScreen = UserDefaults.standard.string(forKey: "uiTestingScreen")
 
+    // CI's screenshot workflow always passes one of these launch arguments; a real user launch
+    // never does. The app-lock gate below must not block CI (there's no way for it to type a
+    // password), so it's skipped whenever either is present.
+    private var isUITesting: Bool {
+        uiTestingScreen != nil || UserDefaults.standard.object(forKey: "selectedTabIndex") != nil
+    }
+
+    @State private var isLocked = AppLockStore.isEnabled
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         if uiTestingScreen == "localReader" {
             NavigationStack {
                 LocalReaderView(book: Self.uiTestingSeedBook)
             }
+        } else if isLocked && !isUITesting {
+            AppLockView(onUnlock: { isLocked = false })
         } else {
             TabView(selection: $selectedTab) {
                 ShelfView()
@@ -35,6 +47,11 @@ struct RootView: View {
                 SettingsView()
                     .tabItem { Label("设置", systemImage: "gearshape") }
                     .tag(3)
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .background && AppLockStore.isEnabled {
+                    isLocked = true
+                }
             }
         }
     }
