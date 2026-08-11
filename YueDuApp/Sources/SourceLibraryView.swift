@@ -3,12 +3,14 @@ import UniformTypeIdentifiers
 import BookSourceModel
 import RuleEngine
 import Persistence
+import NetworkClient
 
 struct SourceLibraryView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var sources: [BookSource] = []
     @State private var capabilityReports: [String: SourceCapabilityReport] = [:]
     @State private var isImporterPresented = false
+    @State private var isShowingURLImport = false
     @State private var importSummary: String?
     @State private var errorMessage: String?
     @State private var editingSource: BookSource?
@@ -101,6 +103,7 @@ struct SourceLibraryView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button("新建书源") { isCreatingSource = true }
+                        Button("从网址导入") { isShowingURLImport = true }
                         Button("全部启用") { setAllEnabled(true) }.disabled(sources.isEmpty)
                         Button("全部停用") { setAllEnabled(false) }.disabled(sources.isEmpty)
                     } label: {
@@ -116,6 +119,11 @@ struct SourceLibraryView: View {
             }
             .sheet(isPresented: $isCreatingSource, onDismiss: { Task { await reload() } }) {
                 BookSourceEditView(source: nil)
+            }
+            .sheet(isPresented: $isShowingURLImport) {
+                BookSourceURLImportView { urlString in
+                    await handleURLImport(urlString)
+                }
             }
             .navigationDestination(isPresented: Binding(
                 get: { debuggingSource != nil },
@@ -178,6 +186,26 @@ struct SourceLibraryView: View {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: url)
+            let imported = try decodeSources(from: data)
+            let (inserted, updated) = try await env.bookSourceStore.importSources(imported)
+            await reload()
+            importSummary = "新增 \(inserted) 个，更新 \(updated) 个"
+        } catch {
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// Same import pipeline as `handleImport`, just sourcing the bytes from a URL instead of a
+    /// local file -- reuses `decodeSources(from:)` so a malformed or unreachable URL surfaces the
+    /// same kind of specific error rather than a separate, possibly worse-worded one.
+    private func handleURLImport(_ urlString: String) async {
+        guard !urlString.isEmpty else { return }
+        do {
+            let response = try await env.httpClient.fetch(HTTPRequest(url: urlString))
+            guard let data = response.body.data(using: .utf8) else {
+                errorMessage = "下载内容无法解析为文本"
+                return
+            }
             let imported = try decodeSources(from: data)
             let (inserted, updated) = try await env.bookSourceStore.importSources(imported)
             await reload()
