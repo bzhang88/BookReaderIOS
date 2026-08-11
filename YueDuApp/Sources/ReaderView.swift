@@ -24,6 +24,7 @@ struct ReaderView: View {
     @State private var isShowingSettings = false
     @State private var isShowingChangeSource = false
     @State private var isShowingChapterSourceSwitch = false
+    @State private var isShowingToc = false
     @State private var isShowingContentSearch = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
@@ -141,6 +142,49 @@ struct ReaderView: View {
                         .font(.title3)
                     }
 
+                    // Utility row -- matches Legado's row of small circular tool buttons above the
+                    // chapter-nav row (search-in-book/auto-page/replace-toggle/night-theme there;
+                    // 目录/书签/换源/自动滚动 here, since that's this app's closest equivalent set).
+                    HStack(spacing: 28) {
+                        Spacer()
+                        Button {
+                            isShowingToc = true
+                        } label: {
+                            Image(systemName: "list.bullet")
+                        }
+                        Button {
+                            Task { await toggleBookmark() }
+                        } label: {
+                            Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
+                        }
+                        Menu {
+                            Button {
+                                isShowingChangeSource = true
+                            } label: {
+                                Label("换源（整本书）", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            Button {
+                                isShowingChapterSourceSwitch = true
+                            } label: {
+                                Label("本章换源", systemImage: "doc.badge.arrow.up")
+                            }
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        Button {
+                            toggleAutoScroll(proxy: scrollProxy)
+                        } label: {
+                            Image(systemName: isAutoScrolling ? "pause.circle" : "arrow.down.circle")
+                        }
+                        Spacer()
+                    }
+                    .font(.title3)
+
+                    // Chapter-nav row -- prev/next chapter flanking read-aloud + settings, matching
+                    // Legado's bottom-most row shape (though without a real draggable in-chapter
+                    // progress bar in between: this reader is continuous-scroll per chapter, not
+                    // paginated, so there's no character-offset position to back a seek control
+                    // with -- "第 X / Y 章" above already covers the equivalent progress info).
                     HStack {
                         Button {
                             goTo(currentIndex - 1)
@@ -160,33 +204,6 @@ struct ReaderView: View {
                             }
                         } label: {
                             Image(systemName: readAloud.isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
-                        }
-
-                        Menu {
-                            Button {
-                                isShowingChangeSource = true
-                            } label: {
-                                Label("换源（整本书）", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                            Button {
-                                isShowingChapterSourceSwitch = true
-                            } label: {
-                                Label("本章换源", systemImage: "doc.badge.arrow.up")
-                            }
-                        } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-
-                        Button {
-                            Task { await toggleBookmark() }
-                        } label: {
-                            Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
-                        }
-
-                        Button {
-                            toggleAutoScroll(proxy: scrollProxy)
-                        } label: {
-                            Image(systemName: isAutoScrolling ? "pause.circle" : "arrow.down.circle")
                         }
 
                         Button {
@@ -247,6 +264,9 @@ struct ReaderView: View {
                 }
             }
         }
+        .sheet(isPresented: $isShowingToc) {
+            tocSheet
+        }
         .sheet(isPresented: $isShowingContentSearch) {
             ChapterContentSearchView(
                 loadChapters: { await loadCachedChaptersForSearch() },
@@ -285,6 +305,40 @@ struct ReaderView: View {
     private func goTo(_ index: Int) {
         guard chapters.indices.contains(index) else { return }
         currentIndex = index
+    }
+
+    /// A lightweight in-session chapter picker, deliberately *not* a reused `TocView` -- that view
+    /// fetches its own chapter list over the network and, on tap, pushes a brand-new `ReaderView`
+    /// via `NavigationLink`. Presented from inside an already-open reader as a sheet, that would
+    /// nest a second reader inside the sheet's own stack instead of just jumping the current
+    /// session to a different chapter. This reuses the `chapters` this reader already has in memory
+    /// and just moves `currentIndex`.
+    @ViewBuilder
+    private var tocSheet: some View {
+        NavigationStack {
+            List(chapters) { chapterItem in
+                Button {
+                    goTo(chapterItem.index)
+                    isShowingToc = false
+                } label: {
+                    HStack {
+                        Text(chapterItem.title)
+                        Spacer()
+                        if chapterItem.index == currentIndex {
+                            Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle("目录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { isShowingToc = false }
+                }
+            }
+        }
     }
 
     private func toggleAutoScroll(proxy: ScrollViewProxy) {
