@@ -16,6 +16,7 @@ struct LocalReaderView: View {
     @State private var isShowingSettings = false
     @State private var isCurrentChapterBookmarked = false
     @State private var matchedReplaceRules: [ReplaceRule] = []
+    @State private var isShowingContentSearch = false
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
@@ -93,9 +94,26 @@ struct LocalReaderView: View {
         }
         .navigationTitle(chapter.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingContentSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+            }
+        }
         .task(id: currentIndex) { await load() }
         .sheet(isPresented: $isShowingSettings) {
             LocalReaderSettingsSheet(matchedRules: matchedReplaceRules)
+        }
+        .sheet(isPresented: $isShowingContentSearch) {
+            ChapterContentSearchView(
+                loadChapters: {
+                    book.chapters.enumerated().map { index, chapter in (index: index, title: chapter.title, text: chapter.text) }
+                },
+                onSelect: { index in goTo(index) }
+            )
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }

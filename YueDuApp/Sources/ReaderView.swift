@@ -23,6 +23,7 @@ struct ReaderView: View {
     @State private var errorMessage: String?
     @State private var isShowingSettings = false
     @State private var isShowingChangeSource = false
+    @State private var isShowingContentSearch = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
     // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
@@ -188,6 +189,15 @@ struct ReaderView: View {
         .navigationTitle(chapter.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(isChromeVisible ? .visible : .hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingContentSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+            }
+        }
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
         // Keyed on source+index (not just index) so switching source always triggers a reload even
         // on the rare occasion the new chapter index happens to numerically match the old one --
@@ -204,6 +214,13 @@ struct ReaderView: View {
                     await switchSource(to: newSource, match: match)
                 }
             }
+        }
+        .sheet(isPresented: $isShowingContentSearch) {
+            ChapterContentSearchView(
+                loadChapters: { await loadCachedChaptersForSearch() },
+                onSelect: { index in goTo(index) },
+                scopeNotice: "仅搜索已下载缓存的章节，未下载的章节不在搜索范围内"
+            )
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
         .onDisappear {
@@ -230,6 +247,19 @@ struct ReaderView: View {
     private func goTo(_ index: Int) {
         guard chapters.indices.contains(index) else { return }
         currentIndex = index
+    }
+
+    /// Feeds `ChapterContentSearchView` -- only chapters already saved to `chapterCacheStore` (via
+    /// the "缓存全本"/per-chapter caching flow) are searchable, since fetching every remaining
+    /// chapter over the network on-demand just to search it would be slow and wasteful.
+    private func loadCachedChaptersForSearch() async -> [(index: Int, title: String, text: String)] {
+        var result: [(index: Int, title: String, text: String)] = []
+        for chapter in chapters {
+            if let cached = try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: chapter.index) {
+                result.append((index: chapter.index, title: chapter.title, text: cached.text))
+            }
+        }
+        return result
     }
 
     /// Advances to the next chapter without requiring an explicit tap on "下一章" -- guarded by
