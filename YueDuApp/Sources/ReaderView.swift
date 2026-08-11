@@ -63,6 +63,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
     // Re-evaluated every minute so a schedule-only filter actually turns on/off while the reader
     // stays open across the boundary, not just whenever the view happens to redraw for other reasons.
     @State private var scheduleTick = Date()
@@ -115,10 +116,15 @@ struct ReaderView: View {
             .contentShape(Rectangle())
             // A zero-distance DragGesture rather than .onTapGesture -- SwiftUI's plain tap gesture
             // doesn't expose *where* the tap landed, and the 3x3 zone grid needs that location to
-            // pick which of the 9 regions was hit (see `handleTap`).
+            // pick which of the 9 regions was hit (see `handleTap`). `touchSlop` filters out
+            // releases too far from where the finger went down -- a scroll attempt that only moved
+            // a little shouldn't also register as a tap-zone tap.
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .onEnded { value in handleTap(at: value.location) }
+                    .onEnded { value in
+                        guard hypot(value.translation.width, value.translation.height) <= touchSlop else { return }
+                        handleTap(at: value.location)
+                    }
             )
         }
         .background(theme.backgroundColor(for: colorScheme))

@@ -24,6 +24,7 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
 
     @Environment(\.dismiss) private var dismiss
 
@@ -90,6 +91,13 @@ struct ReaderSettingsSheet: View {
                     Toggle("音量键翻页", isOn: $volumeKeyPageEnabled)
                     NavigationLink("点击区域设置") {
                         TapZoneConfigView()
+                    }
+                    VStack(alignment: .leading) {
+                        Text("触控灵敏度: \(Int(touchSlop))")
+                        Slider(value: $touchSlop, in: 10...100, step: 5)
+                        Text("值越大，点击时手指有轻微移动也会当作有效点击")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

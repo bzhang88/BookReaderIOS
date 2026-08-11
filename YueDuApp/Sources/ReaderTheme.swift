@@ -120,6 +120,13 @@ enum ReaderSettingsKey {
     static let eyeCareScheduleEnabled = "reader.eyeCareScheduleEnabled"
     static let eyeCareScheduleStartHour = "reader.eyeCareScheduleStartHour"
     static let eyeCareScheduleEndHour = "reader.eyeCareScheduleEndHour"
+    /// Confirmed against Legado_Max's real `AppConfig.pageTouchSlop` (overrides the system's
+    /// `scaledTouchSlop` in `ReadView.kt`) -- how far a finger can drift during a touch-down/up and
+    /// still count as a tap rather than a scroll/drag attempt. This app's tap-zone gesture (see
+    /// `ReaderView.handleTap`) previously had no such tolerance check at all, so the *default* here
+    /// is deliberately generous (50pt) rather than a tight value, to avoid silently changing already
+    /// -shipped tap behavior for existing users -- this is a new tunable, not a bug fix.
+    static let touchSlop = "reader.touchSlop"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before
