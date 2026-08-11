@@ -18,6 +18,8 @@ struct SourceLibraryView: View {
     @State private var editingSource: BookSource?
     @State private var isCreatingSource = false
     @State private var debuggingSource: BookSource?
+    @State private var loggingInSource: BookSource?
+    @State private var loggedInSourceUrls: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -50,6 +52,11 @@ struct SourceLibraryView: View {
                                             .background(.orange.opacity(0.2), in: Capsule())
                                             .foregroundStyle(.orange)
                                     }
+                                    if loggedInSourceUrls.contains(source.bookSourceUrl) {
+                                        Image(systemName: "person.crop.circle.badge.checkmark")
+                                            .font(.caption2)
+                                            .foregroundStyle(Color.green)
+                                    }
                                 }
                                 Text(source.bookSourceUrl)
                                     .font(.caption)
@@ -80,6 +87,16 @@ struct SourceLibraryView: View {
                             debuggingSource = source
                         } label: {
                             Label("调试", systemImage: "ladybug")
+                        }
+                        if let loginUrl = source.loginUrl, !loginUrl.isEmpty {
+                            Button {
+                                loggingInSource = source
+                            } label: {
+                                Label(
+                                    loggedInSourceUrls.contains(source.bookSourceUrl) ? "已登录（重新登录）" : "登录",
+                                    systemImage: "person.crop.circle"
+                                )
+                            }
                         }
                     }
                 }
@@ -139,6 +156,9 @@ struct SourceLibraryView: View {
                     SourceSubscriptionListView()
                 }
             }
+            .sheet(item: $loggingInSource, onDismiss: { Task { await reload() } }) { source in
+                SourceLoginView(source: source)
+            }
             .navigationDestination(isPresented: Binding(
                 get: { debuggingSource != nil },
                 set: { if !$0 { debuggingSource = nil } }
@@ -168,6 +188,8 @@ struct SourceLibraryView: View {
         capabilityReports = Dictionary(
             uniqueKeysWithValues: CapabilityScanner.scan(all).map { ($0.sourceUrl, $0) }
         )
+        let savedCookies = (try? await env.loginCookieStore.allCookies()) ?? [:]
+        loggedInSourceUrls = Set(savedCookies.keys)
     }
 
     private func toggleEnabled(_ source: BookSource) {

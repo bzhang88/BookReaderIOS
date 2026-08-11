@@ -20,6 +20,7 @@ final class AppEnvironment: ObservableObject {
     let chapterCacheStore: ChapterCacheStore
     let bookmarkStore: BookmarkStore
     let txtSplitRuleStore: TxtSplitRuleStore
+    let loginCookieStore: LoginCookieStore
     let httpClient: any HTTPClient
 
     init() {
@@ -38,6 +39,36 @@ final class AppEnvironment: ObservableObject {
         chapterCacheStore = ChapterCacheStore(directory: appSupport.appendingPathComponent("chapter_cache", isDirectory: true))
         bookmarkStore = BookmarkStore(fileURL: appSupport.appendingPathComponent("bookmarks.json"))
         txtSplitRuleStore = TxtSplitRuleStore(fileURL: appSupport.appendingPathComponent("txt_split_rules.json"))
+        loginCookieStore = LoginCookieStore(fileURL: appSupport.appendingPathComponent("login_cookies.json"))
         httpClient = URLSessionHTTPClient()
+
+        let cookieStore = loginCookieStore
+        Task { await Self.reinjectSavedCookies(from: cookieStore) }
+    }
+
+    /// A WebView's cookie jar and `URLSession`'s `HTTPCookieStorage.shared` are separate stores on
+    /// iOS -- cookies captured during a book-source login (see `SourceLoginView`) get copied into
+    /// the shared storage right after capture, but that copy only lives in memory for the current
+    /// process. This repopulates it from disk once at launch so a login from a previous session
+    /// keeps working without the user having to log in again every time the app restarts.
+    private static func reinjectSavedCookies(from store: LoginCookieStore) async {
+        guard let all = try? await store.allCookies() else { return }
+        for (_, cookies) in all {
+            for saved in cookies {
+                var properties: [HTTPCookiePropertyKey: Any] = [
+                    .name: saved.name,
+                    .value: saved.value,
+                    .domain: saved.domain,
+                    .path: saved.path,
+                    .secure: saved.isSecure
+                ]
+                if let expiresAt = saved.expiresAt {
+                    properties[.expires] = expiresAt
+                }
+                if let cookie = HTTPCookie(properties: properties) {
+                    HTTPCookieStorage.shared.setCookie(cookie)
+                }
+            }
+        }
     }
 }

@@ -16,6 +16,16 @@ public struct BookSource: Codable, Equatable, Identifiable {
     public var searchUrl: String?
     public var exploreUrl: String?
     public var weight: Int
+    /// Where to send the user to log in -- either a plain absolute URL (loaded in a WebView so the
+    /// user logs in through the site's own real page, same as Legado's WebView login fallback) or a
+    /// `@js:`/`<js>` script (a login flow driven entirely by JS, which this app doesn't execute --
+    /// see `hasWebLoginURL`).
+    public var loginUrl: String?
+    /// A JSON-array-shaped string describing a login form's fields (Legado's `RowUi` list) --
+    /// decoded and kept for round-trip fidelity with real book source files, but this app doesn't
+    /// yet render a form from it (see `hasWebLoginURL`'s doc comment: WebView login covers the same
+    /// need without needing to model Legado's JS-driven dynamic form UI).
+    public var loginUi: String?
 
     public var ruleSearch: SearchRule?
     public var ruleExplore: ExploreRule?
@@ -38,6 +48,8 @@ public struct BookSource: Codable, Equatable, Identifiable {
         searchUrl: String? = nil,
         exploreUrl: String? = nil,
         weight: Int = 0,
+        loginUrl: String? = nil,
+        loginUi: String? = nil,
         ruleSearch: SearchRule? = nil,
         ruleExplore: ExploreRule? = nil,
         ruleBookInfo: BookInfoRule? = nil,
@@ -54,6 +66,8 @@ public struct BookSource: Codable, Equatable, Identifiable {
         self.searchUrl = searchUrl
         self.exploreUrl = exploreUrl
         self.weight = weight
+        self.loginUrl = loginUrl
+        self.loginUi = loginUi
         self.ruleSearch = ruleSearch
         self.ruleExplore = ruleExplore
         self.ruleBookInfo = ruleBookInfo
@@ -64,6 +78,7 @@ public struct BookSource: Codable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType, header
         case enabled, enabledExplore, searchUrl, exploreUrl, weight
+        case loginUrl, loginUi
         case ruleSearch, ruleExplore, ruleBookInfo, ruleToc, ruleContent
     }
 
@@ -79,6 +94,8 @@ public struct BookSource: Codable, Equatable, Identifiable {
         searchUrl = try container.decodeIfPresent(String.self, forKey: .searchUrl)
         exploreUrl = try container.decodeIfPresent(String.self, forKey: .exploreUrl)
         weight = try container.decodeIfPresent(Int.self, forKey: .weight) ?? 0
+        loginUrl = try container.decodeIfPresent(String.self, forKey: .loginUrl)
+        loginUi = try container.decodeIfPresent(String.self, forKey: .loginUi)
         ruleSearch = try container.decodeIfPresent(SearchRule.self, forKey: .ruleSearch)
         ruleExplore = try container.decodeIfPresent(ExploreRule.self, forKey: .ruleExplore)
         ruleBookInfo = try container.decodeIfPresent(BookInfoRule.self, forKey: .ruleBookInfo)
@@ -91,6 +108,16 @@ public struct BookSource: Codable, Equatable, Identifiable {
     /// unless the source's own `header` field overrides it.
     public static let defaultUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+    /// True when `loginUrl` is something a WebView can load directly -- a plain absolute http(s)
+    /// address -- rather than one of the `@js:`/`<js>`-prefixed script forms the same field can
+    /// also hold (mirroring the convention other JS-bearing rule fields use elsewhere in this
+    /// format), which this app doesn't execute. Sources with only a script-driven login report as
+    /// not loggable rather than a WebView trying to navigate to literal JS source text as a URL.
+    public var hasWebLoginURL: Bool {
+        guard let loginUrl, !loginUrl.isEmpty else { return false }
+        return loginUrl.hasPrefix("http://") || loginUrl.hasPrefix("https://")
+    }
 
     /// Parses `header` (a JSON-object-shaped string, e.g. `{"User-Agent": "..."}`) into a plain
     /// dictionary for building requests, merged over a default User-Agent. Malformed or missing
