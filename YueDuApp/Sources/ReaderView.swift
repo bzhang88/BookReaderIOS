@@ -182,7 +182,14 @@ struct ReaderView: View {
             // pick which of the 9 regions was hit (see `handleTap`). `touchSlop` filters out
             // releases too far from where the finger went down -- a scroll attempt that only moved
             // a little shouldn't also register as a tap-zone tap.
-            .gesture(
+            //
+            // `.simultaneousGesture`, not `.gesture` -- a plain `.gesture(DragGesture(minimumDistance:
+            // 0))` on content *inside* a `ScrollView` can win the touch outright and starve the
+            // ScrollView's own built-in pan/scroll gesture of it, which reads as "scrolling just
+            // doesn't work" (real-device feedback: the page never moves at all in `.scroll` mode).
+            // `.simultaneousGesture` lets both this tap-zone recognizer and the ScrollView's native
+            // scrolling see the same touch instead of one exclusively claiming it.
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
                     .onEnded { value in
                         guard hypot(value.translation.width, value.translation.height) <= touchSlop else { return }
