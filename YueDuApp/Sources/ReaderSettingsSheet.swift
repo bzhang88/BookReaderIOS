@@ -17,6 +17,7 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
+    @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
 
     @Environment(\.dismiss) private var dismiss
 
@@ -56,6 +57,13 @@ struct ReaderSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section("自动滚动") {
+                    VStack(alignment: .leading) {
+                        Text("每段间隔: \(String(format: "%.1f", autoScrollInterval)) 秒")
+                        Slider(value: $autoScrollInterval, in: 1...10, step: 0.5)
+                    }
                 }
 
                 Section("其他") {

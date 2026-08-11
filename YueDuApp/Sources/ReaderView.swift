@@ -35,6 +35,8 @@ struct ReaderView: View {
     @State private var matchedReplaceRules: [ReplaceRule] = []
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @State private var highlightRules: [HighlightRule] = []
+    @State private var isAutoScrolling = false
+    @State private var autoScrollTask: Task<Void, Never>?
     @StateObject private var readAloud = ReadAloudController()
     @Environment(\.colorScheme) private var colorScheme
 
@@ -45,6 +47,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
+    @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
 
     init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
         self._source = State(initialValue: source)
@@ -59,6 +62,7 @@ struct ReaderView: View {
     private var paragraphs: [String] { text.components(separatedBy: "\n") }
 
     var body: some View {
+        ScrollViewReader { scrollProxy in
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
@@ -70,6 +74,7 @@ struct ReaderView: View {
                             readAloud.isSpeaking && index == readAloud.currentParagraphIndex
                                 ? Color.accentColor.opacity(0.15) : Color.clear
                         )
+                        .id(index)
                 }
                 // Invisible sentinel below the last paragraph -- its appearance means the user has
                 // scrolled (or the chapter was short enough to start fully visible) to the bottom.
@@ -179,6 +184,12 @@ struct ReaderView: View {
                         }
 
                         Button {
+                            toggleAutoScroll(proxy: scrollProxy)
+                        } label: {
+                            Image(systemName: isAutoScrolling ? "pause.circle" : "arrow.down.circle")
+                        }
+
+                        Button {
                             isShowingSettings = true
                         } label: {
                             Image(systemName: "textformat.size")
@@ -247,6 +258,7 @@ struct ReaderView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             readAloud.stop()
+            stopAutoScroll()
         }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
@@ -262,12 +274,56 @@ struct ReaderView: View {
             // from the old chapter's text -- stopping is simpler and safer than trying to carry
             // read-aloud state across a chapter reload for this first version.
             readAloud.stop()
+            // Same reasoning as read-aloud: an auto-scroll loop mid-flight is walking paragraph
+            // indices that belonged to the chapter that just got replaced, so it has to stop too
+            // rather than silently continuing to scroll a chapter that no longer matches its state.
+            stopAutoScroll()
+        }
         }
     }
 
     private func goTo(_ index: Int) {
         guard chapters.indices.contains(index) else { return }
         currentIndex = index
+    }
+
+    private func toggleAutoScroll(proxy: ScrollViewProxy) {
+        if isAutoScrolling {
+            stopAutoScroll()
+        } else {
+            startAutoScroll(proxy: proxy)
+        }
+    }
+
+    /// Advances one paragraph per `autoScrollInterval` seconds, hands-free -- not a continuous
+    /// pixel-by-pixel scroll (SwiftUI's `ScrollViewProxy` only exposes anchor-based `scrollTo`, not
+    /// an arbitrary offset), so this reads more like an auto-advancing teleprompter than a smoothly
+    /// gliding page. Stops on its own at the last paragraph rather than rolling into the next
+    /// chapter automatically -- chapter auto-advance already has its own distinct trigger (the
+    /// bottom sentinel in `attemptAutoAdvance`), and conflating the two risked skipping the user
+    /// past a chapter boundary while they weren't looking at the screen.
+    private func startAutoScroll(proxy: ScrollViewProxy) {
+        autoScrollTask?.cancel()
+        isAutoScrolling = true
+        autoScrollTask = Task {
+            var index = 0
+            while !Task.isCancelled && index < paragraphs.count {
+                withAnimation {
+                    proxy.scrollTo(index, anchor: .top)
+                }
+                index += 1
+                try? await Task.sleep(nanoseconds: UInt64(max(autoScrollInterval, 0.5) * 1_000_000_000))
+            }
+            if !Task.isCancelled {
+                isAutoScrolling = false
+            }
+        }
+    }
+
+    private func stopAutoScroll() {
+        autoScrollTask?.cancel()
+        autoScrollTask = nil
+        isAutoScrolling = false
     }
 
     private func applyChineseConversion(_ text: String) -> String {

@@ -103,6 +103,9 @@ enum ReaderSettingsKey {
     /// is 0.5) -- stored as a plain Double since `@AppStorage` doesn't support Float directly.
     static let readAloudRate = "reader.readAloudRate"
     static let chineseConversion = "reader.chineseConversion"
+    /// Seconds between each auto-scroll step -- one paragraph per step, not a continuous pixel
+    /// scroll (see `ReaderView`'s auto-scroll doc comment for why paragraph granularity was chosen).
+    static let autoScrollInterval = "reader.autoScrollInterval"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before
