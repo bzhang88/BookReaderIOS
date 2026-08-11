@@ -38,6 +38,11 @@ struct SettingsView: View {
                     Label("阅读统计", systemImage: "chart.bar")
                 }
                 NavigationLink {
+                    StorageManagementView()
+                } label: {
+                    Label("存储管理", systemImage: "externaldrive")
+                }
+                NavigationLink {
                     BookmarkListView()
                 } label: {
                     Label("书签", systemImage: "bookmark")

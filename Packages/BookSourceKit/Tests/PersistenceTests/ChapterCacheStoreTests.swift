@@ -66,4 +66,41 @@ final class ChapterCacheStoreTests: XCTestCase {
         let read = try await session2.chapter(bookUrl: "https://example.com/book/1", index: 5)
         XCTAssertEqual(read?.text, "正文")
     }
+
+    func testSizeBytesIsZeroForNeverDownloadedBook() async throws {
+        let store = ChapterCacheStore(directory: tempDirectory())
+        let size = await store.sizeBytes(bookUrl: "https://example.com/never-downloaded")
+        XCTAssertEqual(size, 0)
+    }
+
+    func testSizeBytesIsPositiveAfterSaving() async throws {
+        let store = ChapterCacheStore(directory: tempDirectory())
+        try await store.save(bookUrl: "https://example.com/book/1", index: 0, content: ChapterContent(text: "正文内容"))
+        let size = await store.sizeBytes(bookUrl: "https://example.com/book/1")
+        XCTAssertGreaterThan(size, 0)
+    }
+
+    func testTotalSizeBytesSumsAcrossBooks() async throws {
+        let store = ChapterCacheStore(directory: tempDirectory())
+        try await store.save(bookUrl: "https://example.com/book/1", index: 0, content: ChapterContent(text: "书一"))
+        try await store.save(bookUrl: "https://example.com/book/2", index: 0, content: ChapterContent(text: "书二"))
+
+        let bookOneSize = await store.sizeBytes(bookUrl: "https://example.com/book/1")
+        let bookTwoSize = await store.sizeBytes(bookUrl: "https://example.com/book/2")
+        let total = await store.totalSizeBytes()
+        XCTAssertEqual(total, bookOneSize + bookTwoSize)
+    }
+
+    func testRemoveAllClearsEveryBooksCache() async throws {
+        let store = ChapterCacheStore(directory: tempDirectory())
+        try await store.save(bookUrl: "https://example.com/book/1", index: 0, content: ChapterContent(text: "书一"))
+        try await store.save(bookUrl: "https://example.com/book/2", index: 0, content: ChapterContent(text: "书二"))
+
+        try await store.removeAll()
+
+        let total = await store.totalSizeBytes()
+        XCTAssertEqual(total, 0)
+        let indices = try await store.downloadedIndices(bookUrl: "https://example.com/book/1")
+        XCTAssertTrue(indices.isEmpty)
+    }
 }

@@ -34,6 +34,39 @@ public actor ChapterCacheStore {
         try? FileManager.default.removeItem(at: fileURL(for: bookUrl))
     }
 
+    /// On-disk size of one book's cache file -- 0 if it was never downloaded (rather than throwing,
+    /// since "no cache yet" is a totally normal state for a storage-management screen to show).
+    public func sizeBytes(bookUrl: String) async -> Int64 {
+        Self.fileSize(at: fileURL(for: bookUrl))
+    }
+
+    /// Sums every file under the cache directory -- used for the storage-management screen's
+    /// overall "缓存占用" figure without requiring the caller to already know every book that's
+    /// ever been downloaded.
+    public func totalSizeBytes() async -> Int64 {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return 0
+        }
+        return files.reduce(Int64(0)) { $0 + Self.fileSize(at: $1) }
+    }
+
+    /// Wipes every book's downloaded chapter cache in one go -- the "清空全部下载缓存" action.
+    /// Purely a storage reclaim; doesn't touch the shelf/local-book lists themselves, so cleared
+    /// books just go back to fetching over the network next time they're read.
+    public func removeAll() async throws {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return
+        }
+        for file in files {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    private static func fileSize(at url: URL) -> Int64 {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return 0 }
+        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
     // MARK: - Per-book file I/O
 
     private func loadBook(_ bookUrl: String) async throws -> [Int: ChapterContent] {
