@@ -83,7 +83,7 @@ struct SourceCheckView: View {
             ForEach(outcome.stageResults, id: \.stage) { stageResult in
                 Text("\(stageResult.stage.displayName): \(stageResult.detail)")
                     .font(.caption2)
-                    .foregroundStyle(stageResult.success ? .secondary : .red)
+                    .foregroundStyle(stageResult.success ? Color.secondary : Color.red)
                     .lineLimit(2)
             }
         }
