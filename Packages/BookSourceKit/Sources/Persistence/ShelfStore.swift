@@ -71,4 +71,14 @@ public actor ShelfStore {
         books[idx].lastReadAt = Date()
         try await store.save(books)
     }
+
+    /// Refreshes `totalChapterCount` -- called opportunistically wherever a book's real chapter
+    /// list is already being fetched (resuming into the reader, switching source), not on its own
+    /// schedule. A no-op for a book no longer on the shelf.
+    public func updateTotalChapterCount(bookUrl: String, count: Int) async throws {
+        var books = try await all()
+        guard let idx = books.firstIndex(where: { $0.bookUrl == bookUrl }) else { return }
+        books[idx].totalChapterCount = count
+        try await store.save(books)
+    }
 }

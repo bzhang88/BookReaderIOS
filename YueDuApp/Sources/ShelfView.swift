@@ -217,29 +217,79 @@ struct ShelfView: View {
         }
     }
 
+    // Matches Legado_Max's real list-item layout (item_bookshelf_list.xml): cover thumbnail on the
+    // left with an unread-count badge pinned to its top-right corner, title + icon-prefixed info
+    // rows (author / last-read progress / latest update, shown as separate rows, not either/or) on
+    // the right. This app never actually showed a cover thumbnail in the shelf row before this --
+    // a real gap surfaced while matching Legado's layout, not just a restyle.
     @ViewBuilder
     private func bookRowContent(_ book: ShelfBook) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(book.name).font(.headline)
-                if let group = book.group, !group.isEmpty {
-                    Text(group)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.15), in: Capsule())
-                        .foregroundStyle(Color.accentColor)
+        HStack(alignment: .top, spacing: 12) {
+            ZStack(alignment: .topTrailing) {
+                AsyncImage(url: book.coverUrl.flatMap(URL.init(string:))) { phase in
+                    if let image = phase.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Rectangle()
+                            .fill(.quaternary)
+                            .overlay { Image(systemName: "book.closed").foregroundStyle(.secondary) }
+                    }
+                }
+                .frame(width: 56, height: 78)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                if let unread = unreadCount(for: book), unread > 0 {
+                    Text(unread > 99 ? "99+" : "\(unread)")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.red, in: Capsule())
+                        .offset(x: 6, y: -6)
                 }
             }
-            if let author = book.author, !author.isEmpty {
-                Text(author).font(.subheadline).foregroundStyle(.secondary)
-            }
-            if let title = book.lastReadChapterTitle {
-                Text("上次读到: \(title)").font(.caption).foregroundStyle(.secondary)
-            } else if let last = book.lastChapterTitle, !last.isEmpty {
-                Text("最新: \(last)").font(.caption).foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(book.name).font(.headline).lineLimit(1)
+                    if let group = book.group, !group.isEmpty {
+                        Text(group)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                if let author = book.author, !author.isEmpty {
+                    shelfInfoRow(icon: "person.fill", text: author)
+                }
+                if let title = book.lastReadChapterTitle {
+                    shelfInfoRow(icon: "clock", text: "上次读到: \(title)")
+                }
+                if let last = book.lastChapterTitle, !last.isEmpty {
+                    shelfInfoRow(icon: "text.book.closed", text: "最新: \(last)")
+                }
             }
         }
+        .padding(.vertical, 2)
+    }
+
+    private func shelfInfoRow(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.caption2).foregroundStyle(.secondary)
+            Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+
+    /// `nil` (no badge shown at all) until the TOC has been fetched at least once since this field
+    /// was added -- see `ShelfBook.totalChapterCount`'s doc comment. Never negative: a stored index
+    /// that's since drifted past the (possibly stale) total just floors at zero rather than showing
+    /// a nonsensical negative unread count.
+    private func unreadCount(for book: ShelfBook) -> Int? {
+        guard let total = book.totalChapterCount else { return nil }
+        let readCount = (book.lastReadChapterIndex ?? -1) + 1
+        return max(0, total - readCount)
     }
 
     private func toggleSelection(_ book: ShelfBook) {
@@ -440,6 +490,7 @@ struct ShelfBookResumeView: View {
                 errorMessage = "没有找到章节"
             } else {
                 chapters = fetched
+                try? await env.shelfStore.updateTotalChapterCount(bookUrl: book.bookUrl, count: fetched.count)
             }
         } catch {
             errorMessage = "\(error)"

@@ -9,9 +9,16 @@ import NetworkClient
 /// is why the initializer takes plain fallback fields rather than either type directly: neither
 /// context has the other type's value on hand, and both have enough to show something before
 /// `BookInfoService` finishes its own network fetch.
+///
+/// Layout matches Legado_Max's real `BookInfoActivity` (confirmed by reading its actual XML/Kotlin,
+/// not guessed): a full-bleed blurred cover backdrop with a scrim, a centered floating cover card,
+/// a rounded-top content panel "sliding up" over the backdrop, a stack of icon info rows (some with
+/// a trailing pill-shaped action button -- 来源+换源, 分组+改分组, 目录+查看), and a bottom-fixed
+/// two-button bar (加入书架/移出书架 + 阅读). `source`/`bookUrl` are `@State` (not `let`) so 换源 can
+/// swap them in place, the same technique `ReaderView` already uses for its own in-reader 换源.
 struct BookDetailView: View {
-    let source: BookSource
-    let bookUrl: String
+    @State private var source: BookSource
+    @State private var bookUrl: String
     let fallbackName: String
     let fallbackAuthor: String?
     let fallbackCoverUrl: String?
@@ -24,7 +31,11 @@ struct BookDetailView: View {
     @State private var errorMessage: String?
     @State private var isInShelf = false
     @State private var shelfCoverUrl: String?
+    @State private var shelfGroup: String?
+    @State private var existingGroupNames: [String] = []
     @State private var isShowingCoverPicker = false
+    @State private var isShowingChangeSource = false
+    @State private var isShowingGroupPicker = false
     @State private var previewChapters: [BookChapter] = []
     @State private var downloadedCount = 0
     @State private var isDownloading = false
@@ -38,8 +49,8 @@ struct BookDetailView: View {
         source: BookSource, bookUrl: String, fallbackName: String, fallbackAuthor: String? = nil,
         fallbackCoverUrl: String? = nil, fallbackIntro: String? = nil, fallbackLastChapter: String? = nil
     ) {
-        self.source = source
-        self.bookUrl = bookUrl
+        self._source = State(initialValue: source)
+        self._bookUrl = State(initialValue: bookUrl)
         self.fallbackName = fallbackName
         self.fallbackAuthor = fallbackAuthor
         self.fallbackCoverUrl = fallbackCoverUrl
@@ -78,44 +89,49 @@ struct BookDetailView: View {
         return bookInfo?.coverUrl ?? fallbackCoverUrl
     }
     private var intro: String? { bookInfo?.intro ?? fallbackIntro }
-    private var lastChapter: String? { bookInfo?.lastChapter ?? fallbackLastChapter }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let errorMessage {
-                    ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
-                } else {
-                    header
-                    statsRow
-                    actionButtons
-
-                    if !previewChapters.isEmpty {
-                        downloadSection
-                    }
-
-                    if let intro, !intro.isEmpty {
-                        Divider()
-                        Text(intro).font(.body)
-                    }
-
-                    if !previewChapters.isEmpty {
-                        Divider()
-                        chapterPreview
-                    }
+        ZStack(alignment: .top) {
+            backdrop
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Reserves room for the backdrop + floating cover card to show through above
+                    // the panel, matching Legado's "cover peeking out above the sheet" look.
+                    Color.clear.frame(height: 190)
+                    contentPanel
                 }
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            coverCard
         }
+        .ignoresSafeArea(edges: .top)
         .overlay {
             if isLoading { ProgressView() }
         }
-        .navigationTitle(name)
+        .safeAreaInset(edge: .bottom) {
+            if !isLoading, errorMessage == nil {
+                bottomActionBar
+            }
+        }
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { toolbarContent }
         .sheet(isPresented: $isShowingCoverPicker) {
             CoverPickerView(bookName: name) { newCoverUrl in
                 await setCover(newCoverUrl)
+            }
+        }
+        .sheet(isPresented: $isShowingChangeSource) {
+            NavigationStack {
+                ChangeSourceView(
+                    currentBookSourceUrl: source.bookSourceUrl, bookName: name, bookAuthor: author
+                ) { newSource, match in
+                    await switchSource(to: newSource, match: match)
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingGroupPicker) {
+            ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
+                await setGroup(newGroup)
             }
         }
         .sheet(isPresented: $isShowingExportSheet) {
@@ -126,125 +142,41 @@ struct BookDetailView: View {
         .task { await load() }
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AsyncImage(url: coverUrl.flatMap(URL.init(string:))) { phase in
-                if let image = phase.image {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Rectangle()
-                        .fill(.quaternary)
-                        .overlay { Image(systemName: "book.closed").foregroundStyle(.secondary) }
-                }
-            }
-            .frame(width: 100, height: 140)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(name).font(.title2.bold())
-                if let author, !author.isEmpty {
-                    Text(author).font(.subheadline).foregroundStyle(.secondary)
-                }
-                if let lastChapter, !lastChapter.isEmpty {
-                    Text("最新: \(lastChapter)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
-        }
-    }
-
-    private var statsRow: some View {
-        HStack {
-            statColumn(title: "字数", value: bookInfo?.wordCount ?? "未知")
-            Divider().frame(height: 30)
-            statColumn(title: "来源", value: source.bookSourceName)
-            if let kind = bookInfo?.kind, !kind.isEmpty {
-                Divider().frame(height: 30)
-                statColumn(title: "类型", value: kind)
-            }
-        }
-    }
-
-    private func statColumn(title: String, value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.subheadline.bold()).lineLimit(1)
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var actionButtons: some View {
-        HStack {
-            Button {
-                Task { await toggleShelf() }
+    // Split out of `body` into its own `@ToolbarContentBuilder` (rather than inlined in
+    // `.toolbar { }`) for the same reason a couple of other views this session needed splitting: a
+    // real SwiftUI "compiler unable to type-check this expression in reasonable time" build break
+    // has already happened once from a body this size with this much nested-conditional content --
+    // keeping each piece its own small expression avoids relearning that lesson here too.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                overflowMenuItems
             } label: {
-                Label(isInShelf ? "已在书架" : "加入书架", systemImage: isInShelf ? "checkmark" : "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isInShelf || bookInfo == nil)
-
-            if isInShelf {
-                Button {
-                    isShowingCoverPicker = true
-                } label: {
-                    Label("更换封面", systemImage: "photo")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            if let bookInfo {
-                NavigationLink {
-                    TocView(source: source, tocURL: bookInfo.tocUrl, bookUrl: bookUrl, bookTitle: name)
-                } label: {
-                    Label("目录", systemImage: "list.bullet")
-                }
-                .buttonStyle(.bordered)
-
-                NavigationLink {
-                    TocView(source: source, tocURL: bookInfo.tocUrl, bookUrl: bookUrl, bookTitle: name, resumeChapterIndex: 0)
-                } label: {
-                    Label("立即阅读", systemImage: "book")
-                }
-                .buttonStyle(.bordered)
+                Image(systemName: "ellipsis.circle")
             }
         }
     }
 
-    /// Offline download entry point (Legado's own detail page has an equivalent "缓存" button) --
-    /// strictly opt-in, matching `ChapterCacheStore`'s own design: normal reading never silently
-    /// caches anything, only this explicit action does.
     @ViewBuilder
-    private var downloadSection: some View {
-        if isDownloading {
-            VStack(alignment: .leading, spacing: 4) {
-                ProgressView(value: Double(downloadProgress), total: Double(max(previewChapters.count, 1)))
-                HStack {
-                    Text("缓存中 \(downloadProgress)/\(previewChapters.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("取消") { downloadTask?.cancel() }
-                        .font(.caption)
+    private var overflowMenuItems: some View {
+        Button {
+            isShowingCoverPicker = true
+        } label: {
+            Label("更换封面", systemImage: "photo")
+        }
+        if downloadedCount > 0 {
+            if downloadedCount == previewChapters.count {
+                Button {
+                    Task { await exportTxt() }
+                } label: {
+                    Label("导出 txt", systemImage: "square.and.arrow.up")
                 }
             }
-        } else if downloadedCount > 0 {
-            HStack {
-                Label("已缓存 \(downloadedCount)/\(previewChapters.count) 章", systemImage: "arrow.down.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                Spacer()
-                if downloadedCount < previewChapters.count {
-                    Button("继续缓存") { startDownload() }
-                        .font(.caption)
-                } else if isExporting {
-                    ProgressView().font(.caption)
-                } else {
-                    Button("导出 txt") { Task { await exportTxt() } }
-                        .font(.caption)
-                }
-                Button("删除缓存", role: .destructive) {
-                    Task { await deleteCache() }
-                }
-                .font(.caption)
+            Button(role: .destructive) {
+                Task { await deleteCache() }
+            } label: {
+                Label("删除缓存", systemImage: "trash")
             }
         } else {
             Button {
@@ -252,18 +184,196 @@ struct BookDetailView: View {
             } label: {
                 Label("缓存全本", systemImage: "arrow.down.circle")
             }
-            .buttonStyle(.bordered)
         }
     }
 
-    private var chapterPreview: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("章节预览（共 \(previewChapters.count) 章）").font(.headline)
-            ForEach(previewChapters.prefix(5)) { chapter in
-                Text(chapter.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+    // MARK: - Backdrop + floating cover
+
+    private var backdrop: some View {
+        GeometryReader { proxy in
+            AsyncImage(url: coverUrl.flatMap(URL.init(string:))) { phase in
+                if let image = phase.image {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    Rectangle().fill(.quaternary)
+                }
+            }
+            .frame(width: proxy.size.width, height: 340)
+            .blur(radius: 20)
+            .clipped()
+            .overlay(Color.black.opacity(0.45))
+        }
+        .frame(height: 340)
+    }
+
+    private var coverCard: some View {
+        AsyncImage(url: coverUrl.flatMap(URL.init(string:))) { phase in
+            if let image = phase.image {
+                image.resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle()
+                    .fill(.quaternary)
+                    .overlay { Image(systemName: "book.closed").foregroundStyle(.secondary) }
+            }
+        }
+        .frame(width: 110, height: 154)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .shadow(radius: 8, y: 4)
+        .padding(.top, 96)
+        .onLongPressGesture {
+            isShowingCoverPicker = true
+        }
+    }
+
+    // MARK: - Content panel
+
+    private var contentPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let errorMessage {
+                ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
+            } else {
+                Text(name)
+                    .font(.title2.bold())
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 12)
+
+                if let kind = bookInfo?.kind, !kind.isEmpty {
+                    Text(kind)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    if let author, !author.isEmpty {
+                        infoRow(icon: "person.fill", text: author)
+                    }
+                    infoRow(icon: "globe", text: "来源: \(source.bookSourceName)") {
+                        Button("换源") { isShowingChangeSource = true }
+                            .buttonStyle(.pillAction)
+                    }
+                    if let wordCount = bookInfo?.wordCount, !wordCount.isEmpty {
+                        infoRow(icon: "textformat.123", text: "字数: \(wordCount)")
+                    }
+                    if isInShelf {
+                        infoRow(icon: "folder", text: "分组: \(shelfGroup?.isEmpty == false ? shelfGroup! : "未分组")") {
+                            Button("改分组") { isShowingGroupPicker = true }
+                                .buttonStyle(.pillAction)
+                        }
+                    }
+                    if isInShelf, let lastRead = bookInfo == nil ? fallbackLastChapter : shelfLastReadTitle {
+                        infoRow(icon: "clock", text: "上次读到: \(lastRead)")
+                    }
+                    if !previewChapters.isEmpty {
+                        infoRow(icon: "list.bullet", text: "共 \(previewChapters.count) 章") {
+                            NavigationLink {
+                                TocView(source: source, tocURL: bookInfo?.tocUrl ?? "", bookUrl: bookUrl, bookTitle: name)
+                            } label: {
+                                Text("查看")
+                            }
+                            .buttonStyle(.pillAction)
+                        }
+                    }
+                }
+
+                if downloadedCount > 0 {
+                    downloadStatusRow
+                }
+
+                if let intro, !intro.isEmpty {
+                    Divider()
+                    Text(intro).font(.body)
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            UnevenRoundedRectangle(topLeadingRadius: 24, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 24)
+                .fill(.background)
+        )
+    }
+
+    private func infoRow(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.caption).foregroundStyle(.secondary).frame(width: 16)
+            Text(text).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
+    private func infoRow<Trailing: View>(icon: String, text: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.caption).foregroundStyle(.secondary).frame(width: 16)
+            Text(text).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            trailing()
+        }
+    }
+
+    @ViewBuilder
+    private var downloadStatusRow: some View {
+        if isDownloading {
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: Double(downloadProgress), total: Double(max(previewChapters.count, 1)))
+                HStack {
+                    Text("缓存中 \(downloadProgress)/\(previewChapters.count)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("取消") { downloadTask?.cancel() }.font(.caption)
+                }
+            }
+        } else {
+            HStack {
+                Label("已缓存 \(downloadedCount)/\(previewChapters.count) 章", systemImage: "arrow.down.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                Spacer()
+                if downloadedCount < previewChapters.count {
+                    Button("继续缓存") { startDownload() }.font(.caption)
+                } else if isExporting {
+                    ProgressView().font(.caption)
+                }
             }
         }
     }
+
+    // MARK: - Bottom action bar
+
+    private var bottomActionBar: some View {
+        HStack(spacing: 0) {
+            Button {
+                Task { await toggleShelf() }
+            } label: {
+                Text(isInShelf ? "移出书架" : "加入书架")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(bookInfo == nil)
+
+            if let bookInfo {
+                NavigationLink {
+                    TocView(
+                        source: source, tocURL: bookInfo.tocUrl, bookUrl: bookUrl, bookTitle: name,
+                        resumeChapterIndex: 0
+                    )
+                } label: {
+                    Text("阅读").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .background(.bar)
+    }
+
+    // MARK: - Data
+
+    /// Populated by `load()` (and refreshed by `switchSource`) from the live shelf entry.
+    @State private var shelfLastReadTitle: String?
 
     private func load() async {
         isLoading = true
@@ -271,12 +381,22 @@ struct BookDetailView: View {
         do {
             let info = try await BookInfoService.fetchBookInfo(source: source, bookURL: bookUrl, httpClient: env.httpClient)
             bookInfo = info
-            let existingShelfBook = try? await env.shelfStore.book(bookUrl: bookUrl)
+            let allShelfBooks = (try? await env.shelfStore.all()) ?? []
+            let existingShelfBook = allShelfBooks.first { $0.bookUrl == bookUrl }
             isInShelf = existingShelfBook != nil
             shelfCoverUrl = existingShelfBook?.coverUrl
+            shelfGroup = existingShelfBook?.group
+            shelfLastReadTitle = existingShelfBook?.lastReadChapterTitle
+            existingGroupNames = Array(Set(allShelfBooks.compactMap {
+                let trimmed = $0.group?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return (trimmed?.isEmpty ?? true) ? nil : trimmed
+            })).sorted()
             previewChapters = (try? await TocService.fetchChapterList(
                 source: source, tocURL: info.tocUrl, httpClient: env.httpClient
             )) ?? []
+            if isInShelf {
+                try? await env.shelfStore.updateTotalChapterCount(bookUrl: bookUrl, count: previewChapters.count)
+            }
             await refreshDownloadedCount()
         } catch {
             errorMessage = "\(error)"
@@ -332,9 +452,9 @@ struct BookDetailView: View {
         downloadedCount = 0
     }
 
-    /// Only offered once every previewed chapter is cached (`downloadedCount == previewChapters
-    /// .count`, see `downloadSection`) -- there's no server-side export endpoint, so re-assembling
-    /// the book requires every chapter to already be sitting in `ChapterCacheStore`.
+    /// Only offered once every previewed chapter is cached (see the "..." menu's condition) --
+    /// there's no server-side export endpoint, so re-assembling the book requires every chapter to
+    /// already be sitting in `ChapterCacheStore`.
     private func exportTxt() async {
         isExporting = true
         defer { isExporting = false }
@@ -357,15 +477,86 @@ struct BookDetailView: View {
         shelfCoverUrl = newCoverUrl
     }
 
+    private func setGroup(_ newGroup: String?) async {
+        try? await env.shelfStore.setGroups([bookUrl: newGroup])
+        shelfGroup = newGroup
+    }
+
+    /// Toggles shelf membership both ways -- Legado's own detail page button is a real toggle
+    /// (加入书架/移出书架), not the add-only button this screen had before.
     private func toggleShelf() async {
+        if isInShelf {
+            try? await env.shelfStore.remove(bookUrl: bookUrl)
+            isInShelf = false
+            return
+        }
         guard let bookInfo else { return }
         let book = ShelfBook(
             bookSourceUrl: source.bookSourceUrl, bookUrl: bookUrl,
             name: bookInfo.name ?? fallbackName, author: bookInfo.author ?? fallbackAuthor,
             coverUrl: bookInfo.coverUrl ?? fallbackCoverUrl, intro: bookInfo.intro ?? fallbackIntro,
-            tocUrl: bookInfo.tocUrl, lastChapterTitle: bookInfo.lastChapter ?? fallbackLastChapter
+            tocUrl: bookInfo.tocUrl, lastChapterTitle: bookInfo.lastChapter ?? fallbackLastChapter,
+            totalChapterCount: previewChapters.isEmpty ? nil : previewChapters.count
         )
         try? await env.shelfStore.addOrUpdate(book)
         isInShelf = true
     }
+
+    /// In-place source switch (mirrors `ReaderView.switchSource`): re-fetches book info from the
+    /// new source, updates local `@State` so the whole screen re-renders against it, and -- if this
+    /// book is on the shelf -- replaces the shelf entry (chapter index/progress don't carry over
+    /// meaningfully across sources with different chapter counts, so they reset).
+    private func switchSource(to newSource: BookSource, match: SearchResult) async {
+        let oldBookUrl = bookUrl
+        let newInfo = try? await BookInfoService.fetchBookInfo(source: newSource, bookURL: match.bookUrl, httpClient: env.httpClient)
+        source = newSource
+        bookUrl = match.bookUrl
+        bookInfo = newInfo
+        previewChapters = (try? await TocService.fetchChapterList(
+            source: newSource, tocURL: newInfo?.tocUrl ?? match.bookUrl, httpClient: env.httpClient
+        )) ?? []
+        await refreshDownloadedCount()
+
+        if let existing = try? await env.shelfStore.book(bookUrl: oldBookUrl) {
+            let updated = ShelfBook(
+                bookSourceUrl: newSource.bookSourceUrl,
+                bookUrl: match.bookUrl,
+                name: newInfo?.name ?? match.name,
+                author: newInfo?.author ?? match.author,
+                coverUrl: newInfo?.coverUrl ?? match.coverUrl,
+                intro: newInfo?.intro ?? match.intro,
+                tocUrl: newInfo?.tocUrl ?? match.bookUrl,
+                lastChapterTitle: newInfo?.lastChapter ?? match.lastChapter,
+                addedAt: existing.addedAt,
+                group: existing.group,
+                lastReadChapterIndex: nil,
+                lastReadChapterTitle: nil,
+                lastReadCharacterOffset: 0,
+                lastReadAt: existing.lastReadAt,
+                totalChapterCount: previewChapters.isEmpty ? nil : previewChapters.count
+            )
+            try? await env.shelfStore.remove(bookUrl: oldBookUrl)
+            try? await env.shelfStore.addOrUpdate(updated)
+            shelfCoverUrl = updated.coverUrl
+            shelfGroup = updated.group
+            shelfLastReadTitle = nil
+        }
+    }
+}
+
+/// Small rounded-pill button style for the info-row trailing actions (换源/改分组/查看) -- matches
+/// Legado's small accent-colored pill buttons inline with each info row.
+private struct PillActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Color.accentColor.opacity(configuration.isPressed ? 0.3 : 0.15), in: Capsule())
+            .foregroundStyle(Color.accentColor)
+    }
+}
+
+extension ButtonStyle where Self == PillActionButtonStyle {
+    fileprivate static var pillAction: PillActionButtonStyle { PillActionButtonStyle() }
 }

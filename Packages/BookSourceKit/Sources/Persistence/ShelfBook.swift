@@ -25,13 +25,22 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
     public var lastReadCharacterOffset: Int
     public var lastReadAt: Date?
 
+    /// How many chapters this book's TOC had, as of the last time it was actually fetched (resuming
+    /// into the reader, changing source, etc.) -- not kept perfectly live (a source could add
+    /// chapters between visits), just refreshed opportunistically whenever the real chapter list is
+    /// already being fetched anyway. Powers the shelf's unread-count badge: `totalChapterCount -
+    /// (lastReadChapterIndex + 1)`, matching Legado's own badge. `nil` for books never opened since
+    /// this field was added, or before the TOC has ever been fetched once.
+    public var totalChapterCount: Int?
+
     public var id: String { bookUrl }
 
     public init(
         bookSourceUrl: String, bookUrl: String, name: String, author: String? = nil,
         coverUrl: String? = nil, intro: String? = nil, tocUrl: String, lastChapterTitle: String? = nil,
         addedAt: Date = Date(), group: String? = nil, lastReadChapterIndex: Int? = nil,
-        lastReadChapterTitle: String? = nil, lastReadCharacterOffset: Int = 0, lastReadAt: Date? = nil
+        lastReadChapterTitle: String? = nil, lastReadCharacterOffset: Int = 0, lastReadAt: Date? = nil,
+        totalChapterCount: Int? = nil
     ) {
         self.bookSourceUrl = bookSourceUrl
         self.bookUrl = bookUrl
@@ -47,5 +56,6 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         self.lastReadChapterTitle = lastReadChapterTitle
         self.lastReadCharacterOffset = lastReadCharacterOffset
         self.lastReadAt = lastReadAt
+        self.totalChapterCount = totalChapterCount
     }
 }

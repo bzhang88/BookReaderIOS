@@ -73,6 +73,21 @@ final class ShelfStoreTests: XCTestCase {
         XCTAssertNil(all.first?.group)
     }
 
+    func testUpdateTotalChapterCountPersists() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.addOrUpdate(sampleBook())
+        try await store.updateTotalChapterCount(bookUrl: "https://example.com/book/1", count: 120)
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.totalChapterCount, 120)
+    }
+
+    func testUpdateTotalChapterCountForUnknownBookIsANoOp() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.updateTotalChapterCount(bookUrl: "https://nope.com", count: 5)
+        let all = try await store.all()
+        XCTAssertTrue(all.isEmpty)
+    }
+
     func testSetCoverUrlOverridesJustThatField() async throws {
         let store = ShelfStore(fileURL: tempFileURL())
         var book = sampleBook()
