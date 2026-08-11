@@ -93,6 +93,11 @@ struct SettingsView: View {
                     } label: {
                         Label("存储管理", systemImage: "externaldrive")
                     }
+                    NavigationLink {
+                        CoverGalleryManagementView()
+                    } label: {
+                        Label("封面相册", systemImage: "photo.on.rectangle")
+                    }
                 }
 
                 Section {

@@ -15,6 +15,7 @@ struct CoverPickerView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var coverUrls: [String] = []
+    @State private var galleryCovers: [SavedCover] = []
     @State private var isSearching = false
     @State private var manualUrlText = ""
 
@@ -36,6 +37,12 @@ struct CoverPickerView: View {
                     }
                     .padding(.horizontal)
 
+                    if !galleryCovers.isEmpty {
+                        Text("我的相册").font(.headline).padding(.horizontal)
+                        coverGrid(galleryCovers.map(\.url))
+                    }
+
+                    Text("从其他书源查找").font(.headline).padding(.horizontal)
                     if isSearching && coverUrls.isEmpty {
                         ProgressView("正在其他书源里查找封面…").frame(maxWidth: .infinity)
                     } else if coverUrls.isEmpty {
@@ -44,25 +51,7 @@ struct CoverPickerView: View {
                             description: Text("可以在上面直接输入图片网址")
                         )
                     } else {
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(coverUrls, id: \.self) { url in
-                                Button {
-                                    select(url)
-                                } label: {
-                                    AsyncImage(url: URL(string: url)) { phase in
-                                        if let image = phase.image {
-                                            image.resizable().aspectRatio(contentMode: .fill)
-                                        } else {
-                                            Rectangle().fill(.quaternary)
-                                        }
-                                    }
-                                    .frame(width: 90, height: 126)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal)
+                        coverGrid(coverUrls)
                     }
                 }
                 .padding(.vertical)
@@ -74,18 +63,53 @@ struct CoverPickerView: View {
                     Button("取消") { dismiss() }
                 }
             }
-            .task { await search() }
+            .task {
+                async let searchTask: Void = search()
+                async let galleryTask: Void = loadGallery()
+                _ = await (searchTask, galleryTask)
+            }
         }
         .presentationDetents([.medium, .large])
     }
 
+    @ViewBuilder
+    private func coverGrid(_ urls: [String]) -> some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(urls, id: \.self) { url in
+                Button {
+                    select(url)
+                } label: {
+                    AsyncImage(url: URL(string: url)) { phase in
+                        if let image = phase.image {
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            Rectangle().fill(.quaternary)
+                        }
+                    }
+                    .frame(width: 90, height: 126)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    /// Saves every applied cover into the gallery -- there's no separate explicit "save to gallery"
+    /// step; using a cover here is itself what makes it show up there next time (see
+    /// `CoverGalleryStore`'s doc comment).
     private func select(_ url: String) {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         Task {
+            try? await env.coverGalleryStore.add(SavedCover(url: trimmed, bookName: bookName))
             await onSelect(trimmed)
             dismiss()
         }
+    }
+
+    private func loadGallery() async {
+        galleryCovers = (try? await env.coverGalleryStore.all()) ?? []
     }
 
     private func search() async {
