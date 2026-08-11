@@ -91,9 +91,11 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
         let interval = CMTime(seconds: 1, preferredTimescale: 1)
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
-            self.currentTime = time.seconds
-            if let itemDuration = player.currentItem?.duration.seconds, itemDuration.isFinite {
-                self.duration = itemDuration
+            Task { @MainActor in
+                self.currentTime = time.seconds
+                if let itemDuration = self.player?.currentItem?.duration.seconds, itemDuration.isFinite {
+                    self.duration = itemDuration
+                }
             }
         }
     }

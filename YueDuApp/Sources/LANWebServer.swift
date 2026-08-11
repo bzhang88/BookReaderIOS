@@ -54,7 +54,9 @@ final class LANWebServer: ObservableObject {
         do {
             let newListener = try NWListener(using: .tcp, on: endpointPort)
             newListener.newConnectionHandler = { [weak self] connection in
-                self?.accept(connection)
+                Task { @MainActor in
+                    self?.accept(connection)
+                }
             }
             newListener.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor in
