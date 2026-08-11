@@ -104,11 +104,13 @@ struct HttpTTSEngineEditView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("引擎") {
+                Section {
                     TextField("名称", text: $name)
                     TextField("朗读地址（{{text}} 代表要朗读的文字）", text: $urlTemplate)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                } header: {
+                    Text("引擎")
                 } footer: {
                     Text("请求这个地址应该直接返回音频数据")
                 }
