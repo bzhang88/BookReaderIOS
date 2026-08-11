@@ -27,11 +27,17 @@ public struct HTTPResponse {
     public var finalURL: String
     public var statusCode: Int
     public var body: String
+    /// Response headers, keyed by field name as returned by `HTTPURLResponse` -- not consumed by
+    /// any rule-engine code (book source rules only ever look at `body`), but useful for the
+    /// developer toolbox's HTTP debugger. Defaults to empty so every existing call site (stub
+    /// clients in tests, `WebDAVClient` fixtures) keeps compiling unchanged.
+    public var headers: [String: String]
 
-    public init(finalURL: String, statusCode: Int, body: String) {
+    public init(finalURL: String, statusCode: Int, body: String, headers: [String: String] = [:]) {
         self.finalURL = finalURL
         self.statusCode = statusCode
         self.body = body
+        self.headers = headers
     }
 }
 

@@ -107,6 +107,11 @@ struct SettingsView: View {
                     } label: {
                         Label("封面相册", systemImage: "photo.on.rectangle")
                     }
+                    NavigationLink {
+                        DeveloperToolsView()
+                    } label: {
+                        Label("开发者工具箱", systemImage: "hammer")
+                    }
                 }
 
                 Section {

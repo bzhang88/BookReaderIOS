@@ -34,10 +34,18 @@ public struct URLSessionHTTPClient: HTTPClient {
         let charset = CharsetDetector.detect(contentTypeHeader: contentTypeHeader, rawBytes: data)
         let body = CharsetDetector.decode(data, charset: charset)
 
+        var headers: [String: String] = [:]
+        if let allHeaderFields = httpResponse?.allHeaderFields {
+            for (key, value) in allHeaderFields {
+                headers["\(key)"] = "\(value)"
+            }
+        }
+
         return HTTPResponse(
             finalURL: finalURL,
             statusCode: httpResponse?.statusCode ?? 0,
-            body: body
+            body: body,
+            headers: headers
         )
     }
 }
