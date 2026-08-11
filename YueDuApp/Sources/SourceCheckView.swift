@@ -2,17 +2,19 @@ import SwiftUI
 import BookSourceModel
 import WebBookOrchestrator
 
-/// Batch-tests every given source's search against a fixed keyword, showing live pass/fail as
-/// results stream in -- reuses `MultiSourceSearchService` exactly as `GlobalSearchView` does, just
-/// pointed at a diagnostic keyword instead of the user's actual search. This is the fast way to
-/// find out which of a large imported source collection is currently alive, which matters a lot in
-/// practice: real-world testing this session found most sources in an old public collection dead.
+/// Batch-tests every given source against a fixed keyword, showing live pass/fail as results
+/// stream in. How far each source is tested is configurable (search only, all the way through to
+/// actually fetching a chapter's text) -- real-world testing this session found sources that pass
+/// search but fail at detail/toc/content, so a search-only check alone can miss real problems; but
+/// always testing all four stages makes a big batch run noticeably slower, so the depth is a
+/// user choice rather than fixed.
 struct SourceCheckView: View {
     let sources: [BookSource]
 
     @EnvironmentObject private var env: AppEnvironment
     @State private var keyword = "我"
-    @State private var outcomes: [MultiSourceSearchService.SourceOutcome] = []
+    @State private var depth: SourceValidationStage = .search
+    @State private var outcomes: [SourceValidationOutcome] = []
     @State private var isChecking = false
     @State private var completedCount = 0
     @State private var checkTask: Task<Void, Never>?
@@ -30,6 +32,12 @@ struct SourceCheckView: View {
                             .disabled(keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sources.isEmpty)
                     }
                 }
+                Picker("检测深度", selection: $depth) {
+                    ForEach(SourceValidationStage.allCases, id: \.self) { stage in
+                        Text("测到\(stage.displayName)").tag(stage)
+                    }
+                }
+                .disabled(isChecking)
                 if isChecking {
                     ProgressView(value: Double(completedCount), total: Double(max(sources.count, 1)))
                     Text("\(completedCount)/\(sources.count) 已完成")
@@ -39,23 +47,19 @@ struct SourceCheckView: View {
             }
 
             if !outcomes.isEmpty {
-                Section("结果（\(passCount) 成功 / \(outcomes.count) 已测）") {
+                Section("结果（\(passCount) 完全通过 / \(outcomes.count) 已测）") {
                     ForEach(outcomes, id: \.source.bookSourceUrl) { outcome in
-                        HStack(alignment: .top) {
-                            Image(systemName: outcome.errorDescription == nil ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(outcome.errorDescription == nil ? .green : .red)
-                            VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Image(systemName: outcome.isFullyPassing ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(outcome.isFullyPassing ? .green : .red)
                                 Text(outcome.source.bookSourceName)
-                                if let error = outcome.errorDescription {
-                                    Text(error)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                } else {
-                                    Text("\(outcome.results.count) 个结果")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                            }
+                            ForEach(outcome.stageResults, id: \.stage) { stageResult in
+                                Text("\(stageResult.stage.displayName): \(stageResult.detail)")
+                                    .font(.caption2)
+                                    .foregroundStyle(stageResult.success ? .secondary : .red)
+                                    .lineLimit(2)
                             }
                         }
                     }
@@ -66,7 +70,7 @@ struct SourceCheckView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var passCount: Int { outcomes.filter { $0.errorDescription == nil }.count }
+    private var passCount: Int { outcomes.filter(\.isFullyPassing).count }
 
     private func startChecking() {
         let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -78,7 +82,7 @@ struct SourceCheckView: View {
         isChecking = true
 
         checkTask = Task {
-            let stream = MultiSourceSearchService.search(sources: sources, keyword: trimmed, httpClient: env.httpClient)
+            let stream = SourceValidationService.validate(sources: sources, keyword: trimmed, depth: depth, httpClient: env.httpClient)
             for await outcome in stream {
                 if Task.isCancelled { break }
                 outcomes.append(outcome)
