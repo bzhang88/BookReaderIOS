@@ -25,8 +25,11 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
+    @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
 
+    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    @State private var httpTTSEngines: [HttpTTSEngine] = []
 
     var body: some View {
         NavigationStack {
@@ -54,6 +57,15 @@ struct ReaderSettingsSheet: View {
                     VStack(alignment: .leading) {
                         Text("语速: \(Int(readAloudRate * 100))%")
                         Slider(value: $readAloudRate, in: 0.1...1.0)
+                    }
+                    Picker("朗读引擎", selection: $selectedHttpTTSEngineID) {
+                        Text("系统朗读").tag("")
+                        ForEach(httpTTSEngines) { engine in
+                            Text(engine.name).tag(engine.id)
+                        }
+                    }
+                    NavigationLink("自定义朗读引擎管理") {
+                        HttpTTSEngineListView()
                     }
                 }
 
@@ -118,6 +130,7 @@ struct ReaderSettingsSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .task { httpTTSEngines = (try? await env.httpTTSEngineStore.all()) ?? [] }
         }
         .presentationDetents([.medium, .large])
     }

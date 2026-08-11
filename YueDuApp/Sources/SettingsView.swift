@@ -38,6 +38,11 @@ struct SettingsView: View {
                         Label("搜索引擎", systemImage: "globe")
                     }
                     NavigationLink {
+                        HttpTTSEngineListView()
+                    } label: {
+                        Label("自定义朗读引擎", systemImage: "waveform")
+                    }
+                    NavigationLink {
                         HighlightRuleListView()
                     } label: {
                         Label("高亮规则", systemImage: "highlighter")

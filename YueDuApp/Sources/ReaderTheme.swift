@@ -127,6 +127,11 @@ enum ReaderSettingsKey {
     /// is deliberately generous (50pt) rather than a tight value, to avoid silently changing already
     /// -shipped tap behavior for existing users -- this is a new tunable, not a bug fix.
     static let touchSlop = "reader.touchSlop"
+    /// Empty string (the default) means "use the system `AVSpeechSynthesizer` voice" -- a non-empty
+    /// value naming a configured `HttpTTSEngine`'s id switches the 朗读 button over to
+    /// `HttpReadAloudController` instead. Kept as a single id rather than a bool + separate id pair
+    /// since "which engine" and "whether to use a custom one at all" are the same choice here.
+    static let selectedHttpTTSEngineID = "reader.selectedHttpTTSEngineID"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before

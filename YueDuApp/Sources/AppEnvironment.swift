@@ -24,6 +24,8 @@ final class AppEnvironment: ObservableObject {
     let shelfGroupStore: ShelfGroupStore
     let dictRuleStore: DictRuleStore
     let webSearchEngineStore: WebSearchEngineStore
+    let httpTTSEngineStore: HttpTTSEngineStore
+    let httpTTSCache: HttpTTSCache
     let httpClient: any HTTPClient
     #if canImport(Network)
     let lanWebServer: LANWebServer
@@ -49,6 +51,8 @@ final class AppEnvironment: ObservableObject {
         shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
         dictRuleStore = DictRuleStore(fileURL: appSupport.appendingPathComponent("dict_rules.json"))
         webSearchEngineStore = WebSearchEngineStore(fileURL: appSupport.appendingPathComponent("web_search_engines.json"))
+        httpTTSEngineStore = HttpTTSEngineStore(fileURL: appSupport.appendingPathComponent("http_tts_engines.json"))
+        httpTTSCache = HttpTTSCache(directory: appSupport.appendingPathComponent("http_tts_cache", isDirectory: true))
         httpClient = URLSessionHTTPClient()
         #if canImport(Network)
         lanWebServer = LANWebServer(

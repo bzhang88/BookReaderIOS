@@ -43,6 +43,8 @@ struct ReaderView: View {
     @State private var isAutoScrolling = false
     @State private var autoScrollTask: Task<Void, Never>?
     @StateObject private var readAloud = ReadAloudController()
+    @StateObject private var httpReadAloud = HttpReadAloudController()
+    @State private var httpTTSEngines: [HttpTTSEngine] = []
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
@@ -66,6 +68,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
+    @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
     // Re-evaluated every minute so a schedule-only filter actually turns on/off while the reader
     // stays open across the boundary, not just whenever the view happens to redraw for other reasons.
     @State private var scheduleTick = Date()
@@ -99,7 +102,7 @@ struct ReaderView: View {
                         .lineSpacing(lineSpacing)
                         .padding(.horizontal, 4)
                         .background(
-                            readAloud.isSpeaking && index == readAloud.currentParagraphIndex
+                            isReadAloudSpeaking && index == readAloudCurrentParagraphIndex
                                 ? Color.accentColor.opacity(0.15) : Color.clear
                         )
                         .id(index)
@@ -162,25 +165,25 @@ struct ReaderView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if readAloud.isSpeaking {
+                    if isReadAloudSpeaking {
                         HStack(spacing: 20) {
                             Button {
-                                readAloud.previousParagraph()
+                                readAloudPreviousParagraph()
                             } label: {
                                 Image(systemName: "backward.end")
                             }
                             Button {
-                                readAloud.togglePause()
+                                toggleReadAloudPause()
                             } label: {
-                                Image(systemName: readAloud.isPaused ? "play.fill" : "pause.fill")
+                                Image(systemName: isReadAloudPaused ? "play.fill" : "pause.fill")
                             }
                             Button {
-                                readAloud.nextParagraph()
+                                readAloudNextParagraph()
                             } label: {
                                 Image(systemName: "forward.end")
                             }
                             Button(role: .destructive) {
-                                readAloud.stop()
+                                stopReadAloud()
                             } label: {
                                 Image(systemName: "stop.fill")
                             }
@@ -247,14 +250,9 @@ struct ReaderView: View {
                         Spacer()
 
                         Button {
-                            if readAloud.isSpeaking {
-                                readAloud.stop()
-                            } else {
-                                readAloud.setRate(Float(readAloudRate))
-                                readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title)
-                            }
+                            startOrStopReadAloud()
                         } label: {
-                            Image(systemName: readAloud.isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
+                            Image(systemName: isReadAloudSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
                         }
 
                         Button {
@@ -315,6 +313,7 @@ struct ReaderView: View {
         // on the rare occasion the new chapter index happens to numerically match the old one --
         // `.task(id:)` only refires when its id value actually changes.
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
+        .task { httpTTSEngines = (try? await env.httpTTSEngineStore.all()) ?? [] }
         .sheet(isPresented: $isShowingSettings) {
             ReaderSettingsSheet(matchedRules: matchedReplaceRules)
         }
@@ -366,7 +365,7 @@ struct ReaderView: View {
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
-            readAloud.stop()
+            stopReadAloud()
             stopAutoScroll()
             volumeButtonController.stop()
         }
@@ -390,7 +389,7 @@ struct ReaderView: View {
             // chapter's last paragraph in a future increment) invalidates whatever was being read
             // from the old chapter's text -- stopping is simpler and safer than trying to carry
             // read-aloud state across a chapter reload for this first version.
-            readAloud.stop()
+            stopReadAloud()
             // Same reasoning as read-aloud: an auto-scroll loop mid-flight is walking paragraph
             // indices that belonged to the chapter that just got replaced, so it has to stop too
             // rather than silently continuing to scroll a chapter that no longer matches its state.
@@ -432,6 +431,53 @@ struct ReaderView: View {
     private func goTo(_ index: Int) {
         guard chapters.indices.contains(index) else { return }
         currentIndex = index
+    }
+
+    // MARK: - Read-aloud routing
+    //
+    // Two independent controllers exist (`readAloud` wraps AVSpeechSynthesizer, `httpReadAloud`
+    // fetches audio from a configured HttpTTSEngine) rather than one shared abstraction -- see
+    // `HttpReadAloudController`'s doc comment for why. `selectedHttpTTSEngineID` (empty = system
+    // voice) picks which one is "active"; these helpers are the single place that branches on it,
+    // so the rest of the view just calls e.g. `stopReadAloud()` without needing to know which
+    // underlying controller is actually running.
+
+    private var isUsingHttpTTS: Bool { !selectedHttpTTSEngineID.isEmpty }
+    private var isReadAloudSpeaking: Bool { isUsingHttpTTS ? httpReadAloud.isSpeaking : readAloud.isSpeaking }
+    private var isReadAloudPaused: Bool { isUsingHttpTTS ? httpReadAloud.isPaused : readAloud.isPaused }
+    private var readAloudCurrentParagraphIndex: Int {
+        isUsingHttpTTS ? httpReadAloud.currentParagraphIndex : readAloud.currentParagraphIndex
+    }
+
+    private func startOrStopReadAloud() {
+        if isReadAloudSpeaking {
+            stopReadAloud()
+        } else if isUsingHttpTTS, let engine = httpTTSEngines.first(where: { $0.id == selectedHttpTTSEngineID }) {
+            httpReadAloud.start(
+                paragraphs: paragraphs, engine: engine, cache: env.httpTTSCache,
+                bookTitle: bookTitle, chapterTitle: chapter.title
+            )
+        } else {
+            readAloud.setRate(Float(readAloudRate))
+            readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title)
+        }
+    }
+
+    private func stopReadAloud() {
+        readAloud.stop()
+        httpReadAloud.stop()
+    }
+
+    private func toggleReadAloudPause() {
+        if isUsingHttpTTS { httpReadAloud.togglePause() } else { readAloud.togglePause() }
+    }
+
+    private func readAloudPreviousParagraph() {
+        if isUsingHttpTTS { httpReadAloud.previousParagraph() } else { readAloud.previousParagraph() }
+    }
+
+    private func readAloudNextParagraph() {
+        if isUsingHttpTTS { httpReadAloud.nextParagraph() } else { readAloud.nextParagraph() }
     }
 
     /// Resolves a raw tap location to one of the 3x3 zones and runs whatever action the user has
@@ -560,7 +606,7 @@ struct ReaderView: View {
     /// change already stops speech via `onChange(of: currentIndex)`; auto-advancing mid-sentence
     /// while the user is listening, rather than reading, would be jarring rather than helpful).
     private func attemptAutoAdvance() {
-        guard canAutoAdvance, !readAloud.isSpeaking, !isLoading else { return }
+        guard canAutoAdvance, !isReadAloudSpeaking, !isLoading else { return }
         guard currentIndex < chapters.count - 1 else { return }
         goTo(currentIndex + 1)
     }
