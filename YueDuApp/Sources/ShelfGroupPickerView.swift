@@ -1,11 +1,11 @@
 import SwiftUI
-import Persistence
 
-/// Lets the user manually assign (or clear) one shelf book's group -- coexists with the "自动分组"
-/// tag-rule sweep in `ShelfView` since both just write `ShelfBook.group`; picking a group here is
-/// simply a manual override of whatever the last automatic sweep (if any) set.
+/// Lets the user manually assign (or clear) a group for one or more shelf books -- coexists with
+/// the "自动分组" tag-rule sweep in `ShelfView` since both just write `ShelfBook.group`; picking a
+/// group here is simply a manual override of whatever the last automatic sweep (if any) set. Not
+/// tied to a specific book (there's nothing book-specific in this UI), so the same view serves
+/// both the single-row "设置分组" menu action and the multi-select "移动分组" batch action.
 struct ShelfGroupPickerView: View {
-    let book: ShelfBook
     let existingGroups: [String]
     let onSelect: (String?) async -> Void
 

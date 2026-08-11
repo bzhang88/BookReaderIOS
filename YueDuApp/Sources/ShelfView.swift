@@ -10,6 +10,12 @@ struct ShelfView: View {
     @State private var detailTarget: ShelfBook?
     @State private var groupPickerTarget: ShelfBook?
     @State private var isAutoGrouping = false
+    @State private var isSelecting = false
+    @State private var selectedBookUrls: Set<String> = []
+    @State private var isShowingBatchGroupPicker = false
+    @State private var isShowingBatchExportSheet = false
+    @State private var batchExportItems: [Any] = []
+    @State private var isBatchExporting = false
 
     /// Sections books by `group` -- a mix of names assigned by the "自动分组" tag-rule sweep and
     /// ones set manually via the row's "设置分组" menu; both write the same field (see `ShelfBook
@@ -49,45 +55,18 @@ struct ShelfView: View {
                             ForEach(section.books) { book in
                                 bookRow(book)
                             }
-                            .onDelete { offsets in delete(offsets.map { section.books[$0] }) }
+                            .onDelete(perform: isSelecting ? nil : { offsets in delete(offsets.map { section.books[$0] }) })
                         }
                     }
                 } else {
                     ForEach(books) { book in
                         bookRow(book)
                     }
-                    .onDelete { offsets in delete(offsets.map { books[$0] }) }
+                    .onDelete(perform: isSelecting ? nil : { offsets in delete(offsets.map { books[$0] }) })
                 }
             }
             .navigationTitle("书架")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    NavigationLink {
-                        GlobalSearchView()
-                    } label: {
-                        Label("搜索", systemImage: "magnifyingglass")
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        Task { await autoGroup() }
-                    } label: {
-                        if isAutoGrouping {
-                            ProgressView()
-                        } else {
-                            Label("自动分组", systemImage: "tag")
-                        }
-                    }
-                    .disabled(isAutoGrouping || books.isEmpty)
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    NavigationLink {
-                        LocalBookListView()
-                    } label: {
-                        Label("本地书籍", systemImage: "doc.text")
-                    }
-                }
-            }
+            .toolbar { toolbarContent }
             .task { await reload() }
             .refreshable { await reload() }
             .navigationDestination(isPresented: Binding(
@@ -108,64 +87,166 @@ struct ShelfView: View {
                 }
             }
             .sheet(item: $groupPickerTarget) { book in
-                ShelfGroupPickerView(book: book, existingGroups: existingGroupNames) { newGroup in
+                ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
                     await setGroup(of: book, to: newGroup)
+                }
+            }
+            .sheet(isPresented: $isShowingBatchGroupPicker) {
+                ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
+                    await batchSetGroup(to: newGroup)
+                }
+            }
+            .sheet(isPresented: $isShowingBatchExportSheet) {
+                ShareSheet(items: batchExportItems)
+            }
+        }
+    }
+
+    // Broken out of `body` into its own `@ToolbarContentBuilder` property (rather than inlined in
+    // `.toolbar { }`) for the same reason `SourceCheckView` needed splitting into sub-views this
+    // session: a real "compiler unable to type-check this expression in reasonable time" build
+    // break that Windows-local `swift test` can never catch, only actually compiling the App
+    // target (i.e. the macOS CI runners) can. Keeping each toolbar section as its own small
+    // expression avoids relearning that lesson here too.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button(isSelecting ? "完成" : "选择") {
+                isSelecting.toggle()
+                if !isSelecting { selectedBookUrls.removeAll() }
+            }
+            .disabled(books.isEmpty)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            NavigationLink {
+                GlobalSearchView()
+            } label: {
+                Label("搜索", systemImage: "magnifyingglass")
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                Task { await autoGroup() }
+            } label: {
+                if isAutoGrouping {
+                    ProgressView()
+                } else {
+                    Label("自动分组", systemImage: "tag")
+                }
+            }
+            .disabled(isAutoGrouping || books.isEmpty)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            NavigationLink {
+                LocalBookListView()
+            } label: {
+                Label("本地书籍", systemImage: "doc.text")
+            }
+        }
+        if isSelecting {
+            batchActionsToolbarContent
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var batchActionsToolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .bottomBar) {
+            Text("已选 \(selectedBookUrls.count) 本")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("移动分组") { isShowingBatchGroupPicker = true }
+                .disabled(selectedBookUrls.isEmpty)
+            Spacer()
+            if isBatchExporting {
+                ProgressView()
+            } else {
+                Button("导出") { batchExport() }
+                    .disabled(selectedBookUrls.isEmpty)
+            }
+            Spacer()
+            Button("删除", role: .destructive) { batchDelete() }
+                .disabled(selectedBookUrls.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private func bookRow(_ book: ShelfBook) -> some View {
+        if isSelecting {
+            Button {
+                toggleSelection(book)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: selectedBookUrls.contains(book.bookUrl) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selectedBookUrls.contains(book.bookUrl) ? Color.accentColor : Color.secondary)
+                    bookRowContent(book)
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink {
+                ShelfBookResumeView(book: book)
+            } label: {
+                bookRowContent(book)
+            }
+            .swipeActions(edge: .leading) {
+                Button {
+                    changeSourceTarget = book
+                } label: {
+                    Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .tint(.orange)
+            }
+            .contextMenu {
+                Button {
+                    detailTarget = book
+                } label: {
+                    Label("详情", systemImage: "info.circle")
+                }
+                Button {
+                    changeSourceTarget = book
+                } label: {
+                    Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                }
+                Button {
+                    groupPickerTarget = book
+                } label: {
+                    Label("设置分组", systemImage: "folder")
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func bookRow(_ book: ShelfBook) -> some View {
-        NavigationLink {
-            ShelfBookResumeView(book: book)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(book.name).font(.headline)
-                    if let group = book.group, !group.isEmpty {
-                        Text(group)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
-                            .foregroundStyle(Color.accentColor)
-                    }
+    private func bookRowContent(_ book: ShelfBook) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(book.name).font(.headline)
+                if let group = book.group, !group.isEmpty {
+                    Text(group)
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                        .foregroundStyle(Color.accentColor)
                 }
-                if let author = book.author, !author.isEmpty {
-                    Text(author).font(.subheadline).foregroundStyle(.secondary)
-                }
-                if let title = book.lastReadChapterTitle {
-                    Text("上次读到: \(title)").font(.caption).foregroundStyle(.secondary)
-                } else if let last = book.lastChapterTitle, !last.isEmpty {
-                    Text("最新: \(last)").font(.caption).foregroundStyle(.secondary)
-                }
+            }
+            if let author = book.author, !author.isEmpty {
+                Text(author).font(.subheadline).foregroundStyle(.secondary)
+            }
+            if let title = book.lastReadChapterTitle {
+                Text("上次读到: \(title)").font(.caption).foregroundStyle(.secondary)
+            } else if let last = book.lastChapterTitle, !last.isEmpty {
+                Text("最新: \(last)").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .swipeActions(edge: .leading) {
-            Button {
-                changeSourceTarget = book
-            } label: {
-                Label("换源", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .tint(.orange)
-        }
-        .contextMenu {
-            Button {
-                detailTarget = book
-            } label: {
-                Label("详情", systemImage: "info.circle")
-            }
-            Button {
-                changeSourceTarget = book
-            } label: {
-                Label("换源", systemImage: "arrow.triangle.2.circlepath")
-            }
-            Button {
-                groupPickerTarget = book
-            } label: {
-                Label("设置分组", systemImage: "folder")
-            }
+    }
+
+    private func toggleSelection(_ book: ShelfBook) {
+        if selectedBookUrls.contains(book.bookUrl) {
+            selectedBookUrls.remove(book.bookUrl)
+        } else {
+            selectedBookUrls.insert(book.bookUrl)
         }
     }
 
@@ -207,6 +288,76 @@ struct ShelfView: View {
             }
             await reload()
         }
+    }
+
+    /// Applies one group to every selected book in a single batch write -- shares `setGroups` with
+    /// both the auto-grouping sweep and the single-row picker, since all three are just "write this
+    /// group value for these book URLs" with a different source for which URLs to write.
+    private func batchSetGroup(to newGroup: String?) async {
+        var updates: [String: String?] = [:]
+        for bookUrl in selectedBookUrls {
+            updates[bookUrl] = newGroup
+        }
+        try? await env.shelfStore.setGroups(updates)
+        exitSelection()
+        await reload()
+    }
+
+    private func batchDelete() {
+        let toDelete = books.filter { selectedBookUrls.contains($0.bookUrl) }
+        Task {
+            for book in toDelete {
+                try? await env.shelfStore.remove(bookUrl: book.bookUrl)
+            }
+            exitSelection()
+            await reload()
+        }
+    }
+
+    /// Exports every selected book that has at least one cached chapter, skipping the rest (a book
+    /// with zero downloaded chapters has nothing to export) -- unlike `BookDetailView`'s single-book
+    /// export, this doesn't require the *whole* book to be cached first, since gating an entire
+    /// batch action on every selected book being 100% downloaded would make it rarely usable.
+    private func batchExport() {
+        let toExport = books.filter { selectedBookUrls.contains($0.bookUrl) }
+        isBatchExporting = true
+        Task {
+            var items: [Any] = []
+            for book in toExport {
+                if let url = await exportedFileURL(for: book) {
+                    items.append(url)
+                }
+            }
+            isBatchExporting = false
+            guard !items.isEmpty else { return }
+            batchExportItems = items
+            isShowingBatchExportSheet = true
+        }
+    }
+
+    private func exportedFileURL(for book: ShelfBook) async -> URL? {
+        let sources = (try? await env.bookSourceStore.all()) ?? []
+        guard let source = sources.first(where: { $0.bookSourceUrl == book.bookSourceUrl }) else { return nil }
+        guard let chapters = try? await TocService.fetchChapterList(source: source, tocURL: book.tocUrl, httpClient: env.httpClient),
+              !chapters.isEmpty else { return nil }
+
+        var chapterTexts: [(title: String, text: String)] = []
+        for chapter in chapters {
+            guard let content = try? await env.chapterCacheStore.chapter(bookUrl: book.bookUrl, index: chapter.index) else { continue }
+            chapterTexts.append((title: chapter.title, text: content.text))
+        }
+        guard !chapterTexts.isEmpty else { return nil }
+
+        let combined = TxtExporter.combine(bookTitle: book.name, chapters: chapterTexts)
+        let fileName = TxtExporter.sanitizedFileName(book.name)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).txt")
+        guard (try? combined.write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
+        return url
+    }
+
+    private func exitSelection() {
+        selectedBookUrls.removeAll()
+        isSelecting = false
     }
 
     /// Swaps a shelf entry to a different source for the same book. The chapter *index* carries
