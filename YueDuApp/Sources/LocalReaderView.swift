@@ -21,6 +21,9 @@ struct LocalReaderView: View {
     @State private var isShowingAISummary = false
     @State private var isShowingDictLookup = false
     @State private var isShowingWebSearch = false
+    @State private var isShowingToc = false
+    @State private var isBrightnessVisible = false
+    @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
@@ -132,6 +135,19 @@ struct LocalReaderView: View {
         .onReceive(scheduleTimer) { scheduleTick = $0 }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 10) {
+                // Toggled by the "亮度" icon below, matching `ReaderView`'s equivalent (and the
+                // reference reading app the user pointed at directly) -- not shown permanently.
+                if isBrightnessVisible {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sun.min")
+                        Slider(value: $screenBrightness, in: 0...1)
+                            .onChange(of: screenBrightness) { _, newValue in
+                                UIScreen.main.brightness = CGFloat(newValue)
+                            }
+                        Image(systemName: "sun.max")
+                    }
+                }
+
                 // Chapter-progress row -- prev/next chapter text flanking a real draggable seekbar
                 // in paginated mode, same shape as `ReaderView`'s (see its own doc comment for why
                 // `.scroll` mode stays text-only instead of a misleading approximate seekbar).
@@ -162,13 +178,22 @@ struct LocalReaderView: View {
                         .disabled(currentIndex >= book.chapters.count - 1)
                 }
 
+                // Matches `ReaderView`'s primary row shape exactly: 目录/亮度/深色/设置. 书签
+                // moved up to the top bar instead (see `.toolbar` below) since this reader has no
+                // TOC entry point at all yet and gaining one here is worth more than keeping
+                // bookmark in this row -- unlike `ReaderView`'s top bar, this one wasn't crowded
+                // enough to need an overflow menu for it.
                 HStack {
-                    bottomFunctionButton(icon: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark", label: "书签") {
-                        Task { await toggleBookmark() }
+                    bottomFunctionButton(icon: "list.bullet", label: "目录") {
+                        isShowingToc = true
                     }
                     Spacer()
-                    bottomFunctionButton(icon: "textformat.size", label: "界面") {
-                        isShowingStyleSheet = true
+                    bottomFunctionButton(icon: isBrightnessVisible ? "sun.max.fill" : "sun.max", label: "亮度") {
+                        isBrightnessVisible.toggle()
+                    }
+                    Spacer()
+                    bottomFunctionButton(icon: theme == .night ? "moon.fill" : "moon", label: "深色") {
+                        theme = theme == .night ? .day : .night
                     }
                     Spacer()
                     bottomFunctionButton(icon: "gearshape", label: "设置") {
@@ -184,34 +209,65 @@ struct LocalReaderView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    isShowingContentSearch = true
+                    Task { await toggleBookmark() }
                 } label: {
-                    Image(systemName: "magnifyingglass")
+                    Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingAISummary = true
+                Menu {
+                    Button {
+                        isShowingContentSearch = true
+                    } label: {
+                        Label("搜索本书内", systemImage: "magnifyingglass")
+                    }
+                    Button {
+                        isShowingAISummary = true
+                    } label: {
+                        Label("AI 摘要", systemImage: "sparkles")
+                    }
+                    Button {
+                        isShowingDictLookup = true
+                    } label: {
+                        Label("查词", systemImage: "character.book.closed")
+                    }
+                    Button {
+                        isShowingWebSearch = true
+                    } label: {
+                        Label("网页搜索", systemImage: "globe")
+                    }
                 } label: {
-                    Image(systemName: "sparkles")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingDictLookup = true
-                } label: {
-                    Image(systemName: "character.book.closed")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingWebSearch = true
-                } label: {
-                    Image(systemName: "globe")
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
         .task(id: currentIndex) { await load() }
+        .sheet(isPresented: $isShowingToc) {
+            NavigationStack {
+                List(book.chapters.indices, id: \.self) { index in
+                    Button {
+                        goTo(index)
+                        isShowingToc = false
+                    } label: {
+                        HStack {
+                            Text(book.chapters[index].title)
+                            Spacer()
+                            if index == currentIndex {
+                                Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .navigationTitle("目录")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("关闭") { isShowingToc = false }
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $isShowingStyleSheet) {
             LocalReaderStyleSheet()
         }
@@ -415,6 +471,14 @@ struct LocalReaderMoreSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    NavigationLink {
+                        LocalReaderStyleSheet()
+                    } label: {
+                        Label("界面（主题/字体/翻页动画）", systemImage: "textformat.size")
+                    }
+                }
+
                 Section("简繁转换") {
                     Picker("简繁转换", selection: $chineseConversion) {
                         ForEach(ChineseConversionMode.allCases) { mode in

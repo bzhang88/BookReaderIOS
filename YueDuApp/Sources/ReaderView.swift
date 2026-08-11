@@ -33,6 +33,11 @@ struct ReaderView: View {
     @State private var isShowingWebSearch = false
     @State private var isShowingReplaceRules = false
     @State private var isChromeVisible = true
+    // Brightness is a toggleable quick-access row (tap the "亮度" icon to reveal/hide it), not a
+    // permanently-visible slider -- matches the reference reading app the user pointed at directly
+    // (a slider taking up a full row at all times, whether or not anyone's about to touch it, was
+    // part of what made the previous chrome feel cluttered).
+    @State private var isBrightnessVisible = false
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
     // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
     // scroll bounds from the very first layout pass, before the user has read anything) -- reset
@@ -216,6 +221,27 @@ struct ReaderView: View {
                     .allowsHitTesting(false)
             }
         }
+        // Floating quick-access read-aloud button -- matches the reference reading app's own
+        // small circular "听" button, sitting just above the bottom bar rather than making 朗读
+        // compete for one of the 4 primary bottom-row icon slots. Only shown alongside the rest of
+        // the chrome (not in the fully-hidden minimal-footer state) and hidden while already
+        // speaking, since the read-aloud controls row already covers play/pause/stop then.
+        .overlay(alignment: .bottomTrailing) {
+            if isChromeVisible && !isReadAloudSpeaking {
+                Button {
+                    startOrStopReadAloud()
+                } label: {
+                    Image(systemName: "headphones")
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 52)
+                        .background(Color.accentColor, in: Circle())
+                        .shadow(radius: 3, y: 1)
+                }
+                .padding(.trailing, 16)
+                .padding(.bottom, 8)
+            }
+        }
         .onReceive(scheduleTimer) { scheduleTick = $0 }
         // A slim, always-on footer (chapter title + progress) even while the rest of the chrome is
         // hidden -- confirmed against Legado_Max's real `ReadView`/`PageView` that its reading
@@ -227,13 +253,19 @@ struct ReaderView: View {
         .safeAreaInset(edge: .bottom) {
             if isChromeVisible {
                 VStack(spacing: 10) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "sun.min")
-                        Slider(value: $screenBrightness, in: 0...1)
-                            .onChange(of: screenBrightness) { _, newValue in
-                                UIScreen.main.brightness = CGFloat(newValue)
-                            }
-                        Image(systemName: "sun.max")
+                    // Toggled by the "亮度" icon below, not shown permanently -- matches the
+                    // reference reading app the user pointed at directly (a screenshot of its menu
+                    // has no always-on brightness row; brightness is one of the 4 primary icons and
+                    // only reveals a slider on demand).
+                    if isBrightnessVisible {
+                        HStack(spacing: 12) {
+                            Image(systemName: "sun.min")
+                            Slider(value: $screenBrightness, in: 0...1)
+                                .onChange(of: screenBrightness) { _, newValue in
+                                    UIScreen.main.brightness = CGFloat(newValue)
+                                }
+                            Image(systemName: "sun.max")
+                        }
                     }
 
                     if isReadAloudSpeaking {
@@ -262,49 +294,14 @@ struct ReaderView: View {
                         .font(.title3)
                     }
 
-                    // 4 round buttons -- matches Legado's real `ll_floating_button` row (confirmed
-                    // via research): 搜索本书内/自动翻页/替换净化/夜间模式, in that order.
-                    HStack {
-                        Spacer()
-                        Button {
-                            isShowingContentSearch = true
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                        }
-                        Spacer()
-                        Button {
-                            if pageTurnStyle.isPaginated {
-                                toggleAutoPage()
-                            } else {
-                                toggleAutoScroll(proxy: scrollProxy)
-                            }
-                        } label: {
-                            Image(systemName: (pageTurnStyle.isPaginated ? isAutoPaging : isAutoScrolling) ? "pause.circle" : "play.circle")
-                        }
-                        Spacer()
-                        Button {
-                            isShowingReplaceRules = true
-                        } label: {
-                            Image(systemName: "wand.and.stars")
-                        }
-                        Spacer()
-                        Button {
-                            theme = theme == .night ? .day : .night
-                        } label: {
-                            Image(systemName: theme == .night ? "sun.max" : "moon.stars")
-                        }
-                        Spacer()
-                    }
-                    .font(.title2)
-
                     // Chapter-progress row -- prev/next chapter text flanking a real draggable
-                    // seekbar in paginated mode (matches Legado's `tv_pre`/`seek_read_page`/
-                    // `tv_next`, confirmed jumping immediately on release with no confirmation, its
-                    // "page" progress-bar mode). `.scroll` mode has no equivalent accurate position
-                    // to seek (there's nowhere this reader tracks *real* scroll offset, only the
-                    // step-wise `volumeScrollIndex` approximation used elsewhere) -- showing a
-                    // seekbar there would risk being actively misleading rather than just plain, so
-                    // it stays as text-only progress for that mode.
+                    // seekbar in paginated mode, matching the reference app's own prominent
+                    // progress bar in this exact position (jumps immediately on release, no
+                    // confirmation). `.scroll` mode has no equivalent accurate position to seek
+                    // (there's nowhere this reader tracks *real* scroll offset, only the step-wise
+                    // `volumeScrollIndex` approximation used elsewhere) -- showing a seekbar there
+                    // would risk being actively misleading rather than just plain, so it stays as
+                    // text-only progress for that mode.
                     HStack(spacing: 12) {
                         Button("上一章") { goTo(currentIndex - 1) }
                             .font(.caption)
@@ -332,22 +329,26 @@ struct ReaderView: View {
                             .disabled(currentIndex >= chapters.count - 1)
                     }
 
-                    // Bottom-most primary-function row -- matches Legado's real 4-icon labeled row
-                    // exactly: 目录/朗读/界面/设置 (confirmed via research, `ll_catalog`/
-                    // `ll_read_aloud`/`ll_font`/`ll_setting`).
+                    // Bottom-most primary-function row -- matches the reference reading app's own
+                    // 4-icon row exactly (目录/亮度/深色/设置), not Legado_Max's stock 目录/朗读/
+                    // 界面/设置: the user pointed at a real screenshot of the app they like using,
+                    // which weighs more than what the Legado source code documents. 朗读 gets its
+                    // own floating quick button instead (see `body`'s `.overlay`, matching that same
+                    // reference screenshot's floating "听" button); 界面 now opens from inside
+                    // "设置" (its first row) instead of claiming a 5th icon slot; 搜索本书内 and
+                    // 自动翻页/自动滚动 moved into the top bar's "…" overflow to keep this row to
+                    // exactly the 4 the reference shows.
                     HStack {
                         bottomFunctionButton(icon: "list.bullet", label: "目录") {
                             isShowingToc = true
                         }
                         Spacer()
-                        bottomFunctionButton(
-                            icon: isReadAloudSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2", label: "朗读"
-                        ) {
-                            startOrStopReadAloud()
+                        bottomFunctionButton(icon: isBrightnessVisible ? "sun.max.fill" : "sun.max", label: "亮度") {
+                            isBrightnessVisible.toggle()
                         }
                         Spacer()
-                        bottomFunctionButton(icon: "textformat.size", label: "界面") {
-                            isShowingStyleSheet = true
+                        bottomFunctionButton(icon: theme == .night ? "moon.fill" : "moon", label: "深色") {
+                            theme = theme == .night ? .day : .night
                         }
                         Spacer()
                         bottomFunctionButton(icon: "gearshape", label: "设置") {
@@ -415,6 +416,29 @@ struct ReaderView: View {
                         isShowingContentEdit = true
                     } label: {
                         Label("编辑正文", systemImage: "pencil")
+                    }
+                    Button {
+                        isShowingContentSearch = true
+                    } label: {
+                        Label("搜索本书内", systemImage: "magnifyingglass")
+                    }
+                    Button {
+                        isShowingReplaceRules = true
+                    } label: {
+                        Label("替换净化", systemImage: "wand.and.stars")
+                    }
+                    Button {
+                        if pageTurnStyle.isPaginated {
+                            toggleAutoPage()
+                        } else {
+                            toggleAutoScroll(proxy: scrollProxy)
+                        }
+                    } label: {
+                        let isRunning = pageTurnStyle.isPaginated ? isAutoPaging : isAutoScrolling
+                        Label(
+                            isRunning ? "停止自动翻页" : "自动翻页",
+                            systemImage: isRunning ? "pause.circle" : "play.circle"
+                        )
                     }
                     Button {
                         isShowingAISummary = true

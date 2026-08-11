@@ -94,6 +94,18 @@ struct ReaderMoreSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                // "界面" no longer has its own bottom-row icon in the reader chrome (see
+                // `ReaderView`'s redesign against the reference reading app the user pointed at
+                // directly, whose menu screenshot only shows 4 primary icons: 目录/亮度/深色/设置)
+                // -- reachable from here instead, as the first row, rather than dropped entirely.
+                Section {
+                    NavigationLink {
+                        ReaderStyleSheet()
+                    } label: {
+                        Label("界面（主题/字体/翻页动画）", systemImage: "textformat.size")
+                    }
+                }
+
                 Section("朗读") {
                     VStack(alignment: .leading) {
                         Text("语速: \(Int(readAloudRate * 100))%")
