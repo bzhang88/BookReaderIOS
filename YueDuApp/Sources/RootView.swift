@@ -70,19 +70,24 @@ struct RootView: View {
         }
     }
 
+    // Tab order/labels match Legado_Max's real stock-Legado-derived bottom nav (书架/发现/订阅/我的)
+    // rather than this app's earlier ad-hoc arrangement -- confirmed against the actual Fragment/
+    // menu XML in that local reference repo, not guessed from memory. "书源库" isn't a tab anymore;
+    // it's reachable from "我的" (see SettingsView), matching how Legado's own book-source manager
+    // is a settings entry, not a bottom-nav destination.
     private var mainTabView: some View {
         TabView(selection: $selectedTab) {
             ShelfView()
                 .tabItem { Label("书架", systemImage: "books.vertical") }
                 .tag(0)
-            SourceLibraryView()
-                .tabItem { Label("书源库", systemImage: "tray.full") }
+            ExploreView()
+                .tabItem { Label("发现", systemImage: "safari") }
                 .tag(1)
             RssListView()
                 .tabItem { Label("订阅", systemImage: "dot.radiowaves.up.forward") }
                 .tag(2)
             SettingsView()
-                .tabItem { Label("设置", systemImage: "gearshape") }
+                .tabItem { Label("我的", systemImage: "person.circle") }
                 .tag(3)
         }
         .onChange(of: scenePhase) { _, newPhase in

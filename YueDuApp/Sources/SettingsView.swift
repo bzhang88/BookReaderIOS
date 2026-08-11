@@ -1,69 +1,90 @@
 import SwiftUI
 
-/// Home for app-wide settings screens -- the roadmap adds more here over time (theming, AI
-/// provider config, etc.), so this exists as a dedicated tab rather than bolting individual
-/// settings screens onto whichever other tab happened to need one first.
+/// "我的" tab -- doubles as the settings hub, matching Legado's own bottom-nav "我的" tab (its
+/// `MyFragment`, a flat `PreferenceScreen`). Section layout mirrors what was found reading
+/// `Legado_Max`'s real `pref_main.xml`: a few rule-management screens ungrouped at the top
+/// (书源管理 first, exactly like Legado puts book-source management as its very first row), then
+/// titled "设置"/"其他" groups, then an untitled "关于" group at the bottom. Our own feature set
+/// doesn't map 1:1 onto Legado's exact row list (no 词典规则/Web服务 yet, but extra items like
+/// 高亮规则/分组规则 that Legado doesn't have) -- the *grouping pattern* is what's being matched,
+/// not a literal row-for-row copy.
 struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink {
-                    BackupSettingsView()
-                } label: {
-                    Label("备份与同步", systemImage: "icloud.and.arrow.up")
+                Section {
+                    NavigationLink {
+                        SourceLibraryView()
+                    } label: {
+                        Label("书源管理", systemImage: "tray.full")
+                    }
+                    NavigationLink {
+                        TxtSplitRuleListView()
+                    } label: {
+                        Label("TXT 分章规则", systemImage: "text.badge.plus")
+                    }
+                    NavigationLink {
+                        ReplaceRuleListView()
+                    } label: {
+                        Label("替换净化", systemImage: "wand.and.stars")
+                    }
+                    NavigationLink {
+                        HighlightRuleListView()
+                    } label: {
+                        Label("高亮规则", systemImage: "highlighter")
+                    }
+                    NavigationLink {
+                        TagGroupRuleListView()
+                    } label: {
+                        Label("分组规则", systemImage: "tag")
+                    }
                 }
-                NavigationLink {
-                    ReplaceRuleListView()
-                } label: {
-                    Label("净化规则", systemImage: "wand.and.stars")
+
+                Section("设置") {
+                    NavigationLink {
+                        BackupSettingsView()
+                    } label: {
+                        Label("备份与恢复", systemImage: "icloud.and.arrow.up")
+                    }
+                    NavigationLink {
+                        AIProviderListView()
+                    } label: {
+                        Label("AI 服务商", systemImage: "sparkles")
+                    }
+                    NavigationLink {
+                        AppLockSettingsView()
+                    } label: {
+                        Label("本地密码锁", systemImage: "lock")
+                    }
                 }
-                NavigationLink {
-                    AIProviderListView()
-                } label: {
-                    Label("AI 服务商", systemImage: "sparkles")
+
+                Section("其他") {
+                    NavigationLink {
+                        BookmarkListView()
+                    } label: {
+                        Label("书签", systemImage: "bookmark")
+                    }
+                    NavigationLink {
+                        ReadingStatsView()
+                    } label: {
+                        Label("阅读统计", systemImage: "chart.bar")
+                    }
+                    NavigationLink {
+                        StorageManagementView()
+                    } label: {
+                        Label("存储管理", systemImage: "externaldrive")
+                    }
                 }
-                NavigationLink {
-                    HighlightRuleListView()
-                } label: {
-                    Label("高亮规则", systemImage: "highlighter")
-                }
-                NavigationLink {
-                    TagGroupRuleListView()
-                } label: {
-                    Label("分组规则", systemImage: "tag")
-                }
-                NavigationLink {
-                    TxtSplitRuleListView()
-                } label: {
-                    Label("TXT 分章规则", systemImage: "text.badge.plus")
-                }
-                NavigationLink {
-                    ReadingStatsView()
-                } label: {
-                    Label("阅读统计", systemImage: "chart.bar")
-                }
-                NavigationLink {
-                    StorageManagementView()
-                } label: {
-                    Label("存储管理", systemImage: "externaldrive")
-                }
-                NavigationLink {
-                    BookmarkListView()
-                } label: {
-                    Label("书签", systemImage: "bookmark")
-                }
-                NavigationLink {
-                    AppLockSettingsView()
-                } label: {
-                    Label("本地密码锁", systemImage: "lock")
-                }
-                NavigationLink {
-                    AboutView()
-                } label: {
-                    Label("关于", systemImage: "info.circle")
+
+                Section {
+                    NavigationLink {
+                        AboutView()
+                    } label: {
+                        Label("关于", systemImage: "info.circle")
+                    }
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle("我的")
         }
     }
 }
