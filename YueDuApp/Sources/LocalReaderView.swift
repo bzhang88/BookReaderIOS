@@ -24,6 +24,7 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
+    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
 
     /// `startChapterIndex` overrides the book's own last-read position -- used when jumping in from
     /// a bookmark, which names an exact chapter rather than "wherever I left off."
@@ -128,10 +129,18 @@ struct LocalReaderView: View {
         currentIndex = index
     }
 
+    private func applyChineseConversion(_ text: String) -> String {
+        switch chineseConversion {
+        case .off: return text
+        case .toTraditional: return ChineseTextConverter.convert(text, direction: .simplifiedToTraditional)
+        case .toSimplified: return ChineseTextConverter.convert(text, direction: .traditionalToSimplified)
+        }
+    }
+
     private func load() async {
         let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
         let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: chapter.text, sourceUrl: "")
-        purifiedText = purified.result
+        purifiedText = applyChineseConversion(purified.result)
         matchedReplaceRules = purified.matchedRules
         try? await env.localBookStore.updateProgress(id: book.id, chapterIndex: currentIndex)
         isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
@@ -165,6 +174,7 @@ struct LocalReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
+    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
 
     @Environment(\.dismiss) private var dismiss
 
@@ -188,6 +198,15 @@ struct LocalReaderSettingsSheet: View {
                         Text("段间距: \(Int(paragraphSpacing))")
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
                     }
+                }
+
+                Section("简繁转换") {
+                    Picker("简繁转换", selection: $chineseConversion) {
+                        ForEach(ChineseConversionMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
 
                 Section("其他") {

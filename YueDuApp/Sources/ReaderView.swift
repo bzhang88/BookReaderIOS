@@ -43,6 +43,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
+    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
 
     init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
         self._source = State(initialValue: source)
@@ -250,6 +251,14 @@ struct ReaderView: View {
         currentIndex = index
     }
 
+    private func applyChineseConversion(_ text: String) -> String {
+        switch chineseConversion {
+        case .off: return text
+        case .toTraditional: return ChineseTextConverter.convert(text, direction: .simplifiedToTraditional)
+        case .toSimplified: return ChineseTextConverter.convert(text, direction: .traditionalToSimplified)
+        }
+    }
+
     /// Feeds `ChapterContentSearchView` -- only chapters already saved to `chapterCacheStore` (via
     /// the "缓存全本"/per-chapter caching flow) are searchable, since fetching every remaining
     /// chapter over the network on-demand just to search it would be slow and wasteful.
@@ -346,7 +355,7 @@ struct ReaderView: View {
             }
             let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
             let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
-            text = purified.result
+            text = applyChineseConversion(purified.result)
             matchedReplaceRules = purified.matchedRules
             highlightRules = (try? await env.highlightRuleStore.enabled()) ?? []
             try? await env.shelfStore.updateProgress(

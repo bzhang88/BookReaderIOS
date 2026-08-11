@@ -102,4 +102,22 @@ enum ReaderSettingsKey {
     /// 0.0...1.0, matches `AVSpeechUtterance.rate`'s range (`AVSpeechUtteranceDefaultSpeechRate`
     /// is 0.5) -- stored as a plain Double since `@AppStorage` doesn't support Float directly.
     static let readAloudRate = "reader.readAloudRate"
+    static let chineseConversion = "reader.chineseConversion"
+}
+
+/// Whether (and which direction) to run chapter text through `ChineseTextConverter` before
+/// display -- separate from `ReplaceRule`/`HighlightRule` since this isn't a user-authored pattern,
+/// it's a single built-in on/off/direction choice.
+enum ChineseConversionMode: String, CaseIterable, Identifiable {
+    case off, toTraditional, toSimplified
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .off: return "不转换"
+        case .toTraditional: return "简转繁"
+        case .toSimplified: return "繁转简"
+        }
+    }
 }

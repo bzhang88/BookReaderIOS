@@ -16,6 +16,7 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
+    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
 
     @Environment(\.dismiss) private var dismiss
 
@@ -46,6 +47,15 @@ struct ReaderSettingsSheet: View {
                         Text("语速: \(Int(readAloudRate * 100))%")
                         Slider(value: $readAloudRate, in: 0.1...1.0)
                     }
+                }
+
+                Section("简繁转换") {
+                    Picker("简繁转换", selection: $chineseConversion) {
+                        ForEach(ChineseConversionMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
 
                 Section("其他") {
