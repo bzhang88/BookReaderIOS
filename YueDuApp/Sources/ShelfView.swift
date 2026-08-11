@@ -197,10 +197,42 @@ struct ShelfView: View {
             }
             .buttonStyle(.plain)
         } else {
-            NavigationLink {
-                ShelfBookResumeView(book: book)
-            } label: {
-                bookRowContent(book)
+            // A visible "…" button per row, not a long-press context menu -- real usage feedback:
+            // the reference reading app the user pointed at shows this menu from a tappable button
+            // on each row, not a long-press gesture, which is both more discoverable and doesn't
+            // fight with `NavigationLink`'s own tap target. `.buttonStyle(.plain)` on the Menu is
+            // required here -- without it, a `List` row containing both a `NavigationLink` and
+            // another tappable control lets the row's own navigation swallow taps meant for the
+            // second control.
+            HStack(spacing: 0) {
+                NavigationLink {
+                    ShelfBookResumeView(book: book)
+                } label: {
+                    bookRowContent(book)
+                }
+                Menu {
+                    Button {
+                        detailTarget = book
+                    } label: {
+                        Label("详情", systemImage: "info.circle")
+                    }
+                    Button {
+                        changeSourceTarget = book
+                    } label: {
+                        Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Button {
+                        groupPickerTarget = book
+                    } label: {
+                        Label("设置分组", systemImage: "folder")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .swipeActions(edge: .leading) {
                 Button {
@@ -209,23 +241,6 @@ struct ShelfView: View {
                     Label("换源", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .tint(.orange)
-            }
-            .contextMenu {
-                Button {
-                    detailTarget = book
-                } label: {
-                    Label("详情", systemImage: "info.circle")
-                }
-                Button {
-                    changeSourceTarget = book
-                } label: {
-                    Label("换源", systemImage: "arrow.triangle.2.circlepath")
-                }
-                Button {
-                    groupPickerTarget = book
-                } label: {
-                    Label("设置分组", systemImage: "folder")
-                }
             }
         }
     }

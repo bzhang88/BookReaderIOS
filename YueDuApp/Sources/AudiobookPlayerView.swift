@@ -103,6 +103,9 @@ struct AudiobookPlayerView: View {
         .padding()
         .navigationTitle("听书")
         .navigationBarTitleDisplayMode(.inline)
+        // Matches `ReaderView`'s same fix -- without this, the main app's 书架/发现/订阅/我的 tab
+        // bar stayed visible underneath this player's own controls.
+        .toolbar(.hidden, for: .tabBar)
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
         .onAppear { player.onFinished = { advanceOnFinish() } }
         .onDisappear { player.stop() }

@@ -18,6 +18,7 @@ struct ReaderView: View {
     @State private var currentIndex: Int
 
     @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
     @State private var text: String = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -243,14 +244,14 @@ struct ReaderView: View {
             }
         }
         .onReceive(scheduleTimer) { scheduleTick = $0 }
-        // A slim, always-on footer (chapter title + progress) even while the rest of the chrome is
-        // hidden -- confirmed against Legado_Max's real `ReadView`/`PageView` that its reading
-        // screen is never truly blank by default: a low-contrast footer with chapter name + page
-        // count stays up regardless of menu state, and only the *menu* (brightness/buttons/settings)
-        // is the thing that's fully absent until tapped. Previously this reader dropped the progress
-        // text entirely the moment chrome was hidden, so there was no way to glance at "where am I"
-        // without reopening the whole menu.
-        .safeAreaInset(edge: .bottom) {
+        // `.overlay`, not `.safeAreaInset` -- real usage feedback: opening/closing the menu was
+        // visibly shifting where the text sat on screen, because `.safeAreaInset` *reserves* space
+        // for its content, shrinking the reading area (and reflowing every line in it) every time
+        // the menu toggled. An overlay draws on top of the reading area without changing its size at
+        // all -- the menu can cover the last few lines of text while it's open, which is fine, but
+        // the lines that stay visible never move. Paired with the matching `.overlay(alignment:
+        // .top)` fix above for the same reason on the top bar.
+        .overlay(alignment: .bottom) {
             if isChromeVisible {
                 VStack(spacing: 10) {
                     // Toggled by the "亮度" icon below, not shown permanently -- matches the
@@ -357,6 +358,7 @@ struct ReaderView: View {
                     }
                 }
                 .padding()
+                .frame(maxWidth: .infinity)
                 .background(.bar)
             } else {
                 // A slim, always-on footer (chapter title/progress) even while the rest of the
@@ -377,87 +379,124 @@ struct ReaderView: View {
         }
         .navigationTitle(chapter.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(isChromeVisible ? .visible : .hidden, for: .navigationBar)
-        // Matches Legado's real top bar shape (confirmed via research): 换源 change-source stays a
-        // directly-visible action icon (online books always show it there), everything else lives
-        // behind a single "⋯" overflow menu -- bookmark and edit-content are genuinely in Legado's
-        // own overflow too; AI summary/dict lookup/web search are this app's own extra features
-        // with no Legado equivalent, grouped there rather than each claiming their own permanent
-        // icon (the previous 4-icon-wide top bar, plus the utility-row icons this redesign also
-        // removed, was a lot of unlabeled chrome competing for attention on every single screen).
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
+        // Permanently hidden (not conditional on `isChromeVisible`) -- a custom `.overlay(alignment:
+        // .top)` below draws the same buttons instead. Toggling the *native* bar's visibility was
+        // the other half of the "menu open/closed changes where the safe area starts, so the text
+        // itself visibly shifts" bug real usage feedback flagged (`.safeAreaInset` on the bottom was
+        // the other half, fixed the same way just below): showing/hiding a real navigation bar
+        // changes how much vertical space is reserved above the content, which is exactly the kind
+        // of layout-affecting toggle that has to go if the reading area's size is to stay constant
+        // regardless of chrome state. An overlay draws on top without reserving any space at all.
+        .toolbar(.hidden, for: .navigationBar)
+        // The reader is meant to take over the whole screen -- real usage feedback was that the
+        // main app's 书架/发现/订阅/我的 tab bar was still visible at the bottom while reading,
+        // underneath (and confusingly separate from) this reader's own bottom chrome. Pushing a
+        // view via `NavigationLink` inside a `TabView`'s tab keeps the tab bar showing by default
+        // unless a pushed view explicitly hides it, which nothing in this app did before.
+        .toolbar(.hidden, for: .tabBar)
+        .overlay(alignment: .top) {
+            if isChromeVisible {
+                HStack(spacing: 16) {
                     Button {
-                        isShowingChangeSource = true
+                        dismiss()
                     } label: {
-                        Label("换源（整本书）", systemImage: "arrow.triangle.2.circlepath")
+                        Image(systemName: "chevron.left")
                     }
-                    Button {
-                        isShowingChapterSourceSwitch = true
-                    } label: {
-                        Label("本章换源", systemImage: "doc.badge.arrow.up")
-                    }
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        Task { await toggleBookmark() }
-                    } label: {
-                        Label(
-                            isCurrentChapterBookmarked ? "移除书签" : "加入书签",
-                            systemImage: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark"
-                        )
-                    }
-                    Button {
-                        isShowingContentEdit = true
-                    } label: {
-                        Label("编辑正文", systemImage: "pencil")
-                    }
-                    Button {
-                        isShowingContentSearch = true
-                    } label: {
-                        Label("搜索本书内", systemImage: "magnifyingglass")
-                    }
-                    Button {
-                        isShowingReplaceRules = true
-                    } label: {
-                        Label("替换净化", systemImage: "wand.and.stars")
-                    }
-                    Button {
-                        if pageTurnStyle.isPaginated {
-                            toggleAutoPage()
-                        } else {
-                            toggleAutoScroll(proxy: scrollProxy)
+                    Text(chapter.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer()
+                    Menu {
+                        Button {
+                            isShowingChangeSource = true
+                        } label: {
+                            Label("换源（整本书）", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        Button {
+                            isShowingChapterSourceSwitch = true
+                        } label: {
+                            Label("本章换源", systemImage: "doc.badge.arrow.up")
                         }
                     } label: {
-                        let isRunning = pageTurnStyle.isPaginated ? isAutoPaging : isAutoScrolling
-                        Label(
-                            isRunning ? "停止自动翻页" : "自动翻页",
-                            systemImage: isRunning ? "pause.circle" : "play.circle"
-                        )
+                        Image(systemName: "arrow.triangle.2.circlepath")
                     }
-                    Button {
-                        isShowingAISummary = true
+                    Menu {
+                        Button {
+                            Task { await toggleBookmark() }
+                        } label: {
+                            Label(
+                                isCurrentChapterBookmarked ? "移除书签" : "加入书签",
+                                systemImage: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark"
+                            )
+                        }
+                        Button {
+                            isShowingContentEdit = true
+                        } label: {
+                            Label("编辑正文", systemImage: "pencil")
+                        }
+                        Button {
+                            isShowingContentSearch = true
+                        } label: {
+                            Label("搜索本书内", systemImage: "magnifyingglass")
+                        }
+                        Button {
+                            isShowingReplaceRules = true
+                        } label: {
+                            Label("替换净化", systemImage: "wand.and.stars")
+                        }
+                        Button {
+                            if pageTurnStyle.isPaginated {
+                                toggleAutoPage()
+                            } else {
+                                toggleAutoScroll(proxy: scrollProxy)
+                            }
+                        } label: {
+                            let isRunning = pageTurnStyle.isPaginated ? isAutoPaging : isAutoScrolling
+                            Label(
+                                isRunning ? "停止自动翻页" : "自动翻页",
+                                systemImage: isRunning ? "pause.circle" : "play.circle"
+                            )
+                        }
+                        Button {
+                            isShowingAISummary = true
+                        } label: {
+                            Label("AI 摘要", systemImage: "sparkles")
+                        }
+                        Button {
+                            isShowingDictLookup = true
+                        } label: {
+                            Label("查词", systemImage: "character.book.closed")
+                        }
+                        Button {
+                            isShowingWebSearch = true
+                        } label: {
+                            Label("网页搜索", systemImage: "globe")
+                        }
                     } label: {
-                        Label("AI 摘要", systemImage: "sparkles")
+                        Image(systemName: "ellipsis.circle")
                     }
-                    Button {
-                        isShowingDictLookup = true
-                    } label: {
-                        Label("查词", systemImage: "character.book.closed")
-                    }
-                    Button {
-                        isShowingWebSearch = true
-                    } label: {
-                        Label("网页搜索", systemImage: "globe")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(.bar)
+            } else {
+                // Matches the reference reading app's chrome-hidden state: a slim chapter-name
+                // readout stays up top even with the rest of the menu gone (paired with the
+                // symmetric bottom-edge footer below).
+                HStack {
+                    Text(chapter.title)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(bookTitle)
+                        .lineLimit(1)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)

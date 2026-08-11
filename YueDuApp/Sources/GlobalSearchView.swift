@@ -3,6 +3,7 @@ import BookSourceModel
 import WebBookOrchestrator
 import NetworkClient
 import Persistence
+import RuleEngine
 
 /// Searches every *enabled* book source concurrently (not one picked ahead of time), streaming
 /// results in per-source as they arrive, with a visible way to stop early -- matches how these
@@ -23,6 +24,16 @@ struct GlobalSearchView: View {
     @State private var searchHistory: [String] = []
     @State private var shelfKeys: Set<String> = []
     @State private var allShelfBooks: [ShelfBook] = []
+    @State private var relevanceFilter: SearchRelevanceFilter = .all
+    // Precomputed once per settled search (see `recomputeRelevanceBuckets`), not a computed
+    // property re-run on every body evaluation -- similarity scoring is O(title length × keyword
+    // length) per result, and the reference reading app's own search results can run into the
+    // thousands, so recomputing all of them on every SwiftUI redraw would be real, avoidable work.
+    @State private var relevanceBuckets: [SearchRelevanceFilter: [GroupedSearchResult]] = [:]
+
+    private var displayedGroups: [GroupedSearchResult] {
+        relevanceBuckets[relevanceFilter] ?? groups
+    }
 
     var body: some View {
         List {
@@ -35,7 +46,10 @@ struct GlobalSearchView: View {
             if isSearching || hasSearchedOnce {
                 statusRow
             }
-            ForEach(groups) { group in
+            if hasSearchedOnce && !isSearching && !groups.isEmpty {
+                relevanceFilterRow
+            }
+            ForEach(displayedGroups) { group in
                 NavigationLink {
                     destination(for: group)
                 } label: {
@@ -178,6 +192,37 @@ struct GlobalSearchView: View {
             : "共找到 \(groups.count) 本书"
     }
 
+    /// 精确/≥70%/<70%/全部 filter tabs, each showing a live count -- matches the reference reading
+    /// app's own real search-results screen. A horizontally scrollable row rather than a fixed
+    /// segmented control since the labels are asymmetric widths ("精确(0)" vs "<70%(3248)").
+    @ViewBuilder
+    private var relevanceFilterRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(SearchRelevanceFilter.allCases) { filter in
+                    let count = relevanceBuckets[filter]?.count ?? 0
+                    Button {
+                        relevanceFilter = filter
+                    } label: {
+                        Text("\(filter.displayName)(\(count))")
+                            .font(.caption)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                relevanceFilter == filter
+                                    ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.1),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(relevanceFilter == filter ? Color.accentColor : Color.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+    }
+
     private func resolveSource(_ result: SearchResult) -> BookSource {
         sources.first { $0.bookSourceUrl == result.bookSourceUrl }
             ?? BookSource(bookSourceUrl: result.bookSourceUrl, bookSourceName: result.bookSourceName)
@@ -203,6 +248,29 @@ struct GlobalSearchView: View {
         case .relevance:
             groups = groups.rankedByRelevance(query: keyword)
         }
+        recomputeRelevanceBuckets()
+    }
+
+    /// Buckets `groups` by title similarity to the search keyword -- matches the reference reading
+    /// app's real 精确/≥70%/<70%/全部 tabs. Computed once here (see `relevanceBuckets`'s own doc
+    /// comment for why this isn't a plain computed property) rather than per-row, so switching tabs
+    /// is just a dictionary lookup.
+    private func recomputeRelevanceBuckets() {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        var exact: [GroupedSearchResult] = []
+        var high: [GroupedSearchResult] = []
+        var low: [GroupedSearchResult] = []
+        for group in groups {
+            let ratio = TextSimilarity.ratio(group.name, trimmed)
+            if ratio >= 0.999 {
+                exact.append(group)
+            } else if ratio >= 0.7 {
+                high.append(group)
+            } else {
+                low.append(group)
+            }
+        }
+        relevanceBuckets = [.exact: exact, .highSimilarity: high, .lowSimilarity: low, .all: groups]
     }
 
     private func startSearching() {
@@ -211,6 +279,8 @@ struct GlobalSearchView: View {
 
         searchTask?.cancel()
         groups = []
+        relevanceFilter = .all
+        relevanceBuckets = [:]
         completedCount = 0
         failedCount = 0
         isSearching = true
@@ -260,18 +330,37 @@ enum SearchSortMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// Wrapping row of tappable keyword chips (Legado's "最近搜索" style). SwiftUI has no built-in
-/// flow-wrap container, and a custom `Layout` conformance is more machinery than a capped-length
-/// history list warrants -- an adaptive `LazyVGrid` approximates the same "wrap to the next row"
-/// look with none of that, close enough for a handful of short keyword chips.
+/// Which title-similarity bucket a search result falls into, relative to the search keyword --
+/// matches the reference reading app's own real 精确/≥70%/<70%/全部 tabs (see `TextSimilarity`).
+/// `.exact` and `.highSimilarity`/`.lowSimilarity` are mutually exclusive partitions of `.all`, not
+/// overlapping ranges -- a title counted in "精确" never also shows up in "≥70%".
+enum SearchRelevanceFilter: String, CaseIterable, Identifiable {
+    case exact, highSimilarity, lowSimilarity, all
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .exact: return "精确"
+        case .highSimilarity: return "≥70%"
+        case .lowSimilarity: return "<70%"
+        case .all: return "全部"
+        }
+    }
+}
+
+/// Wrapping row of tappable keyword chips (matches the reference reading app's own "最近搜索"
+/// layout, confirmed via real screenshots: chips hug their own text width and wrap left-to-right,
+/// top-to-bottom -- not a fixed-width grid). Real `Layout` conformance, not a `LazyVGrid`
+/// approximation: an adaptive grid gives every chip the same cell width, which doesn't match how a
+/// short 2-character term and a long 8-character one actually sit next to each other in the
+/// reference.
 private struct FlowChips: View {
     let items: [String]
     let onTap: (String) -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 60), spacing: 8, alignment: .leading)]
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+        FlowLayout(spacing: 8) {
             ForEach(items, id: \.self) { item in
                 Button {
                     onTap(item)
@@ -284,6 +373,58 @@ private struct FlowChips: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+}
+
+/// Left-to-right, top-to-bottom wrapping container for variable-width chips -- SwiftUI has no
+/// built-in flow/wrap layout, so this is the standard `Layout`-protocol implementation (each
+/// subview keeps its own natural size; a subview that would overflow the available width starts a
+/// new row instead).
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var isFirstInRow = true
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if !isFirstInRow, rowWidth + spacing + size.width > maxWidth {
+                totalHeight += rowHeight + spacing
+                rowWidth = 0
+                rowHeight = 0
+                isFirstInRow = true
+            }
+            rowWidth += (isFirstInRow ? 0 : spacing) + size.width
+            rowHeight = max(rowHeight, size.height)
+            isFirstInRow = false
+        }
+        totalHeight += rowHeight
+        return CGSize(width: maxWidth.isFinite ? maxWidth : rowWidth, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        var isFirstInRow = true
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if !isFirstInRow, x + size.width > bounds.minX + bounds.width {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+                isFirstInRow = true
+            }
+            subview.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            isFirstInRow = false
         }
     }
 }

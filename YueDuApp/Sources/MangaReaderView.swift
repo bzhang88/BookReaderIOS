@@ -105,6 +105,9 @@ struct MangaReaderView: View {
         .navigationTitle(chapter.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(isChromeVisible ? .visible : .hidden, for: .navigationBar)
+        // Matches `ReaderView`'s same fix -- without this, the main app's 书架/发现/订阅/我的 tab
+        // bar stayed visible underneath this reader's own bottom chrome.
+        .toolbar(.hidden, for: .tabBar)
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
     }
