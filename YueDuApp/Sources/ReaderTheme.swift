@@ -106,6 +106,9 @@ enum ReaderSettingsKey {
     /// Seconds between each auto-scroll step -- one paragraph per step, not a continuous pixel
     /// scroll (see `ReaderView`'s auto-scroll doc comment for why paragraph granularity was chosen).
     static let autoScrollInterval = "reader.autoScrollInterval"
+    /// JSON-encoded `ReaderTapZoneGrid` -- a struct rather than 9 primitive keys since `@AppStorage`
+    /// properties can't be declared dynamically in a loop.
+    static let tapZoneGrid = "reader.tapZoneGrid"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before

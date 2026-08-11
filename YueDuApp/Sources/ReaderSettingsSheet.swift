@@ -68,6 +68,9 @@ struct ReaderSettingsSheet: View {
 
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
+                    NavigationLink("点击区域设置") {
+                        TapZoneConfigView()
+                    }
                 }
 
                 Section("本章生效的净化规则") {

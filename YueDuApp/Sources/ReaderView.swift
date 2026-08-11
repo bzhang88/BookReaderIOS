@@ -49,6 +49,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
     @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
+    @AppStorage(ReaderSettingsKey.tapZoneGrid) private var tapZoneGridRaw: String = ReaderTapZoneGrid.standardEncoded
 
     init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
         self._source = State(initialValue: source)
@@ -89,9 +90,13 @@ struct ReaderView: View {
             .padding()
             .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height, alignment: .topLeading)
             .contentShape(Rectangle())
-            .onTapGesture {
-                isChromeVisible.toggle()
-            }
+            // A zero-distance DragGesture rather than .onTapGesture -- SwiftUI's plain tap gesture
+            // doesn't expose *where* the tap landed, and the 3x3 zone grid needs that location to
+            // pick which of the 9 regions was hit (see `handleTap`).
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onEnded { value in handleTap(at: value.location) }
+            )
         }
         .background(theme.backgroundColor(for: colorScheme))
         .overlay {
@@ -305,6 +310,33 @@ struct ReaderView: View {
     private func goTo(_ index: Int) {
         guard chapters.indices.contains(index) else { return }
         currentIndex = index
+    }
+
+    /// Resolves a raw tap location to one of the 3x3 zones and runs whatever action the user has
+    /// configured for it (default: side columns turn chapters, middle column toggles chrome --
+    /// see `ReaderTapZoneGrid.standard`). Zones are measured against the screen bounds rather than
+    /// a `GeometryReader`-measured local size, matching the same approximation already used for the
+    /// scroll content's `minHeight` a few lines up in `body`.
+    private func handleTap(at location: CGPoint) {
+        let screenSize = UIScreen.main.bounds.size
+        let col = min(2, max(0, Int(location.x / (screenSize.width / 3))))
+        let row = min(2, max(0, Int(location.y / (screenSize.height / 3))))
+        perform(ReaderTapZoneGrid.decode(tapZoneGridRaw).action(row: row, col: col))
+    }
+
+    private func perform(_ action: ReaderTapZoneAction) {
+        switch action {
+        case .none:
+            break
+        case .toggleChrome:
+            isChromeVisible.toggle()
+        case .previousChapter:
+            goTo(currentIndex - 1)
+        case .nextChapter:
+            goTo(currentIndex + 1)
+        case .openToc:
+            isShowingToc = true
+        }
     }
 
     /// A lightweight in-session chapter picker, deliberately *not* a reused `TocView` -- that view
