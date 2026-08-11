@@ -17,6 +17,7 @@ struct LocalReaderView: View {
     @State private var isCurrentChapterBookmarked = false
     @State private var matchedReplaceRules: [ReplaceRule] = []
     @State private var isShowingContentSearch = false
+    @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
@@ -44,14 +45,14 @@ struct LocalReaderView: View {
                     Text(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
-                        .foregroundStyle(theme.textColor)
+                        .foregroundStyle(theme.textColor(for: colorScheme))
                         .padding(.horizontal, 4)
                 }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(theme.backgroundColor)
+        .background(theme.backgroundColor(for: colorScheme))
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
                 Text("第 \(currentIndex + 1) / \(book.chapters.count) 章")

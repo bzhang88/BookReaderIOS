@@ -1,12 +1,13 @@
 import SwiftUI
 
 enum ReaderTheme: String, CaseIterable, Identifiable {
-    case day, night, sepia, green, gray
+    case system, day, night, sepia, green, gray
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
+        case .system: return "跟随系统"
         case .day: return "日间"
         case .night: return "夜间"
         case .sepia: return "护眼"
@@ -15,8 +16,12 @@ enum ReaderTheme: String, CaseIterable, Identifiable {
         }
     }
 
-    var backgroundColor: Color {
+    /// `.system` isn't a real palette of its own -- it resolves to `.night`'s exact look in dark
+    /// mode and `.day`'s in light mode, so switching iOS appearance switches the reader too without
+    /// the user having to remember to flip the swatch by hand.
+    func backgroundColor(for colorScheme: ColorScheme) -> Color {
         switch self {
+        case .system: return colorScheme == .dark ? ReaderTheme.night.backgroundColor(for: colorScheme) : ReaderTheme.day.backgroundColor(for: colorScheme)
         case .day: return Color(red: 1, green: 1, blue: 1)
         case .night: return Color(red: 0.08, green: 0.08, blue: 0.08)
         case .sepia: return Color(red: 0.96, green: 0.93, blue: 0.84)
@@ -25,8 +30,9 @@ enum ReaderTheme: String, CaseIterable, Identifiable {
         }
     }
 
-    var textColor: Color {
+    func textColor(for colorScheme: ColorScheme) -> Color {
         switch self {
+        case .system: return colorScheme == .dark ? ReaderTheme.night.textColor(for: colorScheme) : ReaderTheme.day.textColor(for: colorScheme)
         case .day: return Color(red: 0.05, green: 0.05, blue: 0.05)
         case .night: return Color(red: 0.82, green: 0.82, blue: 0.82)
         case .sepia: return Color(red: 0.30, green: 0.22, blue: 0.10)
@@ -41,6 +47,7 @@ enum ReaderTheme: String, CaseIterable, Identifiable {
 /// visually identical without duplicating this view.
 struct ThemeSwatchPicker: View {
     @Binding var theme: ReaderTheme
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -60,12 +67,12 @@ struct ThemeSwatchPicker: View {
         } label: {
             VStack(spacing: 6) {
                 Circle()
-                    .fill(option.backgroundColor)
+                    .fill(option.backgroundColor(for: colorScheme))
                     .frame(width: 44, height: 44)
                     .overlay(
                         Text("阅")
                             .font(.caption2)
-                            .foregroundStyle(option.textColor)
+                            .foregroundStyle(option.textColor(for: colorScheme))
                     )
                     .overlay(
                         Circle().strokeBorder(

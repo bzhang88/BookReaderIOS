@@ -35,6 +35,7 @@ struct ReaderView: View {
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @State private var highlightRules: [HighlightRule] = []
     @StateObject private var readAloud = ReadAloudController()
+    @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
@@ -84,7 +85,7 @@ struct ReaderView: View {
                 isChromeVisible.toggle()
             }
         }
-        .background(theme.backgroundColor)
+        .background(theme.backgroundColor(for: colorScheme))
         .overlay {
             if isLoading {
                 ProgressView()
@@ -326,7 +327,7 @@ struct ReaderView: View {
             if segment.isHighlighted {
                 return partial + Text(segment.text).foregroundStyle(.orange).bold()
             } else {
-                return partial + Text(segment.text).foregroundStyle(theme.textColor)
+                return partial + Text(segment.text).foregroundStyle(theme.textColor(for: colorScheme))
             }
         }
     }
