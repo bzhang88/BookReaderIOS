@@ -7,6 +7,7 @@ import Persistence
 @MainActor
 final class AppEnvironment: ObservableObject {
     let bookSourceStore: BookSourceStore
+    let bookSourceTrashStore: BookSourceTrashStore
     let shelfStore: ShelfStore
     let replaceRuleStore: ReplaceRuleStore
     let rssSourceStore: RssSourceStore
@@ -23,6 +24,7 @@ final class AppEnvironment: ObservableObject {
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         bookSourceStore = BookSourceStore(fileURL: appSupport.appendingPathComponent("book_sources.json"))
+        bookSourceTrashStore = BookSourceTrashStore(fileURL: appSupport.appendingPathComponent("book_source_trash.json"))
         shelfStore = ShelfStore(fileURL: appSupport.appendingPathComponent("shelf.json"))
         replaceRuleStore = ReplaceRuleStore(fileURL: appSupport.appendingPathComponent("replace_rules.json"))
         rssSourceStore = RssSourceStore(fileURL: appSupport.appendingPathComponent("rss_sources.json"))

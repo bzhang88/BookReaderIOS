@@ -11,6 +11,7 @@ struct SourceLibraryView: View {
     @State private var capabilityReports: [String: SourceCapabilityReport] = [:]
     @State private var isImporterPresented = false
     @State private var isShowingURLImport = false
+    @State private var isShowingTrash = false
     @State private var importSummary: String?
     @State private var errorMessage: String?
     @State private var editingSource: BookSource?
@@ -104,6 +105,7 @@ struct SourceLibraryView: View {
                     Menu {
                         Button("新建书源") { isCreatingSource = true }
                         Button("从网址导入") { isShowingURLImport = true }
+                        Button("回收站") { isShowingTrash = true }
                         Button("全部启用") { setAllEnabled(true) }.disabled(sources.isEmpty)
                         Button("全部停用") { setAllEnabled(false) }.disabled(sources.isEmpty)
                     } label: {
@@ -123,6 +125,11 @@ struct SourceLibraryView: View {
             .sheet(isPresented: $isShowingURLImport) {
                 BookSourceURLImportView { urlString in
                     await handleURLImport(urlString)
+                }
+            }
+            .sheet(isPresented: $isShowingTrash, onDismiss: { Task { await reload() } }) {
+                NavigationStack {
+                    SourceTrashView()
                 }
             }
             .navigationDestination(isPresented: Binding(
@@ -170,10 +177,13 @@ struct SourceLibraryView: View {
         }
     }
 
+    /// Moves deleted sources to `bookSourceTrashStore` rather than removing them outright -- see
+    /// `SourceTrashView`'s doc comment for why (fat-finger recovery in a long, similar-looking list).
     private func delete(at offsets: IndexSet) {
         let toDelete = offsets.map { sources[$0] }
         Task {
             for source in toDelete {
+                try? await env.bookSourceTrashStore.add(source)
                 try? await env.bookSourceStore.remove(bookSourceUrl: source.bookSourceUrl)
             }
             await reload()
