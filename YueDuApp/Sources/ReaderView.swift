@@ -23,6 +23,11 @@ struct ReaderView: View {
     @State private var isShowingSettings = false
     @State private var isShowingChangeSource = false
     @State private var isChromeVisible = true
+    // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
+    // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
+    // scroll bounds from the very first layout pass, before the user has read anything) -- reset
+    // to false on every chapter change, flips true after a short grace period.
+    @State private var canAutoAdvance = false
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @State private var highlightRules: [HighlightRule] = []
     @StateObject private var readAloud = ReadAloudController()
@@ -58,6 +63,14 @@ struct ReaderView: View {
                                 ? Color.accentColor.opacity(0.15) : Color.clear
                         )
                 }
+                // Invisible sentinel below the last paragraph -- its appearance means the user has
+                // scrolled (or the chapter was short enough to start fully visible) to the bottom.
+                // Real-device feedback specifically asked for chapters to "just connect" without an
+                // explicit tap, matching this rather than a full continuous multi-chapter scroll
+                // buffer, which would need a much larger rewrite of how content is rendered.
+                Color.clear
+                    .frame(height: 1)
+                    .onAppear { attemptAutoAdvance() }
             }
             .padding()
             .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height, alignment: .topLeading)
@@ -209,6 +222,16 @@ struct ReaderView: View {
         currentIndex = index
     }
 
+    /// Advances to the next chapter without requiring an explicit tap on "下一章" -- guarded by
+    /// `canAutoAdvance`'s grace period, and skipped while read-aloud is active (its own chapter
+    /// change already stops speech via `onChange(of: currentIndex)`; auto-advancing mid-sentence
+    /// while the user is listening, rather than reading, would be jarring rather than helpful).
+    private func attemptAutoAdvance() {
+        guard canAutoAdvance, !readAloud.isSpeaking, !isLoading else { return }
+        guard currentIndex < chapters.count - 1 else { return }
+        goTo(currentIndex + 1)
+    }
+
     /// Adopts a different source for the book currently being read, in place -- fetches the new
     /// source's own table of contents, carries the chapter *index* over as a best-effort
     /// approximation (same convention `ShelfView.switchSource` already uses: chapter numbering is
@@ -270,6 +293,7 @@ struct ReaderView: View {
     private func load() async {
         isLoading = true
         errorMessage = nil
+        canAutoAdvance = false
         do {
             let cached = try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: chapter.index)
             let content: ChapterContent
@@ -288,5 +312,20 @@ struct ReaderView: View {
             errorMessage = "\(error)"
         }
         isLoading = false
+        armAutoAdvance()
+    }
+
+    /// Runs once per chapter load (both the reader's very first chapter and every subsequent
+    /// transition, since this is called from `load()` rather than `.onChange(of: currentIndex)`,
+    /// which never fires for a view's initial state) -- the delay gives a short-enough-to-fit-on
+    /// -one-screen chapter a moment before the bottom sentinel's mere presence can trigger another
+    /// auto-advance.
+    private func armAutoAdvance() {
+        let loadedIndex = currentIndex
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled, currentIndex == loadedIndex else { return }
+            canAutoAdvance = true
+        }
     }
 }
