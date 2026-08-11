@@ -23,6 +23,7 @@ final class AppEnvironment: ObservableObject {
     let loginCookieStore: LoginCookieStore
     let shelfGroupStore: ShelfGroupStore
     let dictRuleStore: DictRuleStore
+    let webSearchEngineStore: WebSearchEngineStore
     let httpClient: any HTTPClient
     #if canImport(Network)
     let lanWebServer: LANWebServer
@@ -47,6 +48,7 @@ final class AppEnvironment: ObservableObject {
         loginCookieStore = LoginCookieStore(fileURL: appSupport.appendingPathComponent("login_cookies.json"))
         shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
         dictRuleStore = DictRuleStore(fileURL: appSupport.appendingPathComponent("dict_rules.json"))
+        webSearchEngineStore = WebSearchEngineStore(fileURL: appSupport.appendingPathComponent("web_search_engines.json"))
         httpClient = URLSessionHTTPClient()
         #if canImport(Network)
         lanWebServer = LANWebServer(

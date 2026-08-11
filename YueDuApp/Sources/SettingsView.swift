@@ -33,6 +33,11 @@ struct SettingsView: View {
                         Label("词典规则", systemImage: "character.book.closed")
                     }
                     NavigationLink {
+                        WebSearchEngineListView()
+                    } label: {
+                        Label("搜索引擎", systemImage: "globe")
+                    }
+                    NavigationLink {
                         HighlightRuleListView()
                     } label: {
                         Label("高亮规则", systemImage: "highlighter")

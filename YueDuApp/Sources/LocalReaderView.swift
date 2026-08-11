@@ -19,6 +19,7 @@ struct LocalReaderView: View {
     @State private var isShowingContentSearch = false
     @State private var isShowingAISummary = false
     @State private var isShowingDictLookup = false
+    @State private var isShowingWebSearch = false
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
@@ -146,6 +147,13 @@ struct LocalReaderView: View {
                     Image(systemName: "character.book.closed")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingWebSearch = true
+                } label: {
+                    Image(systemName: "globe")
+                }
+            }
         }
         .task(id: currentIndex) { await load() }
         .sheet(isPresented: $isShowingSettings) {
@@ -164,6 +172,9 @@ struct LocalReaderView: View {
         }
         .sheet(isPresented: $isShowingDictLookup) {
             DictLookupView()
+        }
+        .sheet(isPresented: $isShowingWebSearch) {
+            WebSearchPanelView()
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn

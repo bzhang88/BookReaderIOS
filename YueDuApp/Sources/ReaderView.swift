@@ -29,6 +29,7 @@ struct ReaderView: View {
     @State private var isShowingAISummary = false
     @State private var isShowingDictLookup = false
     @State private var isShowingContentEdit = false
+    @State private var isShowingWebSearch = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
     // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
@@ -301,6 +302,13 @@ struct ReaderView: View {
                     Image(systemName: "character.book.closed")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingWebSearch = true
+                } label: {
+                    Image(systemName: "globe")
+                }
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
         // Keyed on source+index (not just index) so switching source always triggers a reload even
@@ -348,6 +356,9 @@ struct ReaderView: View {
             ChapterEditView(source: source, chapter: chapter, bookUrl: bookUrl, currentText: text) { edited in
                 text = edited
             }
+        }
+        .sheet(isPresented: $isShowingWebSearch) {
+            WebSearchPanelView()
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
