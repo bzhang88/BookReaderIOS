@@ -38,6 +38,11 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
     @AppStorage(ReaderSettingsKey.customThemeBackgroundHex) private var customThemeBackgroundHex: String = "#FFFFFF"
     @AppStorage(ReaderSettingsKey.customThemeTextHex) private var customThemeTextHex: String = "#0D0D0D"
+    @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
+    @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
+    @State private var pageAnchor: PageAnchor = .first
+    @State private var pageTurnRequest: PageTurnRequest?
+    @State private var pagedPageProgress: (current: Int, total: Int)?
     @State private var scheduleTick = Date()
     private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -60,8 +65,35 @@ struct LocalReaderView: View {
     private var paragraphs: [String] { purifiedText.components(separatedBy: "\n") }
     @State private var purifiedText: String = ""
 
+    private var chapterProgressText: String {
+        let chapterPart = "第 \(currentIndex + 1) / \(book.chapters.count) 章"
+        guard pageTurnStyle.isPaginated, let pagedPageProgress else { return chapterPart }
+        return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
+    }
+
     var body: some View {
         ScrollViewReader { scrollProxy in
+        Group {
+            if pageTurnStyle.isPaginated {
+                PagedChapterReaderView(
+                    text: purifiedText,
+                    style: pageTurnStyle,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing,
+                    paragraphSpacing: paragraphSpacing,
+                    textColor: theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)),
+                    backgroundColor: theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)),
+                    highlightRules: [],
+                    readAloudParagraphIndex: nil,
+                    initialAnchor: pageAnchor,
+                    pageTurnRequest: $pageTurnRequest,
+                    touchSlop: touchSlop,
+                    onTapMiddle: {},
+                    onRequestPreviousChapter: { goTo(currentIndex - 1, anchor: .last) },
+                    onRequestNextChapter: { goTo(currentIndex + 1) },
+                    onPageChanged: { current, total in pagedPageProgress = (current, total) }
+                )
+            } else {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
@@ -76,6 +108,8 @@ struct LocalReaderView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+            }
+        }
         .background(theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)))
         .overlay {
             if isEyeCareActive {
@@ -87,7 +121,7 @@ struct LocalReaderView: View {
         .onReceive(scheduleTimer) { scheduleTick = $0 }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
-                Text("第 \(currentIndex + 1) / \(book.chapters.count) 章")
+                Text(chapterProgressText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack {
@@ -198,6 +232,7 @@ struct LocalReaderView: View {
         }
         .onChange(of: currentIndex) { _, _ in
             volumeScrollIndex = 0
+            pagedPageProgress = nil
         }
         }
     }
@@ -211,6 +246,10 @@ struct LocalReaderView: View {
     }
 
     private func handleVolumeKeyTurn(direction: Int, proxy: ScrollViewProxy) {
+        guard !pageTurnStyle.isPaginated else {
+            pageTurnRequest = direction > 0 ? .next : .previous
+            return
+        }
         guard !paragraphs.isEmpty else { return }
         let step = 4
         volumeScrollIndex = min(max(volumeScrollIndex + direction * step, 0), paragraphs.count - 1)
@@ -226,8 +265,9 @@ struct LocalReaderView: View {
             .first { $0.isKeyWindow }
     }
 
-    private func goTo(_ index: Int) {
+    private func goTo(_ index: Int, anchor: PageAnchor = .first) {
         guard book.chapters.indices.contains(index) else { return }
+        pageAnchor = anchor
         currentIndex = index
     }
 
@@ -283,6 +323,7 @@ struct LocalReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
 
     @Environment(\.dismiss) private var dismiss
 
@@ -292,6 +333,14 @@ struct LocalReaderSettingsSheet: View {
                 Section("主题") {
                     ThemeSwatchPicker(theme: $theme)
                     CustomThemeEditor(theme: $theme)
+                }
+
+                Section("翻页") {
+                    Picker("翻页动画", selection: $pageTurnStyle) {
+                        ForEach(PageTurnStyle.allCases) { style in
+                            Text(style.displayName).tag(style)
+                        }
+                    }
                 }
 
                 Section("字体") {

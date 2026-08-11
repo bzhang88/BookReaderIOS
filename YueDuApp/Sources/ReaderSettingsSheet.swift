@@ -26,6 +26,7 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
     @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
+    @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
 
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
@@ -37,6 +38,17 @@ struct ReaderSettingsSheet: View {
                 Section("主题") {
                     ThemeSwatchPicker(theme: $theme)
                     CustomThemeEditor(theme: $theme)
+                }
+
+                Section("翻页") {
+                    // Not `.segmented` -- 5 two/three-character Chinese labels crammed into a
+                    // segmented control read as too tight (the same reason `ReaderTheme`'s picker
+                    // was switched to a swatch picker instead of staying segmented).
+                    Picker("翻页动画", selection: $pageTurnStyle) {
+                        ForEach(PageTurnStyle.allCases) { style in
+                            Text(style.displayName).tag(style)
+                        }
+                    }
                 }
 
                 Section("字体") {

@@ -1,9 +1,13 @@
 import Foundation
 
 /// What tapping one of the reader's 9 screen zones does -- matches Legado's own configurable
-/// tap-zone actions, scoped down to the subset that makes sense for a continuous-scroll (not
-/// paginated) reader: no "next/prev page" since there are no pages, but chapter nav + TOC + the
-/// existing chrome-toggle all carry over directly.
+/// tap-zone actions, scoped down to the subset that makes sense for a continuous-scroll reader: no
+/// "next/prev page" since there are no pages, but chapter nav + TOC + the existing chrome-toggle
+/// all carry over directly. Only governs `.scroll` mode (see `PageTurnStyle`) -- the 4 paginated
+/// styles use their own fixed left/middle/right tap zones inside `PagedChapterReaderView` instead
+/// of this configurable grid, since "turn a page, falling through to the next/previous chapter at
+/// the boundary" doesn't map cleanly onto this type's fixed action set without adding new cases
+/// this first pass doesn't need.
 enum ReaderTapZoneAction: String, CaseIterable, Identifiable, Codable {
     case none, toggleChrome, previousChapter, nextChapter, openToc
 

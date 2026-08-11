@@ -71,6 +71,12 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
     @AppStorage(ReaderSettingsKey.customThemeBackgroundHex) private var customThemeBackgroundHex: String = "#FFFFFF"
     @AppStorage(ReaderSettingsKey.customThemeTextHex) private var customThemeTextHex: String = "#0D0D0D"
+    @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
+    // Only ever set to `.last` right before `goTo` steps backward across a paginated chapter's
+    // boundary (see `goTo`'s doc comment) -- every other navigation path defaults back to `.first`.
+    @State private var pageAnchor: PageAnchor = .first
+    @State private var pageTurnRequest: PageTurnRequest?
+    @State private var pagedPageProgress: (current: Int, total: Int)?
     // Re-evaluated every minute so a schedule-only filter actually turns on/off while the reader
     // stays open across the boundary, not just whenever the view happens to redraw for other reasons.
     @State private var scheduleTick = Date()
@@ -94,8 +100,35 @@ struct ReaderView: View {
     private var chapter: BookChapter { chapters[currentIndex] }
     private var paragraphs: [String] { text.components(separatedBy: "\n") }
 
+    private var chapterProgressText: String {
+        let chapterPart = "第 \(currentIndex + 1) / \(chapters.count) 章"
+        guard pageTurnStyle.isPaginated, let pagedPageProgress else { return chapterPart }
+        return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
+    }
+
     var body: some View {
         ScrollViewReader { scrollProxy in
+        Group {
+            if pageTurnStyle.isPaginated {
+                PagedChapterReaderView(
+                    text: text,
+                    style: pageTurnStyle,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing,
+                    paragraphSpacing: paragraphSpacing,
+                    textColor: theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)),
+                    backgroundColor: theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)),
+                    highlightRules: highlightRules,
+                    readAloudParagraphIndex: isReadAloudSpeaking ? readAloudCurrentParagraphIndex : nil,
+                    initialAnchor: pageAnchor,
+                    pageTurnRequest: $pageTurnRequest,
+                    touchSlop: touchSlop,
+                    onTapMiddle: { isChromeVisible.toggle() },
+                    onRequestPreviousChapter: { goTo(currentIndex - 1, anchor: .last) },
+                    onRequestNextChapter: { goTo(currentIndex + 1) },
+                    onPageChanged: { current, total in pagedPageProgress = (current, total) }
+                )
+            } else {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
@@ -134,6 +167,8 @@ struct ReaderView: View {
                     }
             )
         }
+            }
+        }
         .background(theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)))
         .overlay {
             if isLoading {
@@ -163,7 +198,7 @@ struct ReaderView: View {
                             }
                         Image(systemName: "sun.max")
                     }
-                    Text("第 \(currentIndex + 1) / \(chapters.count) 章")
+                    Text(chapterProgressText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -222,10 +257,16 @@ struct ReaderView: View {
                         } label: {
                             Image(systemName: "arrow.triangle.2.circlepath")
                         }
-                        Button {
-                            toggleAutoScroll(proxy: scrollProxy)
-                        } label: {
-                            Image(systemName: isAutoScrolling ? "pause.circle" : "arrow.down.circle")
+                        // Auto-scroll is a `.scroll`-mode-only concept (a paginated reader has no
+                        // continuous scroll position to step through) -- hidden rather than shown
+                        // disabled, matching how this reader treats every other mode-specific
+                        // control (e.g. read-aloud's row only appears while actually speaking).
+                        if !pageTurnStyle.isPaginated {
+                            Button {
+                                toggleAutoScroll(proxy: scrollProxy)
+                            } label: {
+                                Image(systemName: isAutoScrolling ? "pause.circle" : "arrow.down.circle")
+                            }
                         }
                         Button {
                             isShowingContentEdit = true
@@ -237,10 +278,11 @@ struct ReaderView: View {
                     .font(.title3)
 
                     // Chapter-nav row -- prev/next chapter flanking read-aloud + settings, matching
-                    // Legado's bottom-most row shape (though without a real draggable in-chapter
-                    // progress bar in between: this reader is continuous-scroll per chapter, not
-                    // paginated, so there's no character-offset position to back a seek control
-                    // with -- "第 X / Y 章" above already covers the equivalent progress info).
+                    // Legado's bottom-most row shape (though still without a real draggable
+                    // in-chapter progress bar in between: even in paginated mode, dragging to an
+                    // arbitrary page would need cross-chapter page counts precomputed up front,
+                    // which this first pass doesn't do -- the progress text above already covers
+                    // the equivalent "where am I" info for both scroll and paginated modes).
                     HStack {
                         Button {
                             goTo(currentIndex - 1)
@@ -397,6 +439,7 @@ struct ReaderView: View {
             // rather than silently continuing to scroll a chapter that no longer matches its state.
             stopAutoScroll()
             volumeScrollIndex = 0
+            pagedPageProgress = nil
         }
         }
     }
@@ -415,6 +458,10 @@ struct ReaderView: View {
     }
 
     private func handleVolumeKeyTurn(direction: Int, proxy: ScrollViewProxy) {
+        guard !pageTurnStyle.isPaginated else {
+            pageTurnRequest = direction > 0 ? .next : .previous
+            return
+        }
         guard !paragraphs.isEmpty else { return }
         let step = 4
         volumeScrollIndex = min(max(volumeScrollIndex + direction * step, 0), paragraphs.count - 1)
@@ -430,8 +477,14 @@ struct ReaderView: View {
             .first { $0.isKeyWindow }
     }
 
-    private func goTo(_ index: Int) {
+    /// `anchor` only matters in paginated mode (see `PagedChapterReaderView`'s doc comment) --
+    /// `.last` is for the one case where continuing to page backward past a chapter's first page
+    /// should land on the new chapter's *last* page, matching where a physical book would be;
+    /// every other caller (explicit chapter-list/search/bookmark jumps, the toolbar's 上一章/下一章
+    /// buttons, paging forward across a boundary) wants the default `.first`.
+    private func goTo(_ index: Int, anchor: PageAnchor = .first) {
         guard chapters.indices.contains(index) else { return }
+        pageAnchor = anchor
         currentIndex = index
     }
 
