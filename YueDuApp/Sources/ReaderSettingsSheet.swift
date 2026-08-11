@@ -19,6 +19,11 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
     @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
     @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
 
     @Environment(\.dismiss) private var dismiss
 
@@ -64,6 +69,19 @@ struct ReaderSettingsSheet: View {
                     VStack(alignment: .leading) {
                         Text("每段间隔: \(String(format: "%.1f", autoScrollInterval)) 秒")
                         Slider(value: $autoScrollInterval, in: 1...10, step: 0.5)
+                    }
+                }
+
+                Section("护眼滤镜") {
+                    Toggle("护眼滤镜", isOn: $eyeCareEnabled)
+                    VStack(alignment: .leading) {
+                        Text("强度: \(Int(eyeCareIntensity * 100))%")
+                        Slider(value: $eyeCareIntensity, in: 0...1)
+                    }
+                    Toggle("按时间自动开启", isOn: $eyeCareScheduleEnabled)
+                    if eyeCareScheduleEnabled {
+                        Stepper("开始: \(eyeCareScheduleStartHour):00", value: $eyeCareScheduleStartHour, in: 0...23)
+                        Stepper("结束: \(eyeCareScheduleEndHour):00", value: $eyeCareScheduleEndHour, in: 0...23)
                     }
                 }
 

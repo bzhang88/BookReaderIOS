@@ -30,6 +30,19 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
     @State private var volumeButtonController = VolumeButtonPageTurnController()
     @State private var volumeScrollIndex = 0
+    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    @State private var scheduleTick = Date()
+    private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+
+    private var isEyeCareActive: Bool {
+        eyeCareEnabled || (eyeCareScheduleEnabled && EyeCareSchedule.isActive(
+            startHour: eyeCareScheduleStartHour, endHour: eyeCareScheduleEndHour, now: scheduleTick
+        ))
+    }
 
     /// `startChapterIndex` overrides the book's own last-read position -- used when jumping in from
     /// a bookmark, which names an exact chapter rather than "wherever I left off."
@@ -61,6 +74,14 @@ struct LocalReaderView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(theme.backgroundColor(for: colorScheme))
+        .overlay {
+            if isEyeCareActive {
+                Color(red: 1, green: 0.65, blue: 0.2)
+                    .opacity(eyeCareIntensity * 0.35)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onReceive(scheduleTimer) { scheduleTick = $0 }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
                 Text("第 \(currentIndex + 1) / \(book.chapters.count) 章")
@@ -244,6 +265,11 @@ struct LocalReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
     @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
 
     @Environment(\.dismiss) private var dismiss
 
@@ -276,6 +302,19 @@ struct LocalReaderSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section("护眼滤镜") {
+                    Toggle("护眼滤镜", isOn: $eyeCareEnabled)
+                    VStack(alignment: .leading) {
+                        Text("强度: \(Int(eyeCareIntensity * 100))%")
+                        Slider(value: $eyeCareIntensity, in: 0...1)
+                    }
+                    Toggle("按时间自动开启", isOn: $eyeCareScheduleEnabled)
+                    if eyeCareScheduleEnabled {
+                        Stepper("开始: \(eyeCareScheduleStartHour):00", value: $eyeCareScheduleStartHour, in: 0...23)
+                        Stepper("结束: \(eyeCareScheduleEndHour):00", value: $eyeCareScheduleEndHour, in: 0...23)
+                    }
                 }
 
                 Section("其他") {

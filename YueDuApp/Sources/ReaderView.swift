@@ -58,6 +58,21 @@ struct ReaderView: View {
     // same "honest approximation" the auto-scroll feature already uses (see its own doc comment).
     // Resets to 0 on every chapter change.
     @State private var volumeScrollIndex = 0
+    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    // Re-evaluated every minute so a schedule-only filter actually turns on/off while the reader
+    // stays open across the boundary, not just whenever the view happens to redraw for other reasons.
+    @State private var scheduleTick = Date()
+    private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+
+    private var isEyeCareActive: Bool {
+        eyeCareEnabled || (eyeCareScheduleEnabled && EyeCareSchedule.isActive(
+            startHour: eyeCareScheduleStartHour, endHour: eyeCareScheduleEndHour, now: scheduleTick
+        ))
+    }
 
     init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
         self._source = State(initialValue: source)
@@ -114,6 +129,16 @@ struct ReaderView: View {
                 ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             }
         }
+        // A warm, hit-testing-disabled tint layered on top of whichever theme is active -- eye
+        // care is a filter you can combine with any theme, not a theme choice of its own.
+        .overlay {
+            if isEyeCareActive {
+                Color(red: 1, green: 0.65, blue: 0.2)
+                    .opacity(eyeCareIntensity * 0.35)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onReceive(scheduleTimer) { scheduleTick = $0 }
         .safeAreaInset(edge: .bottom) {
             if isChromeVisible {
                 VStack(spacing: 8) {

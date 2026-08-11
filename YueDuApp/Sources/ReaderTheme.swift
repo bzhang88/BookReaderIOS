@@ -112,6 +112,14 @@ enum ReaderSettingsKey {
     /// Off by default -- matches Legado's own `volumeKeyPage` being opt-in, since hijacking the
     /// hardware volume buttons is surprising behavior if the user didn't ask for it.
     static let volumeKeyPage = "reader.volumeKeyPage"
+    /// Eye-care color-temperature filter -- separate from `theme`'s day/night/eye-protect presets:
+    /// a warm-tint overlay that can layer on top of *any* theme, optionally on its own schedule,
+    /// rather than being just another fixed color scheme to switch to manually.
+    static let eyeCareEnabled = "reader.eyeCareEnabled"
+    static let eyeCareIntensity = "reader.eyeCareIntensity"
+    static let eyeCareScheduleEnabled = "reader.eyeCareScheduleEnabled"
+    static let eyeCareScheduleStartHour = "reader.eyeCareScheduleStartHour"
+    static let eyeCareScheduleEndHour = "reader.eyeCareScheduleEndHour"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before
