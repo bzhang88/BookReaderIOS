@@ -30,6 +30,9 @@ struct BookDetailView: View {
     @State private var isDownloading = false
     @State private var downloadProgress = 0
     @State private var downloadTask: Task<Void, Never>?
+    @State private var isExporting = false
+    @State private var exportURL: URL?
+    @State private var isShowingExportSheet = false
 
     init(
         source: BookSource, bookUrl: String, fallbackName: String, fallbackAuthor: String? = nil,
@@ -113,6 +116,11 @@ struct BookDetailView: View {
         .sheet(isPresented: $isShowingCoverPicker) {
             CoverPickerView(bookName: name) { newCoverUrl in
                 await setCover(newCoverUrl)
+            }
+        }
+        .sheet(isPresented: $isShowingExportSheet) {
+            if let exportURL {
+                ShareSheet(items: [exportURL])
             }
         }
         .task { await load() }
@@ -227,6 +235,11 @@ struct BookDetailView: View {
                 if downloadedCount < previewChapters.count {
                     Button("继续缓存") { startDownload() }
                         .font(.caption)
+                } else if isExporting {
+                    ProgressView().font(.caption)
+                } else {
+                    Button("导出 txt") { Task { await exportTxt() } }
+                        .font(.caption)
                 }
                 Button("删除缓存", role: .destructive) {
                     Task { await deleteCache() }
@@ -317,6 +330,26 @@ struct BookDetailView: View {
     private func deleteCache() async {
         try? await env.chapterCacheStore.removeBook(bookUrl: bookUrl)
         downloadedCount = 0
+    }
+
+    /// Only offered once every previewed chapter is cached (`downloadedCount == previewChapters
+    /// .count`, see `downloadSection`) -- there's no server-side export endpoint, so re-assembling
+    /// the book requires every chapter to already be sitting in `ChapterCacheStore`.
+    private func exportTxt() async {
+        isExporting = true
+        defer { isExporting = false }
+        var chapterTexts: [(title: String, text: String)] = []
+        for chapter in previewChapters {
+            guard let content = try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: chapter.index) else { continue }
+            chapterTexts.append((title: chapter.title, text: content.text))
+        }
+        guard !chapterTexts.isEmpty else { return }
+        let combined = TxtExporter.combine(bookTitle: name, chapters: chapterTexts)
+        let fileName = TxtExporter.sanitizedFileName(name)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).txt")
+        guard (try? combined.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        exportURL = url
+        isShowingExportSheet = true
     }
 
     private func setCover(_ newCoverUrl: String) async {

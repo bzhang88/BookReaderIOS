@@ -14,6 +14,8 @@ struct LocalBookListView: View {
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
     @State private var isImporting = false
+    @State private var exportURL: URL?
+    @State private var isShowingExportSheet = false
 
     var body: some View {
         List {
@@ -37,6 +39,14 @@ struct LocalBookListView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                }
+                .swipeActions(edge: .leading) {
+                    Button {
+                        exportTxt(book)
+                    } label: {
+                        Label("导出", systemImage: "square.and.arrow.up")
+                    }
+                    .tint(.blue)
                 }
             }
             .onDelete(perform: delete)
@@ -65,7 +75,25 @@ struct LocalBookListView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .sheet(isPresented: $isShowingExportSheet) {
+            if let exportURL {
+                ShareSheet(items: [exportURL])
+            }
+        }
         .task { await reload() }
+    }
+
+    /// All of a local book's chapters are already in memory (no network/cache round-trip needed,
+    /// unlike a network book's export), so this can write the temp file synchronously right away.
+    private func exportTxt(_ book: LocalBook) {
+        let combined = TxtExporter.combine(
+            bookTitle: book.title, chapters: book.chapters.map { (title: $0.title, text: $0.text) }
+        )
+        let fileName = TxtExporter.sanitizedFileName(book.title)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).txt")
+        guard (try? combined.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        exportURL = url
+        isShowingExportSheet = true
     }
 
     private func reload() async {
