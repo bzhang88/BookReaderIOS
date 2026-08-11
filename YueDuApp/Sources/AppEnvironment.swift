@@ -27,6 +27,7 @@ final class AppEnvironment: ObservableObject {
     let httpTTSEngineStore: HttpTTSEngineStore
     let httpTTSCache: HttpTTSCache
     let coverGalleryStore: CoverGalleryStore
+    let sourceVariableStore: SourceVariableStore
     let httpClient: any HTTPClient
     #if canImport(Network)
     let lanWebServer: LANWebServer
@@ -55,6 +56,7 @@ final class AppEnvironment: ObservableObject {
         httpTTSEngineStore = HttpTTSEngineStore(fileURL: appSupport.appendingPathComponent("http_tts_engines.json"))
         httpTTSCache = HttpTTSCache(directory: appSupport.appendingPathComponent("http_tts_cache", isDirectory: true))
         coverGalleryStore = CoverGalleryStore(fileURL: appSupport.appendingPathComponent("cover_gallery.json"))
+        sourceVariableStore = SourceVariableStore(fileURL: appSupport.appendingPathComponent("source_variables.json"))
         httpClient = URLSessionHTTPClient()
         #if canImport(Network)
         lanWebServer = LANWebServer(

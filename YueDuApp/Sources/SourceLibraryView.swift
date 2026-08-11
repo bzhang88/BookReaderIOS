@@ -104,6 +104,11 @@ struct SourceLibraryView: View {
                         } label: {
                             Label("手动验证（过验证码等）", systemImage: "checkmark.shield")
                         }
+                        NavigationLink {
+                            SourceVariableAndCookieView(source: source)
+                        } label: {
+                            Label("变量与 Cookie", systemImage: "key")
+                        }
                     }
                 }
                 .onDelete(perform: delete)
