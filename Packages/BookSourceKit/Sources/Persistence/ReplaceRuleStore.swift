@@ -19,7 +19,11 @@ public actor ReplaceRuleStore {
     @discardableResult
     public func add(_ rule: ReplaceRule) async throws -> [ReplaceRule] {
         var rules = try await all()
-        rules.append(rule)
+        if let idx = rules.firstIndex(where: { $0.id == rule.id }) {
+            rules[idx] = rule
+        } else {
+            rules.append(rule)
+        }
         try await store.save(rules)
         return rules
     }

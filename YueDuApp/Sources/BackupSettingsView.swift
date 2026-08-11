@@ -9,6 +9,12 @@ import NetworkClient
 /// version. Which categories get included is user-selectable (see `BackupCategory`) rather than
 /// always being "everything" -- some data is large (local books' full text) and some just isn't
 /// everyone's concern to sync (RSS subscriptions, AI provider list).
+///
+/// Restoring downloads everything for the selected categories first, computes what it would
+/// change (`RestorePreviewCalculator`, per-category new/update/skip counts against what's already
+/// on this device) and shows that as a confirmation sheet -- nothing is written until the user
+/// taps "确认恢复". Previously "从云端恢复" applied every category immediately with no way to see
+/// what was about to be overwritten.
 struct BackupSettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @AppStorage("webdav.baseURL") private var baseURL: String = ""
@@ -18,6 +24,7 @@ struct BackupSettingsView: View {
     @State private var password: String = KeychainStore.get("webdav.password") ?? ""
     @State private var statusMessage: String?
     @State private var isWorking = false
+    @State private var pendingRestore: RestorePlan?
 
     private var enabledCategories: Set<BackupCategory> {
         Set(enabledCategoriesRaw.split(separator: ",").compactMap { BackupCategory(rawValue: String($0)) })
@@ -50,8 +57,10 @@ struct BackupSettingsView: View {
             Section {
                 Button("立即备份") { Task { await backup() } }
                     .disabled(isWorking || baseURL.isEmpty || enabledCategories.isEmpty)
-                Button("从云端恢复") { Task { await restore() } }
+                Button("从云端恢复") { Task { await downloadAndPreviewRestore() } }
                     .disabled(isWorking || baseURL.isEmpty || enabledCategories.isEmpty)
+            } footer: {
+                Text("恢复前会先显示每一类将新增/更新/跳过多少项，确认后才会真正写入。")
             }
 
             if isWorking {
@@ -70,6 +79,18 @@ struct BackupSettingsView: View {
         }
         .navigationTitle("备份与同步")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $pendingRestore) { plan in
+            NavigationStack {
+                RestorePreviewSheet(
+                    plan: plan,
+                    onConfirm: {
+                        pendingRestore = nil
+                        Task { await applyRestore(plan) }
+                    },
+                    onCancel: { pendingRestore = nil }
+                )
+            }
+        }
     }
 
     private func setCategory(_ category: BackupCategory, enabled: Bool) {
@@ -158,64 +179,176 @@ struct BackupSettingsView: View {
         isWorking = false
     }
 
-    private func restore() async {
+    /// Downloads and decodes every selected category (without writing anything yet), diffs each
+    /// against what's already on this device, and hands the result to a confirmation sheet.
+    private func downloadAndPreviewRestore() async {
         isWorking = true
         statusMessage = nil
-        var summary: [String] = []
         do {
             let client = makeClient()
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let categories = enabledCategories
+            var plan = RestorePlan()
+            var previews: [RestoreCategoryPreview] = []
 
             if categories.contains(.bookSources) {
-                let json = try await client.download(path: BackupCategory.bookSources.fileName)
-                let items = try decoder.decode([BookSource].self, from: Data(json.utf8))
+                let items = try decoder.decode(
+                    [BookSource].self, from: Data(try await client.download(path: BackupCategory.bookSources.fileName).utf8)
+                )
+                plan.bookSources = items
+                let localIds = Set(try await env.bookSourceStore.all().map(\.bookSourceUrl))
+                previews.append(RestoreCategoryPreview(
+                    category: .bookSources, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.bookSourceUrl), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.shelf) {
+                let items = try decoder.decode(
+                    [ShelfBook].self, from: Data(try await client.download(path: BackupCategory.shelf.fileName).utf8)
+                )
+                plan.shelf = items
+                let localIds = Set(try await env.shelfStore.all().map(\.bookUrl))
+                previews.append(RestoreCategoryPreview(
+                    category: .shelf, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.bookUrl), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.replaceRules) {
+                let items = try decoder.decode(
+                    [ReplaceRule].self, from: Data(try await client.download(path: BackupCategory.replaceRules.fileName).utf8)
+                )
+                plan.replaceRules = items
+                let localIds = Set(try await env.replaceRuleStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .replaceRules, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.highlightRules) {
+                let items = try decoder.decode(
+                    [HighlightRule].self, from: Data(try await client.download(path: BackupCategory.highlightRules.fileName).utf8)
+                )
+                plan.highlightRules = items
+                let localIds = Set(try await env.highlightRuleStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .highlightRules, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.tagGroupRules) {
+                let items = try decoder.decode(
+                    [TagGroupRule].self, from: Data(try await client.download(path: BackupCategory.tagGroupRules.fileName).utf8)
+                )
+                plan.tagGroupRules = items
+                let localIds = Set(try await env.tagGroupRuleStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .tagGroupRules, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.txtSplitRules) {
+                let items = try decoder.decode(
+                    [TxtSplitRule].self, from: Data(try await client.download(path: BackupCategory.txtSplitRules.fileName).utf8)
+                )
+                plan.txtSplitRules = items
+                let localIds = Set(try await env.txtSplitRuleStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .txtSplitRules, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.rssSources) {
+                let items = try decoder.decode(
+                    [RssSource].self, from: Data(try await client.download(path: BackupCategory.rssSources.fileName).utf8)
+                )
+                plan.rssSources = items
+                let localIds = Set(try await env.rssSourceStore.all().map(\.sourceUrl))
+                previews.append(RestoreCategoryPreview(
+                    category: .rssSources, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.sourceUrl), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.bookmarks) {
+                let items = try decoder.decode(
+                    [Bookmark].self, from: Data(try await client.download(path: BackupCategory.bookmarks.fileName).utf8)
+                )
+                plan.bookmarks = items
+                let localIds = Set(try await env.bookmarkStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .bookmarks, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .appendDedup)
+                ))
+            }
+            if categories.contains(.localBooks) {
+                let items = try decoder.decode(
+                    [LocalBook].self, from: Data(try await client.download(path: BackupCategory.localBooks.fileName).utf8)
+                )
+                plan.localBooks = items
+                let localIds = Set(try await env.localBookStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .localBooks, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .appendDedup)
+                ))
+            }
+            if categories.contains(.aiProviders) {
+                let items = try decoder.decode(
+                    [AIProvider].self, from: Data(try await client.download(path: BackupCategory.aiProviders.fileName).utf8)
+                )
+                plan.aiProviders = items
+                let localIds = Set(try await env.aiProviderStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .aiProviders, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+
+            plan.previews = previews
+            pendingRestore = plan
+        } catch {
+            statusMessage = "预览失败: \(error)"
+        }
+        isWorking = false
+    }
+
+    /// Actually writes a previously downloaded-and-previewed plan into the local stores. Reuses the
+    /// same per-category merge behavior the old direct-restore code had (upsert for most categories;
+    /// dedupe-by-id before appending for bookmarks/local books, since those stores' `add` always
+    /// appends).
+    private func applyRestore(_ plan: RestorePlan) async {
+        isWorking = true
+        statusMessage = nil
+        var summary: [String] = []
+        do {
+            if let items = plan.bookSources {
                 let (inserted, updated) = try await env.bookSourceStore.importSources(items)
                 summary.append("书源新增 \(inserted)/更新 \(updated)")
             }
-            if categories.contains(.shelf) {
-                let json = try await client.download(path: BackupCategory.shelf.fileName)
-                let items = try decoder.decode([ShelfBook].self, from: Data(json.utf8))
+            if let items = plan.shelf {
                 for item in items { try await env.shelfStore.addOrUpdate(item) }
                 summary.append("书架 \(items.count)")
             }
-            if categories.contains(.replaceRules) {
-                let json = try await client.download(path: BackupCategory.replaceRules.fileName)
-                let items = try decoder.decode([ReplaceRule].self, from: Data(json.utf8))
+            if let items = plan.replaceRules {
                 for item in items { try await env.replaceRuleStore.add(item) }
                 summary.append("净化规则 \(items.count)")
             }
-            if categories.contains(.highlightRules) {
-                let json = try await client.download(path: BackupCategory.highlightRules.fileName)
-                let items = try decoder.decode([HighlightRule].self, from: Data(json.utf8))
+            if let items = plan.highlightRules {
                 for item in items { try await env.highlightRuleStore.add(item) }
                 summary.append("高亮规则 \(items.count)")
             }
-            if categories.contains(.tagGroupRules) {
-                let json = try await client.download(path: BackupCategory.tagGroupRules.fileName)
-                let items = try decoder.decode([TagGroupRule].self, from: Data(json.utf8))
+            if let items = plan.tagGroupRules {
                 for item in items { try await env.tagGroupRuleStore.add(item) }
                 summary.append("分组规则 \(items.count)")
             }
-            if categories.contains(.txtSplitRules) {
-                let json = try await client.download(path: BackupCategory.txtSplitRules.fileName)
-                let items = try decoder.decode([TxtSplitRule].self, from: Data(json.utf8))
+            if let items = plan.txtSplitRules {
                 for item in items { try await env.txtSplitRuleStore.add(item) }
                 summary.append("TXT 分章规则 \(items.count)")
             }
-            if categories.contains(.rssSources) {
-                let json = try await client.download(path: BackupCategory.rssSources.fileName)
-                let items = try decoder.decode([RssSource].self, from: Data(json.utf8))
+            if let items = plan.rssSources {
                 for item in items { try await env.rssSourceStore.add(item) }
                 summary.append("RSS 订阅源 \(items.count)")
             }
-            if categories.contains(.bookmarks) {
-                // BookmarkStore.add always appends (a bookmark isn't "the same slot" the way a rule
-                // with a stable id is meant to be upserted into) -- dedupe by id here so restoring
-                // twice doesn't double every bookmark.
-                let json = try await client.download(path: BackupCategory.bookmarks.fileName)
-                let items = try decoder.decode([Bookmark].self, from: Data(json.utf8))
+            if let items = plan.bookmarks {
                 let existingIds = Set(try await env.bookmarkStore.all().map(\.id))
                 var added = 0
                 for item in items where !existingIds.contains(item.id) {
@@ -224,10 +357,7 @@ struct BackupSettingsView: View {
                 }
                 summary.append("书签新增 \(added)")
             }
-            if categories.contains(.localBooks) {
-                // Same reasoning as bookmarks: LocalBookStore.add always appends.
-                let json = try await client.download(path: BackupCategory.localBooks.fileName)
-                let items = try decoder.decode([LocalBook].self, from: Data(json.utf8))
+            if let items = plan.localBooks {
                 let existingIds = Set(try await env.localBookStore.all().map(\.id))
                 var added = 0
                 for item in items where !existingIds.contains(item.id) {
@@ -236,9 +366,7 @@ struct BackupSettingsView: View {
                 }
                 summary.append("本地书籍新增 \(added)")
             }
-            if categories.contains(.aiProviders) {
-                let json = try await client.download(path: BackupCategory.aiProviders.fileName)
-                let items = try decoder.decode([AIProvider].self, from: Data(json.utf8))
+            if let items = plan.aiProviders {
                 for item in items { try await env.aiProviderStore.add(item) }
                 summary.append("AI 服务商 \(items.count)")
             }
@@ -248,5 +376,74 @@ struct BackupSettingsView: View {
             statusMessage = "恢复失败: \(error)"
         }
         isWorking = false
+    }
+}
+
+/// One category's decoded remote data plus its precomputed diff, waiting on user confirmation.
+/// Holding the already-decoded arrays (rather than re-downloading on confirm) means the preview the
+/// user reviewed is exactly what gets written -- no risk of the server-side data changing between
+/// preview and confirm.
+private struct RestorePlan: Identifiable {
+    let id = UUID()
+    var bookSources: [BookSource]?
+    var shelf: [ShelfBook]?
+    var replaceRules: [ReplaceRule]?
+    var highlightRules: [HighlightRule]?
+    var tagGroupRules: [TagGroupRule]?
+    var txtSplitRules: [TxtSplitRule]?
+    var rssSources: [RssSource]?
+    var bookmarks: [Bookmark]?
+    var localBooks: [LocalBook]?
+    var aiProviders: [AIProvider]?
+    var previews: [RestoreCategoryPreview] = []
+}
+
+private struct RestoreCategoryPreview: Identifiable {
+    let category: BackupCategory
+    let remoteCount: Int
+    let diff: RestoreDiff
+    var id: String { category.rawValue }
+
+    var summary: String {
+        if diff.willUpdate > 0 {
+            return "远端 \(remoteCount) 项 → 新增 \(diff.willInsert)，更新 \(diff.willUpdate)"
+        } else if diff.willSkip > 0 {
+            return "远端 \(remoteCount) 项 → 新增 \(diff.willInsert)，跳过 \(diff.willSkip) 项重复"
+        } else if remoteCount == 0 {
+            return "远端没有数据"
+        } else {
+            return "远端 \(remoteCount) 项 → 全部新增"
+        }
+    }
+}
+
+private struct RestorePreviewSheet: View {
+    let plan: RestorePlan
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(plan.previews) { preview in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(preview.category.displayName).font(.subheadline)
+                        Text(preview.summary).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } footer: {
+                Text("确认后会立即写入本机存储，覆盖同名/同 ID 的已有数据。")
+            }
+        }
+        .navigationTitle("恢复预览")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消", action: onCancel)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("确认恢复", action: onConfirm)
+            }
+        }
     }
 }

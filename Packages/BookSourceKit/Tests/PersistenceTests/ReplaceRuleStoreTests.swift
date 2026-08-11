@@ -16,6 +16,20 @@ final class ReplaceRuleStoreTests: XCTestCase {
         XCTAssertEqual(all.map(\.name), ["Ad"])
     }
 
+    func testAddWithExistingIDUpdatesInPlaceInsteadOfDuplicating() async throws {
+        let store = ReplaceRuleStore(fileURL: tempFileURL())
+        let rule = ReplaceRule(name: "Original", pattern: "a")
+        try await store.add(rule)
+
+        var edited = rule
+        edited.name = "Edited"
+        try await store.add(edited)
+
+        let all = try await store.all()
+        XCTAssertEqual(all.count, 1)
+        XCTAssertEqual(all.first?.name, "Edited")
+    }
+
     func testEnabledFiltersOutDisabledRules() async throws {
         let store = ReplaceRuleStore(fileURL: tempFileURL())
         try await store.add(ReplaceRule(name: "On", pattern: "a", enabled: true))
