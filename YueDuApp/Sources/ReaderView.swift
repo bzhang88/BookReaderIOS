@@ -28,6 +28,7 @@ struct ReaderView: View {
     @State private var isShowingContentSearch = false
     @State private var isShowingAISummary = false
     @State private var isShowingDictLookup = false
+    @State private var isShowingContentEdit = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
     // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
@@ -220,6 +221,11 @@ struct ReaderView: View {
                         } label: {
                             Image(systemName: isAutoScrolling ? "pause.circle" : "arrow.down.circle")
                         }
+                        Button {
+                            isShowingContentEdit = true
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
                         Spacer()
                     }
                     .font(.title3)
@@ -337,6 +343,11 @@ struct ReaderView: View {
         }
         .sheet(isPresented: $isShowingDictLookup) {
             DictLookupView()
+        }
+        .sheet(isPresented: $isShowingContentEdit) {
+            ChapterEditView(source: source, chapter: chapter, bookUrl: bookUrl, currentText: text) { edited in
+                text = edited
+            }
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
