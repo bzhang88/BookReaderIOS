@@ -8,7 +8,32 @@ struct ShelfView: View {
     @State private var books: [ShelfBook] = []
     @State private var changeSourceTarget: ShelfBook?
     @State private var detailTarget: ShelfBook?
+    @State private var groupPickerTarget: ShelfBook?
     @State private var isAutoGrouping = false
+
+    /// Sections books by `group` -- a mix of names assigned by the "自动分组" tag-rule sweep and
+    /// ones set manually via the row's "设置分组" menu; both write the same field (see `ShelfBook
+    /// .group`'s doc comment), so there's no separate "manual group" data model to keep in sync.
+    /// Un-grouped books land in a synthetic "未分组" section, sorted last.
+    private var groupedSections: [(key: String, books: [ShelfBook])] {
+        let grouped = Dictionary(grouping: books) { book -> String in
+            let trimmed = book.group?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? "未分组" : trimmed
+        }
+        return grouped.sorted { lhs, rhs in
+            if lhs.key == "未分组" { return false }
+            if rhs.key == "未分组" { return true }
+            return lhs.key.localizedStandardCompare(rhs.key) == .orderedAscending
+        }.map { (key: $0.key, books: $0.value) }
+    }
+
+    private var hasAnyGroup: Bool {
+        books.contains { !($0.group?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
+    }
+
+    private var existingGroupNames: [String] {
+        groupedSections.map(\.key).filter { $0 != "未分组" }
+    }
 
     var body: some View {
         NavigationStack {
@@ -18,55 +43,21 @@ struct ShelfView: View {
                         "书架是空的", systemImage: "books.vertical",
                         description: Text("点右上角搜索图标找一本书，加入书架")
                     )
+                } else if hasAnyGroup {
+                    ForEach(groupedSections, id: \.key) { section in
+                        Section(header: Text(section.key)) {
+                            ForEach(section.books) { book in
+                                bookRow(book)
+                            }
+                            .onDelete { offsets in delete(offsets.map { section.books[$0] }) }
+                        }
+                    }
+                } else {
+                    ForEach(books) { book in
+                        bookRow(book)
+                    }
+                    .onDelete { offsets in delete(offsets.map { books[$0] }) }
                 }
-                ForEach(books) { book in
-                    NavigationLink {
-                        ShelfBookResumeView(book: book)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Text(book.name).font(.headline)
-                                if let group = book.group, !group.isEmpty {
-                                    Text(group)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.accentColor.opacity(0.15), in: Capsule())
-                                        .foregroundStyle(Color.accentColor)
-                                }
-                            }
-                            if let author = book.author, !author.isEmpty {
-                                Text(author).font(.subheadline).foregroundStyle(.secondary)
-                            }
-                            if let title = book.lastReadChapterTitle {
-                                Text("上次读到: \(title)").font(.caption).foregroundStyle(.secondary)
-                            } else if let last = book.lastChapterTitle, !last.isEmpty {
-                                Text("最新: \(last)").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            changeSourceTarget = book
-                        } label: {
-                            Label("换源", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .tint(.orange)
-                    }
-                    .contextMenu {
-                        Button {
-                            detailTarget = book
-                        } label: {
-                            Label("详情", systemImage: "info.circle")
-                        }
-                        Button {
-                            changeSourceTarget = book
-                        } label: {
-                            Label("换源", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
-                }
-                .onDelete(perform: delete)
             }
             .navigationTitle("书架")
             .toolbar {
@@ -116,12 +107,79 @@ struct ShelfView: View {
                     }
                 }
             }
+            .sheet(item: $groupPickerTarget) { book in
+                ShelfGroupPickerView(book: book, existingGroups: existingGroupNames) { newGroup in
+                    await setGroup(of: book, to: newGroup)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bookRow(_ book: ShelfBook) -> some View {
+        NavigationLink {
+            ShelfBookResumeView(book: book)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(book.name).font(.headline)
+                    if let group = book.group, !group.isEmpty {
+                        Text(group)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                if let author = book.author, !author.isEmpty {
+                    Text(author).font(.subheadline).foregroundStyle(.secondary)
+                }
+                if let title = book.lastReadChapterTitle {
+                    Text("上次读到: \(title)").font(.caption).foregroundStyle(.secondary)
+                } else if let last = book.lastChapterTitle, !last.isEmpty {
+                    Text("最新: \(last)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .swipeActions(edge: .leading) {
+            Button {
+                changeSourceTarget = book
+            } label: {
+                Label("换源", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .tint(.orange)
+        }
+        .contextMenu {
+            Button {
+                detailTarget = book
+            } label: {
+                Label("详情", systemImage: "info.circle")
+            }
+            Button {
+                changeSourceTarget = book
+            } label: {
+                Label("换源", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Button {
+                groupPickerTarget = book
+            } label: {
+                Label("设置分组", systemImage: "folder")
+            }
         }
     }
 
     private func reload() async {
         let all = (try? await env.shelfStore.all()) ?? []
         books = all.sorted { ($0.lastReadAt ?? $0.addedAt) > ($1.lastReadAt ?? $1.addedAt) }
+    }
+
+    /// Sets (or clears, when `newGroup` is nil) one book's group directly -- shares `setGroups`
+    /// with the batch auto-grouping sweep rather than a separate single-book store method, since
+    /// the underlying write is identical either way.
+    private func setGroup(of book: ShelfBook, to newGroup: String?) async {
+        try? await env.shelfStore.setGroups([book.bookUrl: newGroup])
+        await reload()
     }
 
     /// Matches every shelf book against the user's enabled tag-group rules and saves the results in
@@ -142,8 +200,7 @@ struct ShelfView: View {
         await reload()
     }
 
-    private func delete(at offsets: IndexSet) {
-        let toDelete = offsets.map { books[$0] }
+    private func delete(_ toDelete: [ShelfBook]) {
         Task {
             for book in toDelete {
                 try? await env.shelfStore.remove(bookUrl: book.bookUrl)
