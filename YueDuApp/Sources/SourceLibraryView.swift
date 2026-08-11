@@ -12,6 +12,7 @@ struct SourceLibraryView: View {
     @State private var isImporterPresented = false
     @State private var isShowingURLImport = false
     @State private var isShowingTrash = false
+    @State private var isShowingSubscriptions = false
     @State private var importSummary: String?
     @State private var errorMessage: String?
     @State private var editingSource: BookSource?
@@ -105,6 +106,7 @@ struct SourceLibraryView: View {
                     Menu {
                         Button("新建书源") { isCreatingSource = true }
                         Button("从网址导入") { isShowingURLImport = true }
+                        Button("订阅列表") { isShowingSubscriptions = true }
                         Button("回收站") { isShowingTrash = true }
                         Button("全部启用") { setAllEnabled(true) }.disabled(sources.isEmpty)
                         Button("全部停用") { setAllEnabled(false) }.disabled(sources.isEmpty)
@@ -130,6 +132,11 @@ struct SourceLibraryView: View {
             .sheet(isPresented: $isShowingTrash, onDismiss: { Task { await reload() } }) {
                 NavigationStack {
                     SourceTrashView()
+                }
+            }
+            .sheet(isPresented: $isShowingSubscriptions, onDismiss: { Task { await reload() } }) {
+                NavigationStack {
+                    SourceSubscriptionListView()
                 }
             }
             .navigationDestination(isPresented: Binding(
