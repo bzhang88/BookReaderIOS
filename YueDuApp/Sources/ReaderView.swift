@@ -23,6 +23,7 @@ struct ReaderView: View {
     @State private var errorMessage: String?
     @State private var isShowingSettings = false
     @State private var isShowingChangeSource = false
+    @State private var isShowingChapterSourceSwitch = false
     @State private var isShowingContentSearch = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
@@ -156,8 +157,17 @@ struct ReaderView: View {
                             Image(systemName: readAloud.isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
                         }
 
-                        Button {
-                            isShowingChangeSource = true
+                        Menu {
+                            Button {
+                                isShowingChangeSource = true
+                            } label: {
+                                Label("换源（整本书）", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            Button {
+                                isShowingChapterSourceSwitch = true
+                            } label: {
+                                Label("本章换源", systemImage: "doc.badge.arrow.up")
+                            }
                         } label: {
                             Image(systemName: "arrow.triangle.2.circlepath")
                         }
@@ -214,6 +224,15 @@ struct ReaderView: View {
                     currentBookSourceUrl: source.bookSourceUrl, bookName: bookTitle, bookAuthor: nil
                 ) { newSource, match in
                     await switchSource(to: newSource, match: match)
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingChapterSourceSwitch) {
+            NavigationStack {
+                ChangeSourceView(
+                    currentBookSourceUrl: source.bookSourceUrl, bookName: bookTitle, bookAuthor: nil
+                ) { newSource, match in
+                    await switchChapterSource(to: newSource, match: match)
                 }
             }
         }
@@ -324,6 +343,36 @@ struct ReaderView: View {
             try? await env.shelfStore.remove(bookUrl: oldBookUrl)
             try? await env.shelfStore.addOrUpdate(updated)
         }
+    }
+
+    /// Fixes just the chapter currently on screen without switching the book's source for anything
+    /// else -- finds this chapter's title in another source's table of contents (falling back to
+    /// the same index if no title matches), fetches its content from there, and saves it into
+    /// `chapterCacheStore` under the *original* book/index. `load()`'s existing cache-first lookup
+    /// then picks it up transparently, exactly as if the chapter had been downloaded normally, so
+    /// the fix persists across relaunches without any new loading path.
+    private func switchChapterSource(to newSource: BookSource, match: SearchResult) async {
+        let originalIndex = chapter.index
+        let originalTitle = chapter.title
+        isLoading = true
+        do {
+            let bookInfo = try await BookInfoService.fetchBookInfo(source: newSource, bookURL: match.bookUrl, httpClient: env.httpClient)
+            let altChapters = try await TocService.fetchChapterList(source: newSource, tocURL: bookInfo.tocUrl, httpClient: env.httpClient)
+            let byTitle = altChapters.first(where: { $0.title == originalTitle })
+            let fallback: BookChapter? = altChapters.indices.contains(originalIndex) ? altChapters[originalIndex] : altChapters.first
+            guard let matchedChapter = byTitle ?? fallback else {
+                errorMessage = "对方书源没有可用章节"
+                isLoading = false
+                return
+            }
+            let content = try await ContentService.fetchContent(source: newSource, chapter: matchedChapter, httpClient: env.httpClient)
+            try await env.chapterCacheStore.save(bookUrl: bookUrl, index: originalIndex, content: content)
+        } catch {
+            errorMessage = "本章换源失败: \(error)"
+            isLoading = false
+            return
+        }
+        await load()
     }
 
     /// Builds one paragraph's flowing text as a concatenation of styled `Text` runs -- SwiftUI's
