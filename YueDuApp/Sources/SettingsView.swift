@@ -5,9 +5,9 @@ import SwiftUI
 /// `Legado_Max`'s real `pref_main.xml`: a few rule-management screens ungrouped at the top
 /// (书源管理 first, exactly like Legado puts book-source management as its very first row), then
 /// titled "设置"/"其他" groups, then an untitled "关于" group at the bottom. Our own feature set
-/// doesn't map 1:1 onto Legado's exact row list (no 词典规则/Web服务 yet, but extra items like
-/// 高亮规则/分组规则 that Legado doesn't have) -- the *grouping pattern* is what's being matched,
-/// not a literal row-for-row copy.
+/// doesn't map 1:1 onto Legado's exact row list (no 词典规则 yet, but extra items like 高亮规则/
+/// 分组规则 that Legado doesn't have) -- the *grouping pattern* is what's being matched, not a
+/// literal row-for-row copy.
 struct SettingsView: View {
     var body: some View {
         NavigationStack {
@@ -37,6 +37,11 @@ struct SettingsView: View {
                         TagGroupRuleListView()
                     } label: {
                         Label("分组规则", systemImage: "tag")
+                    }
+                    NavigationLink {
+                        LANWebServiceView()
+                    } label: {
+                        Label("Web 服务", systemImage: "network")
                     }
                 }
 

@@ -13,7 +13,8 @@ let package = Package(
         .library(name: "NetworkClient", targets: ["NetworkClient"]),
         .library(name: "WebBookOrchestrator", targets: ["WebBookOrchestrator"]),
         .library(name: "Persistence", targets: ["Persistence"]),
-        .library(name: "AIService", targets: ["AIService"])
+        .library(name: "AIService", targets: ["AIService"]),
+        .library(name: "LANWebServerCore", targets: ["LANWebServerCore"])
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.0")
@@ -54,6 +55,9 @@ let package = Package(
                 "NetworkClient"
             ]
         ),
+        .target(
+            name: "LANWebServerCore"
+        ),
         .testTarget(
             name: "BookSourceModelTests",
             dependencies: ["BookSourceModel"]
@@ -77,6 +81,10 @@ let package = Package(
         .testTarget(
             name: "AIServiceTests",
             dependencies: ["AIService", "BookSourceModel", "NetworkClient"]
+        ),
+        .testTarget(
+            name: "LANWebServerCoreTests",
+            dependencies: ["LANWebServerCore"]
         )
     ]
 )

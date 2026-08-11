@@ -23,6 +23,9 @@ final class AppEnvironment: ObservableObject {
     let loginCookieStore: LoginCookieStore
     let shelfGroupStore: ShelfGroupStore
     let httpClient: any HTTPClient
+    #if canImport(Network)
+    let lanWebServer: LANWebServer
+    #endif
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -43,6 +46,12 @@ final class AppEnvironment: ObservableObject {
         loginCookieStore = LoginCookieStore(fileURL: appSupport.appendingPathComponent("login_cookies.json"))
         shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
         httpClient = URLSessionHTTPClient()
+        #if canImport(Network)
+        lanWebServer = LANWebServer(
+            shelfStore: shelfStore, bookSourceStore: bookSourceStore,
+            chapterCacheStore: chapterCacheStore, httpClient: httpClient
+        )
+        #endif
 
         let cookieStore = loginCookieStore
         Task { await Self.reinjectSavedCookies(from: cookieStore) }

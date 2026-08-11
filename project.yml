@@ -76,3 +76,5 @@ targets:
         product: Persistence
       - package: BookSourceKit
         product: AIService
+      - package: BookSourceKit
+        product: LANWebServerCore
