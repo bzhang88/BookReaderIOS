@@ -36,6 +36,8 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    @AppStorage(ReaderSettingsKey.customThemeBackgroundHex) private var customThemeBackgroundHex: String = "#FFFFFF"
+    @AppStorage(ReaderSettingsKey.customThemeTextHex) private var customThemeTextHex: String = "#0D0D0D"
     @State private var scheduleTick = Date()
     private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -66,7 +68,7 @@ struct LocalReaderView: View {
                     Text(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
-                        .foregroundStyle(theme.textColor(for: colorScheme))
+                        .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
                         .padding(.horizontal, 4)
                         .id(index)
                 }
@@ -74,7 +76,7 @@ struct LocalReaderView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(theme.backgroundColor(for: colorScheme))
+        .background(theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)))
         .overlay {
             if isEyeCareActive {
                 Color(red: 1, green: 0.65, blue: 0.2)
@@ -289,6 +291,7 @@ struct LocalReaderSettingsSheet: View {
             Form {
                 Section("主题") {
                     ThemeSwatchPicker(theme: $theme)
+                    CustomThemeEditor(theme: $theme)
                 }
 
                 Section("字体") {

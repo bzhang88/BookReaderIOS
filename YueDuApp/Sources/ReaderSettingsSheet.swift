@@ -36,6 +36,7 @@ struct ReaderSettingsSheet: View {
             Form {
                 Section("主题") {
                     ThemeSwatchPicker(theme: $theme)
+                    CustomThemeEditor(theme: $theme)
                 }
 
                 Section("字体") {

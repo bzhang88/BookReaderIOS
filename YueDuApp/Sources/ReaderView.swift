@@ -69,6 +69,8 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
     @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
+    @AppStorage(ReaderSettingsKey.customThemeBackgroundHex) private var customThemeBackgroundHex: String = "#FFFFFF"
+    @AppStorage(ReaderSettingsKey.customThemeTextHex) private var customThemeTextHex: String = "#0D0D0D"
     // Re-evaluated every minute so a schedule-only filter actually turns on/off while the reader
     // stays open across the boundary, not just whenever the view happens to redraw for other reasons.
     @State private var scheduleTick = Date()
@@ -132,7 +134,7 @@ struct ReaderView: View {
                     }
             )
         }
-        .background(theme.backgroundColor(for: colorScheme))
+        .background(theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)))
         .overlay {
             if isLoading {
                 ProgressView()
@@ -696,7 +698,7 @@ struct ReaderView: View {
             if segment.isHighlighted {
                 return partial + Text(segment.text).foregroundStyle(.orange).bold()
             } else {
-                return partial + Text(segment.text).foregroundStyle(theme.textColor(for: colorScheme))
+                return partial + Text(segment.text).foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
             }
         }
     }

@@ -8,6 +8,8 @@ import SwiftUI
 /// doesn't map 1:1 onto Legado's exact row list (extra items like 高亮规则/分组规则 that Legado
 /// doesn't have) -- the *grouping pattern* is what's being matched, not a literal row-for-row copy.
 struct SettingsView: View {
+    @AppStorage(ReaderSettingsKey.appFontScale) private var appFontScale: AppFontScale = .standard
+
     var body: some View {
         NavigationStack {
             List {
@@ -74,6 +76,13 @@ struct SettingsView: View {
                         AppLockSettingsView()
                     } label: {
                         Label("本地密码锁", systemImage: "lock")
+                    }
+                    Picker(selection: $appFontScale) {
+                        ForEach(AppFontScale.allCases) { scale in
+                            Text(scale.displayName).tag(scale)
+                        }
+                    } label: {
+                        Label("App 字体大小", systemImage: "textformat.size")
                     }
                 }
 
