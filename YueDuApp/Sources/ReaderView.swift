@@ -51,6 +51,12 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
     @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
     @AppStorage(ReaderSettingsKey.tapZoneGrid) private var tapZoneGridRaw: String = ReaderTapZoneGrid.standardEncoded
+    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
+    @State private var volumeButtonController = VolumeButtonPageTurnController()
+    // Not real character/pixel scroll position -- a simple step counter over paragraph indices,
+    // same "honest approximation" the auto-scroll feature already uses (see its own doc comment).
+    // Resets to 0 on every chapter change.
+    @State private var volumeScrollIndex = 0
 
     init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
         self._source = State(initialValue: source)
@@ -290,14 +296,25 @@ struct ReaderView: View {
         .sheet(isPresented: $isShowingAISummary) {
             AIChapterSummaryView(chapterTitle: chapter.title, chapterText: text)
         }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = keepScreenOn
+            startVolumeButtonPagingIfEnabled(proxy: scrollProxy)
+        }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             readAloud.stop()
             stopAutoScroll()
+            volumeButtonController.stop()
         }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
+        }
+        .onChange(of: volumeKeyPageEnabled) { _, isEnabled in
+            if isEnabled {
+                startVolumeButtonPagingIfEnabled(proxy: scrollProxy)
+            } else {
+                volumeButtonController.stop()
+            }
         }
         .onChange(of: readAloudRate) { _, newValue in
             // AVSpeechSynthesizer can't change an utterance's rate mid-speech -- this takes effect
@@ -314,8 +331,38 @@ struct ReaderView: View {
             // indices that belonged to the chapter that just got replaced, so it has to stop too
             // rather than silently continuing to scroll a chapter that no longer matches its state.
             stopAutoScroll()
+            volumeScrollIndex = 0
         }
         }
+    }
+
+    /// Volume Up steps back, Volume Down steps forward -- Legado's own convention wasn't confirmed
+    /// during research (its volume-key handling just maps to the same "previous/next" actions a
+    /// paginated reader already has, without a documented up/down convention to match exactly), so
+    /// this picked the mapping that reads as intuitive for a reading gesture (down = further into
+    /// the content) rather than copying an unverified assumption.
+    private func startVolumeButtonPagingIfEnabled(proxy: ScrollViewProxy) {
+        guard volumeKeyPageEnabled else { return }
+        guard let window = Self.keyWindow() else { return }
+        volumeButtonController.onVolumeUp = { handleVolumeKeyTurn(direction: -1, proxy: proxy) }
+        volumeButtonController.onVolumeDown = { handleVolumeKeyTurn(direction: 1, proxy: proxy) }
+        volumeButtonController.start(in: window)
+    }
+
+    private func handleVolumeKeyTurn(direction: Int, proxy: ScrollViewProxy) {
+        guard !paragraphs.isEmpty else { return }
+        let step = 4
+        volumeScrollIndex = min(max(volumeScrollIndex + direction * step, 0), paragraphs.count - 1)
+        withAnimation {
+            proxy.scrollTo(volumeScrollIndex, anchor: .top)
+        }
+    }
+
+    private static func keyWindow() -> UIView? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
     }
 
     private func goTo(_ index: Int) {

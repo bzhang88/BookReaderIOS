@@ -26,6 +26,9 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
+    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
+    @State private var volumeButtonController = VolumeButtonPageTurnController()
+    @State private var volumeScrollIndex = 0
 
     /// `startChapterIndex` overrides the book's own last-read position -- used when jumping in from
     /// a bookmark, which names an exact chapter rather than "wherever I left off."
@@ -41,14 +44,16 @@ struct LocalReaderView: View {
     @State private var purifiedText: String = ""
 
     var body: some View {
+        ScrollViewReader { scrollProxy in
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
-                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
                     Text(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
                         .foregroundStyle(theme.textColor(for: colorScheme))
                         .padding(.horizontal, 4)
+                        .id(index)
                 }
             }
             .padding()
@@ -128,11 +133,52 @@ struct LocalReaderView: View {
         .sheet(isPresented: $isShowingAISummary) {
             AIChapterSummaryView(chapterTitle: chapter.title, chapterText: purifiedText)
         }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = keepScreenOn }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = keepScreenOn
+            startVolumeButtonPagingIfEnabled(proxy: scrollProxy)
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            volumeButtonController.stop()
+        }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
         }
+        .onChange(of: volumeKeyPageEnabled) { _, isEnabled in
+            if isEnabled {
+                startVolumeButtonPagingIfEnabled(proxy: scrollProxy)
+            } else {
+                volumeButtonController.stop()
+            }
+        }
+        .onChange(of: currentIndex) { _, _ in
+            volumeScrollIndex = 0
+        }
+        }
+    }
+
+    private func startVolumeButtonPagingIfEnabled(proxy: ScrollViewProxy) {
+        guard volumeKeyPageEnabled else { return }
+        guard let window = Self.keyWindow() else { return }
+        volumeButtonController.onVolumeUp = { handleVolumeKeyTurn(direction: -1, proxy: proxy) }
+        volumeButtonController.onVolumeDown = { handleVolumeKeyTurn(direction: 1, proxy: proxy) }
+        volumeButtonController.start(in: window)
+    }
+
+    private func handleVolumeKeyTurn(direction: Int, proxy: ScrollViewProxy) {
+        guard !paragraphs.isEmpty else { return }
+        let step = 4
+        volumeScrollIndex = min(max(volumeScrollIndex + direction * step, 0), paragraphs.count - 1)
+        withAnimation {
+            proxy.scrollTo(volumeScrollIndex, anchor: .top)
+        }
+    }
+
+    private static func keyWindow() -> UIView? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
     }
 
     private func goTo(_ index: Int) {
@@ -186,6 +232,7 @@ struct LocalReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
+    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -222,6 +269,7 @@ struct LocalReaderSettingsSheet: View {
 
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
+                    Toggle("音量键翻页", isOn: $volumeKeyPageEnabled)
                 }
 
                 Section("本章生效的净化规则") {

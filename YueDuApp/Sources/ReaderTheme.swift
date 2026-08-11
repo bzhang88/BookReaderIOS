@@ -109,6 +109,9 @@ enum ReaderSettingsKey {
     /// JSON-encoded `ReaderTapZoneGrid` -- a struct rather than 9 primitive keys since `@AppStorage`
     /// properties can't be declared dynamically in a loop.
     static let tapZoneGrid = "reader.tapZoneGrid"
+    /// Off by default -- matches Legado's own `volumeKeyPage` being opt-in, since hijacking the
+    /// hardware volume buttons is surprising behavior if the user didn't ask for it.
+    static let volumeKeyPage = "reader.volumeKeyPage"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before

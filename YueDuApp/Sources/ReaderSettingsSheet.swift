@@ -18,6 +18,7 @@ struct ReaderSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
     @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
+    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -68,6 +69,7 @@ struct ReaderSettingsSheet: View {
 
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
+                    Toggle("音量键翻页", isOn: $volumeKeyPageEnabled)
                     NavigationLink("点击区域设置") {
                         TapZoneConfigView()
                     }
