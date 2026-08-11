@@ -24,6 +24,10 @@ struct BookDetailView: View {
     @State private var errorMessage: String?
     @State private var isInShelf = false
     @State private var previewChapters: [BookChapter] = []
+    @State private var downloadedCount = 0
+    @State private var isDownloading = false
+    @State private var downloadProgress = 0
+    @State private var downloadTask: Task<Void, Never>?
 
     init(
         source: BookSource, bookUrl: String, fallbackName: String, fallbackAuthor: String? = nil,
@@ -73,6 +77,10 @@ struct BookDetailView: View {
                     header
                     statsRow
                     actionButtons
+
+                    if !previewChapters.isEmpty {
+                        downloadSection
+                    }
 
                     if let intro, !intro.isEmpty {
                         Divider()
@@ -170,6 +178,48 @@ struct BookDetailView: View {
         }
     }
 
+    /// Offline download entry point (Legado's own detail page has an equivalent "缓存" button) --
+    /// strictly opt-in, matching `ChapterCacheStore`'s own design: normal reading never silently
+    /// caches anything, only this explicit action does.
+    @ViewBuilder
+    private var downloadSection: some View {
+        if isDownloading {
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: Double(downloadProgress), total: Double(max(previewChapters.count, 1)))
+                HStack {
+                    Text("缓存中 \(downloadProgress)/\(previewChapters.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("取消") { downloadTask?.cancel() }
+                        .font(.caption)
+                }
+            }
+        } else if downloadedCount > 0 {
+            HStack {
+                Label("已缓存 \(downloadedCount)/\(previewChapters.count) 章", systemImage: "arrow.down.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                Spacer()
+                if downloadedCount < previewChapters.count {
+                    Button("继续缓存") { startDownload() }
+                        .font(.caption)
+                }
+                Button("删除缓存", role: .destructive) {
+                    Task { await deleteCache() }
+                }
+                .font(.caption)
+            }
+        } else {
+            Button {
+                startDownload()
+            } label: {
+                Label("缓存全本", systemImage: "arrow.down.circle")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
     private var chapterPreview: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("章节预览（共 \(previewChapters.count) 章）").font(.headline)
@@ -189,10 +239,59 @@ struct BookDetailView: View {
             previewChapters = (try? await TocService.fetchChapterList(
                 source: source, tocURL: info.tocUrl, httpClient: env.httpClient
             )) ?? []
+            await refreshDownloadedCount()
         } catch {
             errorMessage = "\(error)"
         }
         isLoading = false
+    }
+
+    private func refreshDownloadedCount() async {
+        downloadedCount = (try? await env.chapterCacheStore.downloadedIndices(bookUrl: bookUrl).count) ?? 0
+    }
+
+    private func startDownload() {
+        isDownloading = true
+        downloadTask = Task {
+            await downloadRemainingChapters()
+            isDownloading = false
+        }
+    }
+
+    /// Fetches every not-yet-cached chapter with bounded concurrency (a handful at a time, not all
+    /// at once -- hammering a small book-source site with hundreds of simultaneous requests is
+    /// both rude and likely to trip anti-bot protection) and saves each to `ChapterCacheStore` as
+    /// it completes. Skips chapters already downloaded so re-running (e.g. after a previous
+    /// download was cancelled partway) resumes rather than re-fetching everything.
+    private func downloadRemainingChapters() async {
+        let alreadyDownloaded = (try? await env.chapterCacheStore.downloadedIndices(bookUrl: bookUrl)) ?? []
+        let remaining = previewChapters.filter { !alreadyDownloaded.contains($0.index) }
+        downloadProgress = alreadyDownloaded.count
+
+        let concurrency = 4
+        var offset = 0
+        while offset < remaining.count {
+            if Task.isCancelled { break }
+            let batch = Array(remaining[offset..<min(offset + concurrency, remaining.count)])
+            await withTaskGroup(of: Void.self) { group in
+                for chapter in batch {
+                    group.addTask {
+                        guard let content = try? await ContentService.fetchContent(
+                            source: source, chapter: chapter, httpClient: env.httpClient
+                        ) else { return }
+                        try? await env.chapterCacheStore.save(bookUrl: bookUrl, index: chapter.index, content: content)
+                    }
+                }
+            }
+            offset += batch.count
+            downloadProgress = alreadyDownloaded.count + offset
+        }
+        await refreshDownloadedCount()
+    }
+
+    private func deleteCache() async {
+        try? await env.chapterCacheStore.removeBook(bookUrl: bookUrl)
+        downloadedCount = 0
     }
 
     private func toggleShelf() async {

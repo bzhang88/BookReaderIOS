@@ -42,7 +42,8 @@ let package = Package(
         .target(
             name: "Persistence",
             dependencies: [
-                "BookSourceModel"
+                "BookSourceModel",
+                "WebBookOrchestrator"
             ]
         ),
         .testTarget(
@@ -63,7 +64,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PersistenceTests",
-            dependencies: ["Persistence", "BookSourceModel"]
+            dependencies: ["Persistence", "BookSourceModel", "WebBookOrchestrator"]
         )
     ]
 )

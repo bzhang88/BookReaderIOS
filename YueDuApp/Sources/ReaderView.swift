@@ -271,7 +271,13 @@ struct ReaderView: View {
         isLoading = true
         errorMessage = nil
         do {
-            let content = try await ContentService.fetchContent(source: source, chapter: chapter, httpClient: env.httpClient)
+            let cached = try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: chapter.index)
+            let content: ChapterContent
+            if let cached {
+                content = cached
+            } else {
+                content = try await ContentService.fetchContent(source: source, chapter: chapter, httpClient: env.httpClient)
+            }
             let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
             text = ReplaceRuleApplier.apply(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
             highlightRules = (try? await env.highlightRuleStore.enabled()) ?? []
