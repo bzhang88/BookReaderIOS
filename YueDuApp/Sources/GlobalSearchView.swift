@@ -22,9 +22,13 @@ struct GlobalSearchView: View {
     @State private var sortMode: SearchSortMode = .sourceCount
     @State private var searchHistory: [String] = []
     @State private var shelfKeys: Set<String> = []
+    @State private var allShelfBooks: [ShelfBook] = []
 
     var body: some View {
         List {
+            if !keyword.isEmpty && !hasSearchedOnce {
+                shelfMatchSection
+            }
             if keyword.isEmpty {
                 historySection
             }
@@ -52,7 +56,12 @@ struct GlobalSearchView: View {
             }
         }
         .navigationTitle("搜索")
-        .searchable(text: $keyword, prompt: "搜索所有已启用的书源")
+        // `.navigationBarDrawer(displayMode: .always)` keeps the field permanently expanded in the
+        // nav bar instead of collapsing to a search icon you have to tap first -- matches Legado's
+        // own search screen, where the box is embedded in the title bar and always visible.
+        .searchable(
+            text: $keyword, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索所有已启用的书源"
+        )
         .onSubmit(of: .search) { startSearching() }
         .toolbar {
             if hasSearchedOnce && !groups.isEmpty {
@@ -79,7 +88,31 @@ struct GlobalSearchView: View {
         .task {
             sources = (try? await env.bookSourceStore.enabled()) ?? []
             await reloadHistory()
-            await reloadShelfKeys()
+            await reloadShelfBooks()
+        }
+    }
+
+    /// Live-filters the shelf as the user types, *before* they've actually submitted a search --
+    /// matches Legado's own pre-search empty state, which shows "书架中同名书籍" above the search
+    /// history so a book you already own surfaces immediately without waiting on a network search.
+    @ViewBuilder
+    private var shelfMatchSection: some View {
+        let matches = allShelfBooks.filter { $0.name.localizedCaseInsensitiveContains(keyword) }
+        if !matches.isEmpty {
+            Section("书架中同名书籍") {
+                ForEach(matches) { book in
+                    NavigationLink {
+                        ShelfBookResumeView(book: book)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(book.name).font(.headline)
+                            if let author = book.author, !author.isEmpty {
+                                Text(author).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -154,8 +187,9 @@ struct GlobalSearchView: View {
         searchHistory = (try? await env.searchHistoryStore.recent()) ?? []
     }
 
-    private func reloadShelfKeys() async {
+    private func reloadShelfBooks() async {
         let shelfBooks = (try? await env.shelfStore.all()) ?? []
+        allShelfBooks = shelfBooks
         shelfKeys = Set(shelfBooks.map { GroupedSearchResult.groupKey(name: $0.name, author: $0.author) })
     }
 
