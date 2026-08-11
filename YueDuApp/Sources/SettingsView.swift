@@ -33,6 +33,11 @@ struct SettingsView: View {
                     Label("分组规则", systemImage: "tag")
                 }
                 NavigationLink {
+                    TxtSplitRuleListView()
+                } label: {
+                    Label("TXT 分章规则", systemImage: "text.badge.plus")
+                }
+                NavigationLink {
                     ReadingStatsView()
                 } label: {
                     Label("阅读统计", systemImage: "chart.bar")

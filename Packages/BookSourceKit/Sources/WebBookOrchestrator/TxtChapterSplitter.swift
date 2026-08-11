@@ -64,4 +64,20 @@ public enum TxtChapterSplitter {
 
         return chapters
     }
+
+    /// Tries each pattern in order (the user's enabled `TxtSplitRule`s, in priority order) and
+    /// returns the first result that actually splits the text into more than one chapter -- a
+    /// pattern that doesn't match this file's heading convention just yields `split`'s own
+    /// single-chapter fallback, which is the signal to move on to the next one. Falls back to
+    /// `defaultPattern` if no rule was given, or none of them matched anything, so an empty rule
+    /// library behaves exactly like before this rule system existed.
+    public static func splitTryingRules(_ text: String, rules: [String], fallbackTitle: String) -> [Chapter] {
+        for pattern in rules {
+            let result = split(text, pattern: pattern, fallbackTitle: fallbackTitle)
+            if result.count > 1 {
+                return result
+            }
+        }
+        return split(text, pattern: defaultPattern, fallbackTitle: fallbackTitle)
+    }
 }

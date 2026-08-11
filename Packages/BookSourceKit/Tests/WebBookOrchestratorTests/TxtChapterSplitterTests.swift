@@ -83,4 +83,41 @@ final class TxtChapterSplitterTests: XCTestCase {
         XCTAssertTrue(chapters[0].text.contains("line one"))
         XCTAssertTrue(chapters[0].text.contains("line two"))
     }
+
+    func testSplitTryingRulesUsesFirstRuleThatProducesMultipleChapters() {
+        let text = """
+        Chapter 1: Beginning
+        first
+        Chapter 2: Middle
+        second
+        """
+        // "第X章" (won't match this file) listed first, "Chapter N: Title" second -- should skip
+        // the first (single-chapter fallback) and use the second.
+        let rules = [TxtChapterSplitter.defaultPattern, #"^Chapter \d+:.{0,40}$"#]
+        let chapters = TxtChapterSplitter.splitTryingRules(text, rules: rules, fallbackTitle: "全文")
+        XCTAssertEqual(chapters.map(\.title), ["Chapter 1: Beginning", "Chapter 2: Middle"])
+    }
+
+    func testSplitTryingRulesFallsBackToDefaultPatternWhenNoRuleMatches() {
+        let text = """
+        第一章 开始
+        正文一
+        第二章 继续
+        正文二
+        """
+        let rules = [#"^Chapter \d+:.{0,40}$"#]
+        let chapters = TxtChapterSplitter.splitTryingRules(text, rules: rules, fallbackTitle: "全文")
+        XCTAssertEqual(chapters.map(\.title), ["第一章 开始", "第二章 继续"])
+    }
+
+    func testSplitTryingRulesWithEmptyRuleListUsesDefaultPattern() {
+        let text = """
+        第一章 开始
+        正文一
+        第二章 继续
+        正文二
+        """
+        let chapters = TxtChapterSplitter.splitTryingRules(text, rules: [], fallbackTitle: "全文")
+        XCTAssertEqual(chapters.map(\.title), ["第一章 开始", "第二章 继续"])
+    }
 }

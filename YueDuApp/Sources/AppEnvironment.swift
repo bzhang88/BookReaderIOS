@@ -17,6 +17,7 @@ final class AppEnvironment: ObservableObject {
     let searchHistoryStore: SearchHistoryStore
     let chapterCacheStore: ChapterCacheStore
     let bookmarkStore: BookmarkStore
+    let txtSplitRuleStore: TxtSplitRuleStore
     let httpClient: any HTTPClient
 
     init() {
@@ -32,6 +33,7 @@ final class AppEnvironment: ObservableObject {
         searchHistoryStore = SearchHistoryStore(fileURL: appSupport.appendingPathComponent("search_history.json"))
         chapterCacheStore = ChapterCacheStore(directory: appSupport.appendingPathComponent("chapter_cache", isDirectory: true))
         bookmarkStore = BookmarkStore(fileURL: appSupport.appendingPathComponent("bookmarks.json"))
+        txtSplitRuleStore = TxtSplitRuleStore(fileURL: appSupport.appendingPathComponent("txt_split_rules.json"))
         httpClient = URLSessionHTTPClient()
     }
 }

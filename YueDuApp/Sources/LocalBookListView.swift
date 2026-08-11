@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import BookSourceModel
 import NetworkClient
 import WebBookOrchestrator
 import Persistence
@@ -82,7 +83,8 @@ struct LocalBookListView: View {
             let data = try Data(contentsOf: url)
             let text = CharsetDetector.decodeAutodetectingBytes(data)
             let title = url.deletingPathExtension().lastPathComponent
-            let split = TxtChapterSplitter.split(text, fallbackTitle: title)
+            let patterns = ((try? await env.txtSplitRuleStore.enabled()) ?? []).map(\.pattern)
+            let split = TxtChapterSplitter.splitTryingRules(text, rules: patterns, fallbackTitle: title)
             guard !split.isEmpty else {
                 errorMessage = "这个文件看起来是空的"
                 return
