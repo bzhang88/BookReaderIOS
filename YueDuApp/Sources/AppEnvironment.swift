@@ -22,6 +22,7 @@ final class AppEnvironment: ObservableObject {
     let txtSplitRuleStore: TxtSplitRuleStore
     let loginCookieStore: LoginCookieStore
     let shelfGroupStore: ShelfGroupStore
+    let dictRuleStore: DictRuleStore
     let httpClient: any HTTPClient
     #if canImport(Network)
     let lanWebServer: LANWebServer
@@ -45,6 +46,7 @@ final class AppEnvironment: ObservableObject {
         txtSplitRuleStore = TxtSplitRuleStore(fileURL: appSupport.appendingPathComponent("txt_split_rules.json"))
         loginCookieStore = LoginCookieStore(fileURL: appSupport.appendingPathComponent("login_cookies.json"))
         shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
+        dictRuleStore = DictRuleStore(fileURL: appSupport.appendingPathComponent("dict_rules.json"))
         httpClient = URLSessionHTTPClient()
         #if canImport(Network)
         lanWebServer = LANWebServer(

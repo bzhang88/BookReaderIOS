@@ -18,6 +18,7 @@ struct LocalReaderView: View {
     @State private var matchedReplaceRules: [ReplaceRule] = []
     @State private var isShowingContentSearch = false
     @State private var isShowingAISummary = false
+    @State private var isShowingDictLookup = false
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
@@ -117,6 +118,13 @@ struct LocalReaderView: View {
                     Image(systemName: "sparkles")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingDictLookup = true
+                } label: {
+                    Image(systemName: "character.book.closed")
+                }
+            }
         }
         .task(id: currentIndex) { await load() }
         .sheet(isPresented: $isShowingSettings) {
@@ -132,6 +140,9 @@ struct LocalReaderView: View {
         }
         .sheet(isPresented: $isShowingAISummary) {
             AIChapterSummaryView(chapterTitle: chapter.title, chapterText: purifiedText)
+        }
+        .sheet(isPresented: $isShowingDictLookup) {
+            DictLookupView()
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn

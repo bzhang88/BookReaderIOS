@@ -27,6 +27,7 @@ struct ReaderView: View {
     @State private var isShowingToc = false
     @State private var isShowingContentSearch = false
     @State private var isShowingAISummary = false
+    @State private var isShowingDictLookup = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
     // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
@@ -256,6 +257,13 @@ struct ReaderView: View {
                     Image(systemName: "sparkles")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingDictLookup = true
+                } label: {
+                    Image(systemName: "character.book.closed")
+                }
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
         // Keyed on source+index (not just index) so switching source always triggers a reload even
@@ -295,6 +303,9 @@ struct ReaderView: View {
         }
         .sheet(isPresented: $isShowingAISummary) {
             AIChapterSummaryView(chapterTitle: chapter.title, chapterText: text)
+        }
+        .sheet(isPresented: $isShowingDictLookup) {
+            DictLookupView()
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
