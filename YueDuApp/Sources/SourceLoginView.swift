@@ -13,38 +13,64 @@ import Persistence
 /// underlying need (get a session cookie the source's later requests can use) without needing to
 /// understand or execute the source's specific login JS.
 struct SourceLoginView: View {
+    /// `.login` (the default) only opens when the source declares a real web login URL, matching
+    /// the original login-only behavior. `.verify` is for sources that don't have a login flow at
+    /// all but still gate plain requests (search, etc.) behind a CAPTCHA or Cloudflare-style
+    /// challenge -- confirmed against Legado_Max's real `SourceVerificationHelp`/
+    /// `VerificationCodeActivity` that this exists as its own concept, separate from login. Real
+    /// Legado *detects* when a challenge is needed (a JS callback mid-request pops the CAPTCHA
+    /// dialog); this app's rule engine doesn't execute that same `java.*` JS bridge, so automatic
+    /// detection isn't feasible here -- instead this just always offers a manual "open the source's
+    /// site in a WebView, solve whatever appears, capture the resulting cookies" entry point,
+    /// reusing the exact same WebView+cookie-capture mechanics login already has, just pointed at
+    /// the source's own `bookSourceUrl` instead of requiring a dedicated `loginUrl`.
+    enum Mode {
+        case login
+        case verify
+    }
+
     let source: BookSource
+    var mode: Mode = .login
 
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var isSaving = false
     @State private var statusMessage: String?
 
-    private var loginURL: URL? {
-        guard source.hasWebLoginURL, let loginUrl = source.loginUrl else { return nil }
-        return URL(string: loginUrl)
+    private var targetURL: URL? {
+        switch mode {
+        case .login:
+            guard source.hasWebLoginURL, let loginUrl = source.loginUrl else { return nil }
+            return URL(string: loginUrl)
+        case .verify:
+            return URL(string: source.bookSourceUrl)
+        }
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if let loginURL {
-                    SourceLoginWebView(url: loginURL, userAgent: source.parsedHeaders()["User-Agent"])
+                if let targetURL {
+                    SourceLoginWebView(url: targetURL, userAgent: source.parsedHeaders()["User-Agent"])
                 } else {
                     ContentUnavailableView(
-                        "该书源登录方式暂不支持",
+                        mode == .login ? "该书源登录方式暂不支持" : "书源地址无效",
                         systemImage: "person.crop.circle.badge.exclamationmark",
-                        description: Text("这个书源的登录需要执行脚本才能完成，本 App 目前只支持网页登录。")
+                        description: Text(
+                            mode == .login
+                                ? "这个书源的登录需要执行脚本才能完成，本 App 目前只支持网页登录。"
+                                : "这个书源的地址无法在网页里打开。"
+                        )
                     )
                 }
             }
-            .navigationTitle("登录 \(source.bookSourceName)")
+            .navigationTitle(mode == .login ? "登录 \(source.bookSourceName)" : "验证 \(source.bookSourceName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
-                if loginURL != nil {
+                if targetURL != nil {
                     ToolbarItem(placement: .confirmationAction) {
                         Button(isSaving ? "保存中…" : "完成") {
                             Task { await saveCookiesAndDismiss() }
@@ -83,7 +109,9 @@ struct SourceLoginView: View {
             return host == cookieDomain || host.hasSuffix("." + cookieDomain)
         }
         guard !matched.isEmpty else {
-            statusMessage = "没有检测到登录 Cookie，请先在页面里完成登录"
+            statusMessage = mode == .login
+                ? "没有检测到登录 Cookie，请先在页面里完成登录"
+                : "没有检测到新的 Cookie，请先在页面里完成验证（比如过一遍验证码）"
             return
         }
         for cookie in matched {

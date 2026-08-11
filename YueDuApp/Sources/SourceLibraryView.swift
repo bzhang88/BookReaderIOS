@@ -19,6 +19,7 @@ struct SourceLibraryView: View {
     @State private var isCreatingSource = false
     @State private var debuggingSource: BookSource?
     @State private var loggingInSource: BookSource?
+    @State private var verifyingSource: BookSource?
     @State private var loggedInSourceUrls: Set<String> = []
 
     var body: some View {
@@ -98,6 +99,11 @@ struct SourceLibraryView: View {
                                 )
                             }
                         }
+                        Button {
+                            verifyingSource = source
+                        } label: {
+                            Label("手动验证（过验证码等）", systemImage: "checkmark.shield")
+                        }
                     }
                 }
                 .onDelete(perform: delete)
@@ -158,6 +164,9 @@ struct SourceLibraryView: View {
             }
             .sheet(item: $loggingInSource, onDismiss: { Task { await reload() } }) { source in
                 SourceLoginView(source: source)
+            }
+            .sheet(item: $verifyingSource, onDismiss: { Task { await reload() } }) { source in
+                SourceLoginView(source: source, mode: .verify)
             }
             .navigationDestination(isPresented: Binding(
                 get: { debuggingSource != nil },
