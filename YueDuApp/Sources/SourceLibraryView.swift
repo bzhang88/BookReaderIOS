@@ -196,7 +196,7 @@ struct SourceLibraryView: View {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: url)
-            let imported = try decodeSources(from: data)
+            let imported = try BookSourceImportDecoder.decode(from: data)
             let (inserted, updated) = try await env.bookSourceStore.importSources(imported)
             await reload()
             importSummary = "新增 \(inserted) 个，更新 \(updated) 个"
@@ -206,7 +206,7 @@ struct SourceLibraryView: View {
     }
 
     /// Same import pipeline as `handleImport`, just sourcing the bytes from a URL instead of a
-    /// local file -- reuses `decodeSources(from:)` so a malformed or unreachable URL surfaces the
+    /// local file -- reuses `BookSourceImportDecoder` so a malformed or unreachable URL surfaces the
     /// same kind of specific error rather than a separate, possibly worse-worded one.
     private func handleURLImport(_ urlString: String) async {
         guard !urlString.isEmpty else { return }
@@ -216,28 +216,12 @@ struct SourceLibraryView: View {
                 errorMessage = "下载内容无法解析为文本"
                 return
             }
-            let imported = try decodeSources(from: data)
+            let imported = try BookSourceImportDecoder.decode(from: data)
             let (inserted, updated) = try await env.bookSourceStore.importSources(imported)
             await reload()
             importSummary = "新增 \(inserted) 个，更新 \(updated) 个"
         } catch {
             errorMessage = "\(error)"
-        }
-    }
-
-    /// Real book-source files are almost always a top-level array of many sources, but tolerate a
-    /// single bare source object too. Tries the (expected, common) array shape first and surfaces
-    /// *that* error on failure -- not the fallback's, which is always a confusing
-    /// "expected Dictionary but found an array" when the file is an array (the common case) and
-    /// the real problem is actually somewhere inside one of its elements.
-    private func decodeSources(from data: Data) throws -> [BookSource] {
-        do {
-            return try JSONDecoder().decode([BookSource].self, from: data)
-        } catch let arrayDecodingError {
-            if let single = try? JSONDecoder().decode(BookSource.self, from: data) {
-                return [single]
-            }
-            throw arrayDecodingError
         }
     }
 }
