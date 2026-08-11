@@ -23,6 +23,8 @@ struct BookDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var isInShelf = false
+    @State private var shelfCoverUrl: String?
+    @State private var isShowingCoverPicker = false
     @State private var previewChapters: [BookChapter] = []
     @State private var downloadedCount = 0
     @State private var isDownloading = false
@@ -64,7 +66,14 @@ struct BookDetailView: View {
 
     private var name: String { bookInfo?.name ?? fallbackName }
     private var author: String? { bookInfo?.author ?? fallbackAuthor }
-    private var coverUrl: String? { bookInfo?.coverUrl ?? fallbackCoverUrl }
+    /// Once a book is shelved, its shelf-stored cover (which may be a manual override the user
+    /// picked via `CoverPickerView`) takes priority over whatever the source's own detail page
+    /// currently returns -- otherwise a manually-picked cover would silently revert to the
+    /// source's default the very next time this screen re-fetches `bookInfo`.
+    private var coverUrl: String? {
+        if let shelfCoverUrl, !shelfCoverUrl.isEmpty { return shelfCoverUrl }
+        return bookInfo?.coverUrl ?? fallbackCoverUrl
+    }
     private var intro: String? { bookInfo?.intro ?? fallbackIntro }
     private var lastChapter: String? { bookInfo?.lastChapter ?? fallbackLastChapter }
 
@@ -101,6 +110,11 @@ struct BookDetailView: View {
         }
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingCoverPicker) {
+            CoverPickerView(bookName: name) { newCoverUrl in
+                await setCover(newCoverUrl)
+            }
+        }
         .task { await load() }
     }
 
@@ -159,6 +173,15 @@ struct BookDetailView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(isInShelf || bookInfo == nil)
+
+            if isInShelf {
+                Button {
+                    isShowingCoverPicker = true
+                } label: {
+                    Label("更换封面", systemImage: "photo")
+                }
+                .buttonStyle(.bordered)
+            }
 
             if let bookInfo {
                 NavigationLink {
@@ -235,7 +258,9 @@ struct BookDetailView: View {
         do {
             let info = try await BookInfoService.fetchBookInfo(source: source, bookURL: bookUrl, httpClient: env.httpClient)
             bookInfo = info
-            isInShelf = (try? await env.shelfStore.book(bookUrl: bookUrl)) != nil
+            let existingShelfBook = try? await env.shelfStore.book(bookUrl: bookUrl)
+            isInShelf = existingShelfBook != nil
+            shelfCoverUrl = existingShelfBook?.coverUrl
             previewChapters = (try? await TocService.fetchChapterList(
                 source: source, tocURL: info.tocUrl, httpClient: env.httpClient
             )) ?? []
@@ -292,6 +317,11 @@ struct BookDetailView: View {
     private func deleteCache() async {
         try? await env.chapterCacheStore.removeBook(bookUrl: bookUrl)
         downloadedCount = 0
+    }
+
+    private func setCover(_ newCoverUrl: String) async {
+        try? await env.shelfStore.setCoverUrl(bookUrl: bookUrl, coverUrl: newCoverUrl)
+        shelfCoverUrl = newCoverUrl
     }
 
     private func toggleShelf() async {

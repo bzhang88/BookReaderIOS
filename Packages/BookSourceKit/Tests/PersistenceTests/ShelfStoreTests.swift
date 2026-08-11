@@ -73,6 +73,27 @@ final class ShelfStoreTests: XCTestCase {
         XCTAssertNil(all.first?.group)
     }
 
+    func testSetCoverUrlOverridesJustThatField() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.coverUrl = "https://example.com/old-cover.jpg"
+        try await store.addOrUpdate(book)
+
+        try await store.setCoverUrl(bookUrl: "https://example.com/book/1", coverUrl: "https://example.com/new-cover.jpg")
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.coverUrl, "https://example.com/new-cover.jpg")
+        XCTAssertEqual(all.first?.name, "My Novel", "setCoverUrl must not touch other fields")
+        XCTAssertEqual(all.first?.bookSourceUrl, "https://example.com", "changing the cover must not switch the source")
+    }
+
+    func testSetCoverUrlForUnknownBookIsANoOp() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.setCoverUrl(bookUrl: "https://nope.com", coverUrl: "https://example.com/cover.jpg")
+        let all = try await store.all()
+        XCTAssertTrue(all.isEmpty)
+    }
+
     // MARK: - Phase 5 acceptance scenario: force-quit, relaunch days later, resume exactly
 
     func testProgressSurvivesSimulatedAppRelaunch() async throws {

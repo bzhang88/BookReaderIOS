@@ -47,6 +47,17 @@ public actor ShelfStore {
         try await store.save(books)
     }
 
+    /// Overrides just this book's cover image, independent of its source -- lets the user pick a
+    /// better-looking cover found on another source (or paste a direct image URL) without actually
+    /// switching which source the book reads from (that's `addOrUpdate` replacing the whole entry,
+    /// a different operation).
+    public func setCoverUrl(bookUrl: String, coverUrl: String) async throws {
+        var books = try await all()
+        guard let idx = books.firstIndex(where: { $0.bookUrl == bookUrl }) else { return }
+        books[idx].coverUrl = coverUrl
+        try await store.save(books)
+    }
+
     /// Records exact resume position — the one piece of state Phase 5's acceptance test
     /// (force-quit, relaunch days later, resume exactly where left off) actually depends on.
     public func updateProgress(
