@@ -13,7 +13,8 @@ struct LocalReaderView: View {
 
     @EnvironmentObject private var env: AppEnvironment
     @State private var currentIndex: Int
-    @State private var isShowingSettings = false
+    @State private var isShowingStyleSheet = false
+    @State private var isShowingMoreSettings = false
     @State private var isCurrentChapterBookmarked = false
     @State private var matchedReplaceRules: [ReplaceRule] = []
     @State private var isShowingContentSearch = false
@@ -42,7 +43,9 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
     @State private var pageAnchor: PageAnchor = .first
     @State private var pageTurnRequest: PageTurnRequest?
+    @State private var pageJumpRequest: Int?
     @State private var pagedPageProgress: (current: Int, total: Int)?
+    @State private var pageSeekDragValue: Double?
     @State private var scheduleTick = Date()
     private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -71,6 +74,13 @@ struct LocalReaderView: View {
         return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
     }
 
+    private var pageSeekBinding: Binding<Double> {
+        Binding(
+            get: { pageSeekDragValue ?? Double((pagedPageProgress?.current ?? 1) - 1) },
+            set: { pageSeekDragValue = $0 }
+        )
+    }
+
     var body: some View {
         ScrollViewReader { scrollProxy in
         Group {
@@ -87,6 +97,7 @@ struct LocalReaderView: View {
                     readAloudParagraphIndex: nil,
                     initialAnchor: pageAnchor,
                     pageTurnRequest: $pageTurnRequest,
+                    pageJumpRequest: $pageJumpRequest,
                     touchSlop: touchSlop,
                     onTapMiddle: {},
                     onRequestPreviousChapter: { goTo(currentIndex - 1, anchor: .last) },
@@ -120,40 +131,49 @@ struct LocalReaderView: View {
         }
         .onReceive(scheduleTimer) { scheduleTick = $0 }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
-                Text(chapterProgressText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 10) {
+                // Chapter-progress row -- prev/next chapter text flanking a real draggable seekbar
+                // in paginated mode, same shape as `ReaderView`'s (see its own doc comment for why
+                // `.scroll` mode stays text-only instead of a misleading approximate seekbar).
+                HStack(spacing: 12) {
+                    Button("上一章") { goTo(currentIndex - 1) }
+                        .font(.caption)
+                        .disabled(currentIndex <= 0)
+
+                    if pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
+                        Slider(
+                            value: pageSeekBinding, in: 0...Double(pagedPageProgress.total - 1), step: 1,
+                            onEditingChanged: { isEditing in
+                                if !isEditing {
+                                    if let pageSeekDragValue { pageJumpRequest = Int(pageSeekDragValue) }
+                                    pageSeekDragValue = nil
+                                }
+                            }
+                        )
+                    } else {
+                        Text(chapterProgressText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    Button("下一章") { goTo(currentIndex + 1) }
+                        .font(.caption)
+                        .disabled(currentIndex >= book.chapters.count - 1)
+                }
+
                 HStack {
-                    Button {
-                        goTo(currentIndex - 1)
-                    } label: {
-                        Label("上一章", systemImage: "chevron.left")
-                    }
-                    .disabled(currentIndex <= 0)
-
-                    Spacer()
-
-                    Button {
+                    bottomFunctionButton(icon: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark", label: "书签") {
                         Task { await toggleBookmark() }
-                    } label: {
-                        Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
                     }
-
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "textformat.size")
-                    }
-
                     Spacer()
-
-                    Button {
-                        goTo(currentIndex + 1)
-                    } label: {
-                        Label("下一章", systemImage: "chevron.right")
+                    bottomFunctionButton(icon: "textformat.size", label: "界面") {
+                        isShowingStyleSheet = true
                     }
-                    .disabled(currentIndex >= book.chapters.count - 1)
+                    Spacer()
+                    bottomFunctionButton(icon: "gearshape", label: "设置") {
+                        isShowingMoreSettings = true
+                    }
                 }
             }
             .padding()
@@ -192,8 +212,11 @@ struct LocalReaderView: View {
             }
         }
         .task(id: currentIndex) { await load() }
-        .sheet(isPresented: $isShowingSettings) {
-            LocalReaderSettingsSheet(matchedRules: matchedReplaceRules)
+        .sheet(isPresented: $isShowingStyleSheet) {
+            LocalReaderStyleSheet()
+        }
+        .sheet(isPresented: $isShowingMoreSettings) {
+            LocalReaderMoreSettingsSheet(matchedRules: matchedReplaceRules)
         }
         .sheet(isPresented: $isShowingContentSearch) {
             ChapterContentSearchView(
@@ -258,6 +281,20 @@ struct LocalReaderView: View {
         }
     }
 
+    /// Icon-over-label button, matching `ReaderView`'s equivalent -- see its doc comment for why
+    /// (bare unlabeled icons were part of what made the previous chrome hard to use at a glance).
+    @ViewBuilder
+    private func bottomFunctionButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.title3)
+                Text(label)
+                    .font(.caption2)
+            }
+        }
+    }
+
     private static func keyWindow() -> UIView? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -305,24 +342,14 @@ struct LocalReaderView: View {
     }
 }
 
-/// Trimmed-down variant of `ReaderSettingsSheet` without the TTS "朗读" section -- `LocalReaderView`
-/// has no read-aloud button in this increment, and showing a rate slider with nothing to control
-/// would look like a broken feature rather than an absent one.
-struct LocalReaderSettingsSheet: View {
-    var matchedRules: [ReplaceRule] = []
-
+/// "界面" -- matches `ReaderStyleSheet`'s split (theme/typography/page-turn-style only, see its
+/// doc comment for why); `LocalReaderView` has no read-aloud button in this increment, so there's
+/// no TTS section to omit differently from the network reader here.
+struct LocalReaderStyleSheet: View {
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
-    @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
-    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
-    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
-    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
-    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
-    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
-    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
-    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
 
     @Environment(\.dismiss) private var dismiss
@@ -357,7 +384,37 @@ struct LocalReaderSettingsSheet: View {
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
                     }
                 }
+            }
+            .navigationTitle("界面")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
 
+/// "设置" -- matches `ReaderMoreSettingsSheet`'s split (everything not visual/typographic).
+struct LocalReaderMoreSettingsSheet: View {
+    var matchedRules: [ReplaceRule] = []
+
+    @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
+    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
+    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
                 Section("简繁转换") {
                     Picker("简繁转换", selection: $chineseConversion) {
                         ForEach(ChineseConversionMode.allCases) { mode in
@@ -395,7 +452,7 @@ struct LocalReaderSettingsSheet: View {
                     }
                 }
             }
-            .navigationTitle("阅读设置")
+            .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

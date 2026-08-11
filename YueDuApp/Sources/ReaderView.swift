@@ -21,7 +21,8 @@ struct ReaderView: View {
     @State private var text: String = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var isShowingSettings = false
+    @State private var isShowingStyleSheet = false
+    @State private var isShowingMoreSettings = false
     @State private var isShowingChangeSource = false
     @State private var isShowingChapterSourceSwitch = false
     @State private var isShowingToc = false
@@ -30,6 +31,7 @@ struct ReaderView: View {
     @State private var isShowingDictLookup = false
     @State private var isShowingContentEdit = false
     @State private var isShowingWebSearch = false
+    @State private var isShowingReplaceRules = false
     @State private var isChromeVisible = true
     // Guards auto-advance so a chapter that's short enough to fit on screen without scrolling
     // doesn't fire the moment it loads (the bottom sentinel would already be within the visible
@@ -76,7 +78,15 @@ struct ReaderView: View {
     // boundary (see `goTo`'s doc comment) -- every other navigation path defaults back to `.first`.
     @State private var pageAnchor: PageAnchor = .first
     @State private var pageTurnRequest: PageTurnRequest?
+    @State private var pageJumpRequest: Int?
     @State private var pagedPageProgress: (current: Int, total: Int)?
+    // Local override while the user is actively dragging the progress seekbar -- lets the slider
+    // show the finger's live position instead of snapping back to the real page on every tiny
+    // movement; cleared (reverting to tracking `pagedPageProgress` again) once the drag ends and
+    // `pageJumpRequest` has been sent.
+    @State private var pageSeekDragValue: Double?
+    @State private var isAutoPaging = false
+    @State private var autoPageTask: Task<Void, Never>?
     // Re-evaluated every minute so a schedule-only filter actually turns on/off while the reader
     // stays open across the boundary, not just whenever the view happens to redraw for other reasons.
     @State private var scheduleTick = Date()
@@ -106,6 +116,18 @@ struct ReaderView: View {
         return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
     }
 
+    /// Drives the paginated-mode progress seekbar -- while a drag is in flight, shows the finger's
+    /// live position (`pageSeekDragValue`) instead of the real current page, so the slider doesn't
+    /// fight the user's touch; reverts to tracking `pagedPageProgress` once the drag ends and the
+    /// actual jump (`pageJumpRequest`) has been sent. Matches Legado's real "page" progress-bar
+    /// mode: jump immediately on release, no confirmation (confirmed via `ReadMenu.kt` research).
+    private var pageSeekBinding: Binding<Double> {
+        Binding(
+            get: { pageSeekDragValue ?? Double((pagedPageProgress?.current ?? 1) - 1) },
+            set: { pageSeekDragValue = $0 }
+        )
+    }
+
     var body: some View {
         ScrollViewReader { scrollProxy in
         Group {
@@ -122,6 +144,7 @@ struct ReaderView: View {
                     readAloudParagraphIndex: isReadAloudSpeaking ? readAloudCurrentParagraphIndex : nil,
                     initialAnchor: pageAnchor,
                     pageTurnRequest: $pageTurnRequest,
+                    pageJumpRequest: $pageJumpRequest,
                     touchSlop: touchSlop,
                     onTapMiddle: { isChromeVisible.toggle() },
                     onRequestPreviousChapter: { goTo(currentIndex - 1, anchor: .last) },
@@ -187,9 +210,16 @@ struct ReaderView: View {
             }
         }
         .onReceive(scheduleTimer) { scheduleTick = $0 }
+        // A slim, always-on footer (chapter title + progress) even while the rest of the chrome is
+        // hidden -- confirmed against Legado_Max's real `ReadView`/`PageView` that its reading
+        // screen is never truly blank by default: a low-contrast footer with chapter name + page
+        // count stays up regardless of menu state, and only the *menu* (brightness/buttons/settings)
+        // is the thing that's fully absent until tapped. Previously this reader dropped the progress
+        // text entirely the moment chrome was hidden, so there was no way to glance at "where am I"
+        // without reopening the whole menu.
         .safeAreaInset(edge: .bottom) {
             if isChromeVisible {
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     HStack(spacing: 12) {
                         Image(systemName: "sun.min")
                         Slider(value: $screenBrightness, in: 0...1)
@@ -198,9 +228,6 @@ struct ReaderView: View {
                             }
                         Image(systemName: "sun.max")
                     }
-                    Text(chapterProgressText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     if isReadAloudSpeaking {
                         HStack(spacing: 20) {
@@ -228,127 +255,177 @@ struct ReaderView: View {
                         .font(.title3)
                     }
 
-                    // Utility row -- matches Legado's row of small circular tool buttons above the
-                    // chapter-nav row (search-in-book/auto-page/replace-toggle/night-theme there;
-                    // 目录/书签/换源/自动滚动 here, since that's this app's closest equivalent set).
-                    HStack(spacing: 28) {
+                    // 4 round buttons -- matches Legado's real `ll_floating_button` row (confirmed
+                    // via research): 搜索本书内/自动翻页/替换净化/夜间模式, in that order.
+                    HStack {
                         Spacer()
                         Button {
-                            isShowingToc = true
+                            isShowingContentSearch = true
                         } label: {
-                            Image(systemName: "list.bullet")
+                            Image(systemName: "magnifyingglass")
                         }
+                        Spacer()
                         Button {
-                            Task { await toggleBookmark() }
-                        } label: {
-                            Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
-                        }
-                        Menu {
-                            Button {
-                                isShowingChangeSource = true
-                            } label: {
-                                Label("换源（整本书）", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                            Button {
-                                isShowingChapterSourceSwitch = true
-                            } label: {
-                                Label("本章换源", systemImage: "doc.badge.arrow.up")
-                            }
-                        } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-                        // Auto-scroll is a `.scroll`-mode-only concept (a paginated reader has no
-                        // continuous scroll position to step through) -- hidden rather than shown
-                        // disabled, matching how this reader treats every other mode-specific
-                        // control (e.g. read-aloud's row only appears while actually speaking).
-                        if !pageTurnStyle.isPaginated {
-                            Button {
+                            if pageTurnStyle.isPaginated {
+                                toggleAutoPage()
+                            } else {
                                 toggleAutoScroll(proxy: scrollProxy)
-                            } label: {
-                                Image(systemName: isAutoScrolling ? "pause.circle" : "arrow.down.circle")
                             }
-                        }
-                        Button {
-                            isShowingContentEdit = true
                         } label: {
-                            Image(systemName: "pencil")
+                            Image(systemName: (pageTurnStyle.isPaginated ? isAutoPaging : isAutoScrolling) ? "pause.circle" : "play.circle")
+                        }
+                        Spacer()
+                        Button {
+                            isShowingReplaceRules = true
+                        } label: {
+                            Image(systemName: "wand.and.stars")
+                        }
+                        Spacer()
+                        Button {
+                            theme = theme == .night ? .day : .night
+                        } label: {
+                            Image(systemName: theme == .night ? "sun.max" : "moon.stars")
                         }
                         Spacer()
                     }
-                    .font(.title3)
+                    .font(.title2)
 
-                    // Chapter-nav row -- prev/next chapter flanking read-aloud + settings, matching
-                    // Legado's bottom-most row shape (though still without a real draggable
-                    // in-chapter progress bar in between: even in paginated mode, dragging to an
-                    // arbitrary page would need cross-chapter page counts precomputed up front,
-                    // which this first pass doesn't do -- the progress text above already covers
-                    // the equivalent "where am I" info for both scroll and paginated modes).
+                    // Chapter-progress row -- prev/next chapter text flanking a real draggable
+                    // seekbar in paginated mode (matches Legado's `tv_pre`/`seek_read_page`/
+                    // `tv_next`, confirmed jumping immediately on release with no confirmation, its
+                    // "page" progress-bar mode). `.scroll` mode has no equivalent accurate position
+                    // to seek (there's nowhere this reader tracks *real* scroll offset, only the
+                    // step-wise `volumeScrollIndex` approximation used elsewhere) -- showing a
+                    // seekbar there would risk being actively misleading rather than just plain, so
+                    // it stays as text-only progress for that mode.
+                    HStack(spacing: 12) {
+                        Button("上一章") { goTo(currentIndex - 1) }
+                            .font(.caption)
+                            .disabled(currentIndex <= 0)
+
+                        if pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
+                            Slider(
+                                value: pageSeekBinding, in: 0...Double(pagedPageProgress.total - 1), step: 1,
+                                onEditingChanged: { isEditing in
+                                    if !isEditing {
+                                        if let pageSeekDragValue { pageJumpRequest = Int(pageSeekDragValue) }
+                                        pageSeekDragValue = nil
+                                    }
+                                }
+                            )
+                        } else {
+                            Text(chapterProgressText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        Button("下一章") { goTo(currentIndex + 1) }
+                            .font(.caption)
+                            .disabled(currentIndex >= chapters.count - 1)
+                    }
+
+                    // Bottom-most primary-function row -- matches Legado's real 4-icon labeled row
+                    // exactly: 目录/朗读/界面/设置 (confirmed via research, `ll_catalog`/
+                    // `ll_read_aloud`/`ll_font`/`ll_setting`).
                     HStack {
-                        Button {
-                            goTo(currentIndex - 1)
-                        } label: {
-                            Label("上一章", systemImage: "chevron.left")
+                        bottomFunctionButton(icon: "list.bullet", label: "目录") {
+                            isShowingToc = true
                         }
-                        .disabled(currentIndex <= 0)
-
                         Spacer()
-
-                        Button {
+                        bottomFunctionButton(
+                            icon: isReadAloudSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2", label: "朗读"
+                        ) {
                             startOrStopReadAloud()
-                        } label: {
-                            Image(systemName: isReadAloudSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
                         }
-
-                        Button {
-                            isShowingSettings = true
-                        } label: {
-                            Image(systemName: "textformat.size")
-                        }
-
                         Spacer()
-
-                        Button {
-                            goTo(currentIndex + 1)
-                        } label: {
-                            Label("下一章", systemImage: "chevron.right")
+                        bottomFunctionButton(icon: "textformat.size", label: "界面") {
+                            isShowingStyleSheet = true
                         }
-                        .disabled(currentIndex >= chapters.count - 1)
+                        Spacer()
+                        bottomFunctionButton(icon: "gearshape", label: "设置") {
+                            isShowingMoreSettings = true
+                        }
                     }
                 }
                 .padding()
                 .background(.bar)
+            } else {
+                // A slim, always-on footer (chapter title/progress) even while the rest of the
+                // chrome is hidden -- confirmed against Legado_Max's real `ReadView`/`PageView`
+                // that its reading screen is never truly blank by default: a low-contrast footer
+                // with chapter name + page count stays up regardless of menu state, and only the
+                // *menu* (brightness/buttons/settings) is fully absent until tapped. Previously
+                // this reader dropped the progress text entirely the moment chrome was hidden, so
+                // there was no way to glance at "where am I" without reopening the whole menu.
+                Text(chapterProgressText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(.ultraThinMaterial)
             }
         }
         .navigationTitle(chapter.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(isChromeVisible ? .visible : .hidden, for: .navigationBar)
+        // Matches Legado's real top bar shape (confirmed via research): 换源 change-source stays a
+        // directly-visible action icon (online books always show it there), everything else lives
+        // behind a single "⋯" overflow menu -- bookmark and edit-content are genuinely in Legado's
+        // own overflow too; AI summary/dict lookup/web search are this app's own extra features
+        // with no Legado equivalent, grouped there rather than each claiming their own permanent
+        // icon (the previous 4-icon-wide top bar, plus the utility-row icons this redesign also
+        // removed, was a lot of unlabeled chrome competing for attention on every single screen).
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingContentSearch = true
+                Menu {
+                    Button {
+                        isShowingChangeSource = true
+                    } label: {
+                        Label("换源（整本书）", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Button {
+                        isShowingChapterSourceSwitch = true
+                    } label: {
+                        Label("本章换源", systemImage: "doc.badge.arrow.up")
+                    }
                 } label: {
-                    Image(systemName: "magnifyingglass")
+                    Image(systemName: "arrow.triangle.2.circlepath")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingAISummary = true
+                Menu {
+                    Button {
+                        Task { await toggleBookmark() }
+                    } label: {
+                        Label(
+                            isCurrentChapterBookmarked ? "移除书签" : "加入书签",
+                            systemImage: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark"
+                        )
+                    }
+                    Button {
+                        isShowingContentEdit = true
+                    } label: {
+                        Label("编辑正文", systemImage: "pencil")
+                    }
+                    Button {
+                        isShowingAISummary = true
+                    } label: {
+                        Label("AI 摘要", systemImage: "sparkles")
+                    }
+                    Button {
+                        isShowingDictLookup = true
+                    } label: {
+                        Label("查词", systemImage: "character.book.closed")
+                    }
+                    Button {
+                        isShowingWebSearch = true
+                    } label: {
+                        Label("网页搜索", systemImage: "globe")
+                    }
                 } label: {
-                    Image(systemName: "sparkles")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingDictLookup = true
-                } label: {
-                    Image(systemName: "character.book.closed")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingWebSearch = true
-                } label: {
-                    Image(systemName: "globe")
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
@@ -358,8 +435,16 @@ struct ReaderView: View {
         // `.task(id:)` only refires when its id value actually changes.
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
         .task { httpTTSEngines = (try? await env.httpTTSEngineStore.all()) ?? [] }
-        .sheet(isPresented: $isShowingSettings) {
-            ReaderSettingsSheet(matchedRules: matchedReplaceRules)
+        .sheet(isPresented: $isShowingStyleSheet) {
+            ReaderStyleSheet()
+        }
+        .sheet(isPresented: $isShowingMoreSettings) {
+            ReaderMoreSettingsSheet(matchedRules: matchedReplaceRules)
+        }
+        .sheet(isPresented: $isShowingReplaceRules) {
+            NavigationStack {
+                ReplaceRuleListView()
+            }
         }
         .sheet(isPresented: $isShowingChangeSource) {
             NavigationStack {
@@ -411,6 +496,7 @@ struct ReaderView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             stopReadAloud()
             stopAutoScroll()
+            stopAutoPage()
             volumeButtonController.stop()
         }
         .onChange(of: keepScreenOn) { _, newValue in
@@ -535,6 +621,22 @@ struct ReaderView: View {
         if isUsingHttpTTS { httpReadAloud.nextParagraph() } else { readAloud.nextParagraph() }
     }
 
+    /// Icon-over-label button matching Legado's real bottom-most row style (`ll_catalog` etc. in
+    /// `view_read_menu.xml` are icon+text, not bare icons) -- a plain icon-only button doesn't say
+    /// what it does until you've already memorized it, which was part of what made the previous
+    /// all-icon utility row hard to use at a glance.
+    @ViewBuilder
+    private func bottomFunctionButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.title3)
+                Text(label)
+                    .font(.caption2)
+            }
+        }
+    }
+
     /// Resolves a raw tap location to one of the 3x3 zones and runs whatever action the user has
     /// configured for it (default: side columns turn chapters, middle column toggles chrome --
     /// see `ReaderTapZoneGrid.standard`). Zones are measured against the screen bounds rather than
@@ -633,6 +735,37 @@ struct ReaderView: View {
         autoScrollTask?.cancel()
         autoScrollTask = nil
         isAutoScrolling = false
+    }
+
+    /// Paginated-mode equivalent of auto-scroll -- Legado's real "自动翻页" (`AutoPager`) works this
+    /// way regardless of page-turn style since its reader is always page-based; this reader only
+    /// has a real page concept in the 4 non-`.scroll` styles, so this is the paginated-only half of
+    /// the same "hands-free reading" feature, reusing the same `autoScrollInterval` setting and the
+    /// `pageTurnRequest` channel volume keys already drive.
+    private func toggleAutoPage() {
+        if isAutoPaging {
+            stopAutoPage()
+        } else {
+            startAutoPage()
+        }
+    }
+
+    private func startAutoPage() {
+        autoPageTask?.cancel()
+        isAutoPaging = true
+        autoPageTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(max(autoScrollInterval, 0.5) * 1_000_000_000))
+                guard !Task.isCancelled else { break }
+                pageTurnRequest = .next
+            }
+        }
+    }
+
+    private func stopAutoPage() {
+        autoPageTask?.cancel()
+        autoPageTask = nil
+        isAutoPaging = false
     }
 
     private func applyChineseConversion(_ text: String) -> String {

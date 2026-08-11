@@ -1,36 +1,21 @@
 import SwiftUI
 import BookSourceModel
 
-/// Reading typography/theme settings. Shares its `@AppStorage` keys directly with `ReaderView` --
-/// no separate settings object to keep in sync, changes here are visible live behind the sheet
-/// since both views read the same UserDefaults-backed keys.
-struct ReaderSettingsSheet: View {
-    /// Which of the user's purification rules actually fired on the chapter currently on screen --
-    /// passed in rather than recomputed here, since the sheet has no access to the chapter text
-    /// itself (only `ReaderView`/`LocalReaderView` do, right after fetching/loading it).
-    var matchedRules: [ReplaceRule] = []
-
+/// "界面" -- theme/typography/page-turn-style only. Confirmed against Legado_Max's real
+/// `ReadStyleDialog` that this is deliberately a *narrow* dialog (color preset swatches, font/
+/// spacing sliders, page-turn-animation picker) kept separate from the much longer "设置"
+/// preference list (`ReaderMoreSettingsSheet`) -- previously this app crammed both into one giant
+/// sheet behind a single unlabeled icon, which is exactly the kind of "too much at once, hard to
+/// find anything" pattern real usage feedback flagged. Shares its `@AppStorage` keys directly with
+/// `ReaderView`/`LocalReaderView` -- no separate settings object to keep in sync.
+struct ReaderStyleSheet: View {
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
-    @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
-    @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
-    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
-    @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
-    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
-    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
-    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
-    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
-    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
-    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
-    @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
-    @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
 
-    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
-    @State private var httpTTSEngines: [HttpTTSEngine] = []
 
     var body: some View {
         NavigationStack {
@@ -65,7 +50,50 @@ struct ReaderSettingsSheet: View {
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
                     }
                 }
+            }
+            .navigationTitle("界面")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
 
+/// "设置" -- everything that isn't visual/typographic: read-aloud, simplified/traditional
+/// conversion, auto-page/scroll timing, eye care, screen/touch behavior, and the currently-matched
+/// purification rules. Matches Legado_Max's real `MoreConfigDialog`, a long scrollable preference
+/// list kept separate from "界面" (`ReaderStyleSheet`).
+struct ReaderMoreSettingsSheet: View {
+    /// Which of the user's purification rules actually fired on the chapter currently on screen --
+    /// passed in rather than recomputed here, since the sheet has no access to the chapter text
+    /// itself (only `ReaderView`/`LocalReaderView` do, right after fetching/loading it).
+    var matchedRules: [ReplaceRule] = []
+
+    @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
+    @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
+    @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
+    @AppStorage(ReaderSettingsKey.autoScrollInterval) private var autoScrollInterval: Double = 3.0
+    @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareEnabled) private var eyeCareEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareIntensity) private var eyeCareIntensity: Double = 0.35
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
+    @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
+    @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
+    @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
+
+    @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
+    @State private var httpTTSEngines: [HttpTTSEngine] = []
+
+    var body: some View {
+        NavigationStack {
+            Form {
                 Section("朗读") {
                     VStack(alignment: .leading) {
                         Text("语速: \(Int(readAloudRate * 100))%")
@@ -91,9 +119,9 @@ struct ReaderSettingsSheet: View {
                     .pickerStyle(.segmented)
                 }
 
-                Section("自动滚动") {
+                Section(pageTurnStyle.isPaginated ? "自动翻页" : "自动滚动") {
                     VStack(alignment: .leading) {
-                        Text("每段间隔: \(String(format: "%.1f", autoScrollInterval)) 秒")
+                        Text(pageTurnStyle.isPaginated ? "每页间隔: \(String(format: "%.1f", autoScrollInterval)) 秒" : "每段间隔: \(String(format: "%.1f", autoScrollInterval)) 秒")
                         Slider(value: $autoScrollInterval, in: 1...10, step: 0.5)
                     }
                 }
@@ -114,8 +142,10 @@ struct ReaderSettingsSheet: View {
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
                     Toggle("音量键翻页", isOn: $volumeKeyPageEnabled)
-                    NavigationLink("点击区域设置") {
-                        TapZoneConfigView()
+                    if !pageTurnStyle.isPaginated {
+                        NavigationLink("点击区域设置") {
+                            TapZoneConfigView()
+                        }
                     }
                     VStack(alignment: .leading) {
                         Text("触控灵敏度: \(Int(touchSlop))")
@@ -136,7 +166,7 @@ struct ReaderSettingsSheet: View {
                     }
                 }
             }
-            .navigationTitle("阅读设置")
+            .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

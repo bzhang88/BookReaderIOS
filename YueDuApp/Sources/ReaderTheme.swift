@@ -72,8 +72,8 @@ extension Color {
 }
 
 /// Horizontally scrollable row of circular color swatches for picking a `ReaderTheme` -- shared by
-/// `ReaderSettingsSheet` and `LocalReaderSettingsSheet` so the two readers' settings sheets stay
-/// visually identical without duplicating this view.
+/// `ReaderStyleSheet` and `LocalReaderStyleSheet` so the two readers' "界面" sheets stay visually
+/// identical without duplicating this view.
 struct ThemeSwatchPicker: View {
     @Binding var theme: ReaderTheme
     @Environment(\.colorScheme) private var colorScheme
@@ -178,10 +178,11 @@ struct CustomThemeExport: Codable {
     var textHex: String
 }
 
-/// Keys shared verbatim between `ReaderView` and `ReaderSettingsSheet` so both stay in sync via
-/// plain `@AppStorage` (same UserDefaults key, no custom ObservableObject needed -- avoids the
-/// well-known gotcha where `@AppStorage` inside a hand-rolled ObservableObject doesn't actually
-/// propagate change notifications on its own).
+/// Keys shared verbatim between `ReaderView` and its `ReaderStyleSheet`/`ReaderMoreSettingsSheet`
+/// (and the `LocalReaderView` equivalents) so all of them stay in sync via plain `@AppStorage`
+/// (same UserDefaults key, no custom ObservableObject needed -- avoids the well-known gotcha where
+/// `@AppStorage` inside a hand-rolled ObservableObject doesn't actually propagate change
+/// notifications on its own).
 enum ReaderSettingsKey {
     static let fontSize = "reader.fontSize"
     static let lineSpacing = "reader.lineSpacing"

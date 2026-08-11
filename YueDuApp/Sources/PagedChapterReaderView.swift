@@ -46,6 +46,10 @@ struct PagedChapterReaderView: View {
     let readAloudParagraphIndex: Int?
     let initialAnchor: PageAnchor
     @Binding var pageTurnRequest: PageTurnRequest?
+    /// Set by a parent-owned draggable progress seekbar to jump straight to a page (0-based) --
+    /// applied immediately with no transition animation, matching Legado's own "page" progress-bar
+    /// mode (`ReadMenu.kt`'s `skipToPage`, confirmed via research: no confirmation, no animation).
+    @Binding var pageJumpRequest: Int?
     let touchSlop: Double
     let onTapMiddle: () -> Void
     let onRequestPreviousChapter: () -> Void
@@ -118,6 +122,15 @@ struct PagedChapterReaderView: View {
             case .next: beginTransition(direction: 1, layout: layout)
             }
             pageTurnRequest = nil
+        }
+        .onChange(of: pageJumpRequest) { _, request in
+            guard let request, let layout, !layout.pages.isEmpty else { return }
+            pendingTransitionTask?.cancel()
+            pendingTransitionTask = nil
+            transition = nil
+            transitionProgress = 0
+            currentPageIndex = min(max(request, 0), layout.pages.count - 1)
+            pageJumpRequest = nil
         }
         .onChange(of: currentPageIndex) { _, newValue in
             guard let layout else { return }
