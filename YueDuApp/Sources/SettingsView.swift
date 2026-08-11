@@ -33,6 +33,11 @@ struct SettingsView: View {
                     Label("分组规则", systemImage: "tag")
                 }
                 NavigationLink {
+                    ReadingStatsView()
+                } label: {
+                    Label("阅读统计", systemImage: "chart.bar")
+                }
+                NavigationLink {
                     AboutView()
                 } label: {
                     Label("关于", systemImage: "info.circle")
