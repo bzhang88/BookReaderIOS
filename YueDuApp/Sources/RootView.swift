@@ -29,11 +29,17 @@ struct RootView: View {
     @State private var isLocked = AppLockStore.isEnabled
     @Environment(\.scenePhase) private var scenePhase
 
-    // "legado://import/bookSource?src=<url>" -- lets a shared link or QR code jump straight into
-    // importing a book source instead of the user having to copy/paste the URL by hand into "从
-    // 网址导入". Matches Legado's own real-world import-link convention (see project.yml's
-    // CFBundleURLTypes comment) so links/QR codes made for actual Legado are compatible here too.
-    @State private var pendingImportSourceURL: URL?
+    // "legado://import/<kind>?src=<url>" -- lets a shared link or QR code jump straight into
+    // importing something instead of the user having to copy/paste the URL by hand. Matches
+    // Legado's own real-world import-link convention (see project.yml's CFBundleURLTypes comment
+    // and `FileAssociationActivity.kt`'s real dispatch, confirmed against the actual source rather
+    // than guessed) so links/QR codes made for actual Legado are compatible here too, for whichever
+    // of the 7 types this app actually has somewhere to import into (see `LegadoImportKind`).
+    private struct PendingImport {
+        var kind: LegadoImportKind
+        var url: URL
+    }
+    @State private var pendingImport: PendingImport?
     @State private var importResultMessage: String?
 
     var body: some View {
@@ -51,14 +57,22 @@ struct RootView: View {
         .onOpenURL { url in
             handleIncomingURL(url)
         }
-        .alert("导入书源？", isPresented: Binding(
-            get: { pendingImportSourceURL != nil },
-            set: { if !$0 { pendingImportSourceURL = nil } }
+        .alert(pendingImportAlertTitle, isPresented: Binding(
+            get: { pendingImport != nil },
+            set: { if !$0 { pendingImport = nil } }
         )) {
-            Button("导入") { Task { await confirmPendingImport() } }
-            Button("取消", role: .cancel) { pendingImportSourceURL = nil }
+            if pendingImport?.kind.isSupported == true {
+                Button("导入") { Task { await confirmPendingImport() } }
+                Button("取消", role: .cancel) { pendingImport = nil }
+            } else {
+                Button("好") { pendingImport = nil }
+            }
         } message: {
-            Text(pendingImportSourceURL?.absoluteString ?? "")
+            if let pendingImport {
+                Text(pendingImport.kind.isSupported
+                    ? pendingImport.url.absoluteString
+                    : "本 App 暂不支持导入\(pendingImport.kind.displayName)")
+            }
         }
         .alert("导入结果", isPresented: Binding(
             get: { importResultMessage != nil },
@@ -97,6 +111,11 @@ struct RootView: View {
         }
     }
 
+    private var pendingImportAlertTitle: String {
+        guard let kind = pendingImport?.kind else { return "" }
+        return kind.isSupported ? "导入\(kind.displayName)？" : "无法导入"
+    }
+
     /// Ignores incoming links entirely while locked -- importing something before the user has
     /// unlocked would defeat the point of having a lock at all, and there's no good place to queue
     /// the link for after unlock without a lot of extra state, so this keeps it simple: re-tap the
@@ -104,27 +123,59 @@ struct RootView: View {
     private func handleIncomingURL(_ url: URL) {
         guard !isLocked else { return }
         guard url.scheme?.lowercased() == "legado", url.host == "import" else { return }
-        guard url.path.lowercased() == "/booksource" else { return }
+        guard let kind = LegadoImportKind(path: url.path) else { return }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let src = components.queryItems?.first(where: { $0.name == "src" })?.value,
               let srcURL = URL(string: src) else { return }
-        pendingImportSourceURL = srcURL
+        pendingImport = PendingImport(kind: kind, url: srcURL)
     }
 
     private func confirmPendingImport() async {
-        guard let sourceURL = pendingImportSourceURL else { return }
-        pendingImportSourceURL = nil
+        guard let pending = pendingImport, pending.kind.isSupported else { return }
+        pendingImport = nil
         do {
-            let response = try await env.httpClient.fetch(HTTPRequest(url: sourceURL.absoluteString))
+            let response = try await env.httpClient.fetch(HTTPRequest(url: pending.url.absoluteString))
             guard let data = response.body.data(using: .utf8) else {
                 importResultMessage = "下载内容无法解析为文本"
                 return
             }
-            let sources = try BookSourceImportDecoder.decode(from: data)
-            let (inserted, updated) = try await env.bookSourceStore.importSources(sources)
-            importResultMessage = "导入完成：新增 \(inserted) 个，更新 \(updated) 个"
+            importResultMessage = try await importPayload(kind: pending.kind, data: data)
         } catch {
             importResultMessage = "导入失败: \(error)"
+        }
+    }
+
+    /// One case per `legado://import/<kind>` path segment this app recognizes -- routing +
+    /// decode + store target for each. `bookSource`/`dictRule`/`rssSource` decode straight into
+    /// this app's own models since their real Legado field names already match (confirmed against
+    /// source, not assumed); `replaceRule`/`txtRule` go through a small field-mapping struct (see
+    /// `LegadoImportMapping.swift`) since a few field *names* differ even though the underlying
+    /// concept is the same.
+    private func importPayload(kind: LegadoImportKind, data: Data) async throws -> String {
+        switch kind {
+        case .bookSource:
+            let sources = try BookSourceImportDecoder.decode(from: data)
+            let (inserted, updated) = try await env.bookSourceStore.importSources(sources)
+            return "导入完成：新增 \(inserted) 个，更新 \(updated) 个"
+        case .rssSource:
+            let sources = try LegadoImportDecoding.decodeArrayOrSingle(RssSource.self, from: data)
+            for source in sources { try await env.rssSourceStore.add(source) }
+            return "导入完成：\(sources.count) 个订阅源"
+        case .dictRule:
+            let rules = try LegadoImportDecoding.decodeArrayOrSingle(DictRule.self, from: data)
+            for rule in rules { try await env.dictRuleStore.add(rule) }
+            return "导入完成：\(rules.count) 条词典规则"
+        case .replaceRule:
+            let imported = try LegadoImportDecoding.decodeArrayOrSingle(LegadoReplaceRuleImport.self, from: data)
+            for rule in imported { try await env.replaceRuleStore.add(rule.toReplaceRule()) }
+            return "导入完成：\(imported.count) 条替换净化规则"
+        case .txtRule:
+            let imported = try LegadoImportDecoding.decodeArrayOrSingle(LegadoTxtTocRuleImport.self, from: data)
+            for rule in imported { try await env.txtSplitRuleStore.add(rule.toTxtSplitRule()) }
+            return "导入完成：\(imported.count) 条 TXT 分章规则"
+        case .httpTts, .theme:
+            // Unreachable -- `confirmPendingImport` only calls this for `kind.isSupported` types.
+            return ""
         }
     }
 
