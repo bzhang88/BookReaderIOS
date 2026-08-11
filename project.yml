@@ -20,7 +20,16 @@ targets:
     info:
       path: YueDuApp/Info.plist
       properties:
-        UILaunchScreen: {}
+        # Confirmed against Legado_Max's real WelcomeConfigFragment that a custom launch screen is
+        # a real feature there (separate light/dark images) -- but real iOS launch screens render
+        # before any app code runs, so an in-app light/dark *picker* isn't possible the way it is on
+        # Android; light/dark switching here would need separate image-set "Appearances" variants in
+        # the asset catalog instead, which this first pass doesn't add (kept to one universal image).
+        # UIImageName references LaunchImage.imageset (reuses the same sunset/mountain artwork as
+        # the app icon) instead of the previous blank default (`UILaunchScreen: {}`).
+        UILaunchScreen:
+          UIImageName: LaunchImage
+          UIImageRespectsSafeAreaInsets: false
         CFBundleDisplayName: 拾光
         # xcodegen defaults these two keys to a hardcoded "1.0"/"1" when they're absent from this
         # properties block -- it does NOT automatically wire them to the MARKETING_VERSION/
