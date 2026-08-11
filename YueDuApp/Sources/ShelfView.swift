@@ -199,8 +199,8 @@ struct ShelfBookResumeView: View {
         Group {
             if let source, !chapters.isEmpty {
                 ReaderView(
-                    source: source, bookUrl: book.bookUrl, chapters: chapters, currentIndex: resumeIndex,
-                    bookTitle: book.name
+                    source: source, bookUrl: book.bookUrl, tocUrl: book.tocUrl, chapters: chapters,
+                    currentIndex: resumeIndex, bookTitle: book.name
                 )
             } else if let errorMessage {
                 ContentUnavailableView("无法打开", systemImage: "exclamationmark.triangle", description: Text(errorMessage))

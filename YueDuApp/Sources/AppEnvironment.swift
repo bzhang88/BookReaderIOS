@@ -16,6 +16,7 @@ final class AppEnvironment: ObservableObject {
     let localBookStore: LocalBookStore
     let searchHistoryStore: SearchHistoryStore
     let chapterCacheStore: ChapterCacheStore
+    let bookmarkStore: BookmarkStore
     let httpClient: any HTTPClient
 
     init() {
@@ -30,6 +31,7 @@ final class AppEnvironment: ObservableObject {
         localBookStore = LocalBookStore(fileURL: appSupport.appendingPathComponent("local_books.json"))
         searchHistoryStore = SearchHistoryStore(fileURL: appSupport.appendingPathComponent("search_history.json"))
         chapterCacheStore = ChapterCacheStore(directory: appSupport.appendingPathComponent("chapter_cache", isDirectory: true))
+        bookmarkStore = BookmarkStore(fileURL: appSupport.appendingPathComponent("bookmarks.json"))
         httpClient = URLSessionHTTPClient()
     }
 }

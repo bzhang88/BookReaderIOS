@@ -23,7 +23,8 @@ struct TocView: View {
         List(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
             NavigationLink {
                 ReaderView(
-                    source: source, bookUrl: bookUrl, chapters: chapters, currentIndex: index, bookTitle: bookTitle
+                    source: source, bookUrl: bookUrl, tocUrl: tocURL, chapters: chapters, currentIndex: index,
+                    bookTitle: bookTitle
                 )
             } label: {
                 Text(chapter.title)
@@ -42,7 +43,7 @@ struct TocView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $shouldPresentResume) {
             ReaderView(
-                source: source, bookUrl: bookUrl, chapters: chapters,
+                source: source, bookUrl: bookUrl, tocUrl: tocURL, chapters: chapters,
                 currentIndex: resumeChapterIndex ?? 0, bookTitle: bookTitle
             )
         }

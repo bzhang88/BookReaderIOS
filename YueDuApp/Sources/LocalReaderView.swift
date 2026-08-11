@@ -14,6 +14,7 @@ struct LocalReaderView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var currentIndex: Int
     @State private var isShowingSettings = false
+    @State private var isCurrentChapterBookmarked = false
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
@@ -21,9 +22,12 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
 
-    init(book: LocalBook) {
+    /// `startChapterIndex` overrides the book's own last-read position -- used when jumping in from
+    /// a bookmark, which names an exact chapter rather than "wherever I left off."
+    init(book: LocalBook, startChapterIndex: Int? = nil) {
         self.book = book
-        let start = book.lastReadChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? 0
+        let fallback = book.lastReadChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? 0
+        let start = startChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? fallback
         self._currentIndex = State(initialValue: start)
     }
 
@@ -60,6 +64,12 @@ struct LocalReaderView: View {
                     .disabled(currentIndex <= 0)
 
                     Spacer()
+
+                    Button {
+                        Task { await toggleBookmark() }
+                    } label: {
+                        Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
+                    }
 
                     Button {
                         isShowingSettings = true
@@ -102,6 +112,23 @@ struct LocalReaderView: View {
         let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
         purifiedText = ReplaceRuleApplier.apply(replaceRules, to: chapter.text, sourceUrl: "")
         try? await env.localBookStore.updateProgress(id: book.id, chapterIndex: currentIndex)
+        isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
+            bookIdentifier: book.id, chapterIndex: currentIndex
+        )) ?? false
+    }
+
+    private func toggleBookmark() async {
+        if isCurrentChapterBookmarked {
+            try? await env.bookmarkStore.remove(bookIdentifier: book.id, chapterIndex: currentIndex)
+            isCurrentChapterBookmarked = false
+        } else {
+            let bookmark = Bookmark(
+                isLocal: true, bookIdentifier: book.id, bookTitle: book.title,
+                chapterIndex: currentIndex, chapterTitle: chapter.title
+            )
+            try? await env.bookmarkStore.add(bookmark)
+            isCurrentChapterBookmarked = true
+        }
     }
 }
 

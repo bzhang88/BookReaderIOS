@@ -12,6 +12,7 @@ struct ReaderView: View {
     // to, given how deeply it's already nested under Shelf/Toc navigation).
     @State private var source: BookSource
     @State private var bookUrl: String
+    @State private var tocUrl: String
     @State private var chapters: [BookChapter]
     @State private var bookTitle: String
     @State private var currentIndex: Int
@@ -28,6 +29,7 @@ struct ReaderView: View {
     // scroll bounds from the very first layout pass, before the user has read anything) -- reset
     // to false on every chapter change, flips true after a short grace period.
     @State private var canAutoAdvance = false
+    @State private var isCurrentChapterBookmarked = false
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
     @State private var highlightRules: [HighlightRule] = []
     @StateObject private var readAloud = ReadAloudController()
@@ -39,9 +41,10 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
 
-    init(source: BookSource, bookUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
+    init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
         self._source = State(initialValue: source)
         self._bookUrl = State(initialValue: bookUrl)
+        self._tocUrl = State(initialValue: tocUrl)
         self._chapters = State(initialValue: chapters)
         self._bookTitle = State(initialValue: bookTitle)
         self._currentIndex = State(initialValue: currentIndex)
@@ -156,6 +159,12 @@ struct ReaderView: View {
                         }
 
                         Button {
+                            Task { await toggleBookmark() }
+                        } label: {
+                            Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
+                        }
+
+                        Button {
                             isShowingSettings = true
                         } label: {
                             Image(systemName: "textformat.size")
@@ -249,6 +258,7 @@ struct ReaderView: View {
         let newIndex = min(currentIndex, newChapters.count - 1)
         source = newSource
         bookUrl = match.bookUrl
+        self.tocUrl = tocUrl
         chapters = newChapters
         bookTitle = bookInfo?.name ?? match.name
         currentIndex = newIndex
@@ -308,11 +318,30 @@ struct ReaderView: View {
             try? await env.shelfStore.updateProgress(
                 bookUrl: bookUrl, chapterIndex: chapter.index, chapterTitle: chapter.title, characterOffset: 0
             )
+            isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
+                bookIdentifier: bookUrl, chapterIndex: chapter.index
+            )) ?? false
         } catch {
             errorMessage = "\(error)"
         }
         isLoading = false
         armAutoAdvance()
+    }
+
+    /// Bookmarks are chapter-level (this reader doesn't track a finer scroll position anywhere),
+    /// so the button is a simple toggle -- one bookmark per (book, chapter) at most.
+    private func toggleBookmark() async {
+        if isCurrentChapterBookmarked {
+            try? await env.bookmarkStore.remove(bookIdentifier: bookUrl, chapterIndex: chapter.index)
+            isCurrentChapterBookmarked = false
+        } else {
+            let bookmark = Bookmark(
+                isLocal: false, bookSourceUrl: source.bookSourceUrl, bookIdentifier: bookUrl,
+                tocUrl: tocUrl, bookTitle: bookTitle, chapterIndex: chapter.index, chapterTitle: chapter.title
+            )
+            try? await env.bookmarkStore.add(bookmark)
+            isCurrentChapterBookmarked = true
+        }
     }
 
     /// Runs once per chapter load (both the reader's very first chapter and every subsequent

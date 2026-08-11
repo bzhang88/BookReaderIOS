@@ -38,6 +38,11 @@ struct SettingsView: View {
                     Label("阅读统计", systemImage: "chart.bar")
                 }
                 NavigationLink {
+                    BookmarkListView()
+                } label: {
+                    Label("书签", systemImage: "bookmark")
+                }
+                NavigationLink {
                     AboutView()
                 } label: {
                     Label("关于", systemImage: "info.circle")
