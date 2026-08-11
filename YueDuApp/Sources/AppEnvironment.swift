@@ -21,6 +21,7 @@ final class AppEnvironment: ObservableObject {
     let bookmarkStore: BookmarkStore
     let txtSplitRuleStore: TxtSplitRuleStore
     let loginCookieStore: LoginCookieStore
+    let shelfGroupStore: ShelfGroupStore
     let httpClient: any HTTPClient
 
     init() {
@@ -40,6 +41,7 @@ final class AppEnvironment: ObservableObject {
         bookmarkStore = BookmarkStore(fileURL: appSupport.appendingPathComponent("bookmarks.json"))
         txtSplitRuleStore = TxtSplitRuleStore(fileURL: appSupport.appendingPathComponent("txt_split_rules.json"))
         loginCookieStore = LoginCookieStore(fileURL: appSupport.appendingPathComponent("login_cookies.json"))
+        shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
         httpClient = URLSessionHTTPClient()
 
         let cookieStore = loginCookieStore

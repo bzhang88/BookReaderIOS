@@ -16,6 +16,7 @@ struct ShelfView: View {
     @State private var isShowingBatchExportSheet = false
     @State private var batchExportItems: [Any] = []
     @State private var isBatchExporting = false
+    @State private var registeredGroupNames: [String] = []
 
     /// Sections books by `group` -- a mix of names assigned by the "自动分组" tag-rule sweep and
     /// ones set manually via the row's "设置分组" menu; both write the same field (see `ShelfBook
@@ -37,8 +38,13 @@ struct ShelfView: View {
         books.contains { !($0.group?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
     }
 
+    /// Merges group names still in live use on the shelf with ones registered in `shelfGroupStore`
+    /// but not currently assigned to any book -- otherwise a group created ahead of time via
+    /// `ShelfGroupManagementView` would never show up here as a pickable option.
     private var existingGroupNames: [String] {
-        groupedSections.map(\.key).filter { $0 != "未分组" }
+        var names = Set(groupedSections.map(\.key).filter { $0 != "未分组" })
+        names.formUnion(registeredGroupNames)
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     var body: some View {
@@ -141,6 +147,13 @@ struct ShelfView: View {
                 LocalBookListView()
             } label: {
                 Label("本地书籍", systemImage: "doc.text")
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            NavigationLink {
+                ShelfGroupManagementView()
+            } label: {
+                Label("分组管理", systemImage: "folder.badge.gearshape")
             }
         }
         if isSelecting {
@@ -303,13 +316,18 @@ struct ShelfView: View {
     private func reload() async {
         let all = (try? await env.shelfStore.all()) ?? []
         books = all.sorted { ($0.lastReadAt ?? $0.addedAt) > ($1.lastReadAt ?? $1.addedAt) }
+        registeredGroupNames = (try? await env.shelfGroupStore.all()) ?? []
     }
 
     /// Sets (or clears, when `newGroup` is nil) one book's group directly -- shares `setGroups`
     /// with the batch auto-grouping sweep rather than a separate single-book store method, since
-    /// the underlying write is identical either way.
+    /// the underlying write is identical either way. Also registers the name in `shelfGroupStore`
+    /// (a no-op if already registered) so it stays pickable even if this book later leaves the group.
     private func setGroup(of book: ShelfBook, to newGroup: String?) async {
         try? await env.shelfStore.setGroups([book.bookUrl: newGroup])
+        if let newGroup {
+            try? await env.shelfGroupStore.add(newGroup)
+        }
         await reload()
     }
 
@@ -349,6 +367,9 @@ struct ShelfView: View {
             updates[bookUrl] = newGroup
         }
         try? await env.shelfStore.setGroups(updates)
+        if let newGroup {
+            try? await env.shelfGroupStore.add(newGroup)
+        }
         exitSelection()
         await reload()
     }
