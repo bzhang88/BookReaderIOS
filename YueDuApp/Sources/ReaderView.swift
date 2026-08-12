@@ -417,7 +417,7 @@ struct ReaderView: View {
                         // `.padding` + `.contentShape(Rectangle())` so the tappable area is a real
                         // ~44pt-tall button, not just the tiny `.caption`-sized text glyphs -- same
                         // "too small to reliably tap" feedback as the top bar's icons.
-                        Button("上一章") { goTo(currentIndex - 1) }
+                        Button("上一章") { goToPreviousChapter() }
                             .font(.caption)
                             .padding(.vertical, 12)
                             .padding(.horizontal, 8)
@@ -441,7 +441,7 @@ struct ReaderView: View {
                                 .frame(maxWidth: .infinity)
                         }
 
-                        Button("下一章") { goTo(currentIndex + 1) }
+                        Button("下一章") { goToNextChapter() }
                             .font(.caption)
                             .padding(.vertical, 12)
                             .padding(.horizontal, 8)
@@ -839,8 +839,11 @@ struct ReaderView: View {
     /// `anchor` only matters in paginated mode (see `PagedChapterReaderView`'s doc comment) --
     /// `.last` is for the one case where continuing to page backward past a chapter's first page
     /// should land on the new chapter's *last* page, matching where a physical book would be;
-    /// every other caller (explicit chapter-list/search/bookmark jumps, the toolbar's 上一章/下一章
-    /// buttons, paging forward across a boundary) wants the default `.first`.
+    /// every other caller (explicit chapter-list/search/bookmark jumps, and -- in `.scroll` mode --
+    /// `goToNextChapter`/`goToPreviousChapter`'s own fallback when no preview is ready yet) wants the
+    /// default `.first`. A full reload: fetches fresh content over the network/cache and reflows the
+    /// whole `ScrollView` from scratch, unlike the seamless preview-commit `goToNextChapter`/
+    /// `goToPreviousChapter` prefer when possible.
     private func goTo(_ index: Int, anchor: PageAnchor = .first) {
         guard chapters.indices.contains(index) else { return }
         // An explicit jump (buttons/TOC/search/bookmark) invalidates whatever was queued as "the
@@ -851,6 +854,35 @@ struct ReaderView: View {
         nextChapterPreview = nil
         pageAnchor = anchor
         currentIndex = index
+    }
+
+    /// Prefers a seamless commit over `goTo`'s full reload for the toolbar's 下一章 button and the
+    /// matching tap zone -- `nextChapterPreview` is usually already sitting there fully fetched and
+    /// paginated (prefetched the moment the current chapter loaded), so committing it directly avoids
+    /// both a wasted refetch of content the reader already has and, more importantly, real-device
+    /// testing found that a full reload's fresh-fetch-then-prepend timing could occasionally leave
+    /// `repaginateForScroll`'s crossing-suppression guard (see
+    /// `isCompensatingForPrevChapterHeightChange`'s doc comment) racing against content that hadn't
+    /// finished laying out yet, which could still let the backward-cascade bug it was built to
+    /// prevent slip through on an explicit chapter-button tap even though plain scrolling no longer
+    /// triggered it. Falls back to `goTo` only when no ready preview exists yet (tapping faster than
+    /// prefetch keeps up, paginated mode, or this is the last chapter).
+    private func goToNextChapter() {
+        if let preview = nextChapterPreview, preview.pageLayout != nil {
+            commitToNextChapterPreview(preview, arrivingAtPageIndex: 0)
+        } else {
+            goTo(currentIndex + 1)
+        }
+    }
+
+    /// Exact mirror of `goToNextChapter`, facing backward, for the toolbar's 上一章 button and its
+    /// tap zone.
+    private func goToPreviousChapter() {
+        if let preview = prevChapterPreview, preview.pageLayout != nil {
+            commitToPrevChapterPreview(preview, arrivingAtPageIndex: 0)
+        } else {
+            goTo(currentIndex - 1)
+        }
     }
 
     // MARK: - Read-aloud routing
@@ -1018,9 +1050,9 @@ struct ReaderView: View {
         case .toggleChrome:
             isChromeVisible.toggle()
         case .previousChapter:
-            goTo(currentIndex - 1)
+            goToPreviousChapter()
         case .nextChapter:
-            goTo(currentIndex + 1)
+            goToNextChapter()
         case .openToc:
             isShowingToc = true
         case .nextPage:
@@ -1800,7 +1832,7 @@ struct ReaderView: View {
                 withAnimation(nil) {
                     proxy.scrollTo(targetID, anchor: .top)
                 }
-                isCompensatingForPrevChapterHeightChange = false
+                clearPrevHeightChangeCompensationGuard()
             }
         } else if prevWasPresent {
             // `scrollTo` looks up `anchorID` in whatever the layout looks like *when this actually
@@ -1812,8 +1844,24 @@ struct ReaderView: View {
                 withAnimation(nil) {
                     proxy.scrollTo(anchorID, anchor: .top)
                 }
-                isCompensatingForPrevChapterHeightChange = false
+                clearPrevHeightChangeCompensationGuard()
             }
+        }
+    }
+
+    /// One more deferred hop past the `scrollTo` call itself before actually lowering the guard --
+    /// real-device testing found a single `DispatchQueue.main.async` hop wasn't always enough for a
+    /// *freshly fetched* chapter (a full `goTo` reload, not a seamless preview-commit): unlike a
+    /// crossing-based promotion, where the page being scrolled to was already laid out and visible
+    /// (that's how the user could scroll to it), a fresh reload's page views can still be mid-layout
+    /// at the exact moment `scrollTo` is called, and lowering the guard immediately after left a
+    /// residual window for the backward-cascade bug this guard exists to prevent. This is why
+    /// `goToNextChapter`/`goToPreviousChapter` now prefer a seamless commit over `goTo` whenever a
+    /// preview is already ready -- but `goTo` itself (TOC/search/bookmark jumps, resuming a book on
+    /// launch) still needs this extra margin.
+    private func clearPrevHeightChangeCompensationGuard() {
+        DispatchQueue.main.async {
+            isCompensatingForPrevChapterHeightChange = false
         }
     }
 
