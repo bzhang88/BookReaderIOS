@@ -247,6 +247,13 @@ enum ReaderSettingsKey {
     /// chapter, the overwhelmingly common next action) rather than something larger, to keep the
     /// default behavior's extra network usage modest.
     static let prefetchChapterCount = "reader.prefetchChapterCount"
+    /// Backward mirror of `prefetchChapterCount` -- confirmed against Legado_Max's own `ReadBook.
+    /// preDownload`, which warms raw chapter text on *both* sides of the resident reading window
+    /// (`backwardPreDownloadNum`, not just `preDownloadNum`). Also defaults to 1: scrolling back up
+    /// past where you started (re-reading, or continuing a backward scroll) was only ever cache-warm
+    /// one chapter back (whichever `prevChapterPreview` itself already fetched) before this existed,
+    /// unlike going forward.
+    static let backwardPrefetchChapterCount = "reader.backwardPrefetchChapterCount"
     /// Independent top/bottom/leading/trailing page margins -- real usage feedback wanted all 4
     /// adjustable separately, not just one shared padding value. Each defaults to 16 (matching what
     /// the previous hardcoded `.padding()` used).

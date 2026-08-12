@@ -93,6 +93,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.customThemeTextHex) private var customThemeTextHex: String = "#0D0D0D"
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
     @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
+    @AppStorage(ReaderSettingsKey.backwardPrefetchChapterCount) private var backwardPrefetchChapterCount: Int = 1
     // Only ever set to `.last` right before `goTo` steps backward across a paginated chapter's
     // boundary (see `goTo`'s doc comment) -- every other navigation path defaults back to `.first`.
     @State private var pageAnchor: PageAnchor = .first
@@ -1289,8 +1290,12 @@ struct ReaderView: View {
                         // begins (its translation is exactly `.zero` on that very first callback,
                         // since `minimumDistance: 0` means this fires immediately on touch-down) is
                         // what lets each subsequent callback add on top of that instead of overwriting
-                        // it.
+                        // it. A fresh touch-down also grabs control away from any still-settling fling
+                        // or animated page-turn from a moment ago, matching how grabbing a real
+                        // decelerating scroll view stops it dead rather than fighting your finger.
                         if value.translation == .zero {
+                            pendingPageStepTask?.cancel()
+                            pendingPageStepTask = nil
                             dragGestureBaseOffset = dragOffset
                         }
                         commitPageOffset(dragGestureBaseOffset + value.translation.height)
@@ -1298,10 +1303,22 @@ struct ReaderView: View {
                     .onEnded { value in
                         if hypot(value.translation.width, value.translation.height) <= touchSlop {
                             handleTap(at: value.location)
+                            return
                         }
-                        // No fling/momentum for this first pass -- `dragOffset` simply stays wherever
-                        // the finger left it, matching Legado's own resting behavior (a drag ending
-                        // never by itself snaps back to a page boundary).
+                        // Fling: `predictedEndTranslation` is SwiftUI's own estimate of where this
+                        // gesture would have naturally decelerated to (the same estimate UIKit's own
+                        // scroll views use) -- mirrors Legado_Max's `ScrollPageDelegate.onAnimStart`
+                        // handing the release velocity to a `Scroller` for inertial scrolling, just
+                        // built on SwiftUI's equivalent instead of reimplementing velocity tracking
+                        // and a deceleration curve from scratch. Clamped to at most one further page
+                        // beyond wherever the raw drag already ended (see `settleDrag`'s doc comment
+                        // for why) rather than flinging an unbounded distance.
+                        let pageHeight = scrollPageSize.height
+                        guard pageHeight > 0 else { return }
+                        let rawOffset = dragGestureBaseOffset + value.translation.height
+                        let predictedOffset = dragGestureBaseOffset + value.predictedEndTranslation.height
+                        let target = min(max(predictedOffset, rawOffset - pageHeight), rawOffset + pageHeight)
+                        settleDrag(to: target)
                     }
             )
             .task(id: scrollPaginationKey(size: contentSize)) {
@@ -1463,13 +1480,43 @@ struct ReaderView: View {
         // slide depending on how close the rest position already was -- just correctly *ends* exactly
         // on the next/previous page boundary (`dragOffset` settling back to precisely 0) every time.
         let targetOffset: CGFloat = direction > 0 ? -pageHeight : pageHeight
-        withAnimation(.easeInOut(duration: 0.25)) {
-            dragOffset = targetOffset
+        animateAndCommit(to: targetOffset, duration: 0.25, animation: .easeInOut(duration: 0.25))
+    }
+
+    /// Finishes a released drag that still had momentum -- see `scrollModeBody`'s `.onEnded` for
+    /// where `target` comes from (SwiftUI's own `predictedEndTranslation`, clamped to at most one
+    /// further page beyond wherever the raw drag ended). Duration scales with distance -- a harder
+    /// flick travels further *and* takes a bit longer to visually settle, within a bounded range --
+    /// a reasonable stand-in for Legado_Max's real `Scroller`-based deceleration physics without
+    /// reimplementing velocity/friction curves from scratch.
+    ///
+    /// The one-page clamp (in `.onEnded`, not here) matters for a structural reason, not just
+    /// restraint: `pageSlot`'s 3 slots only ever resolve content *relative to whatever's currently
+    /// committed* (`resolvedPage(relativeIndex: -1/0/1)`). Animating `dragOffset` further than one
+    /// page out ahead of that commit would slide those slots past content that doesn't exist in the
+    /// rendered tree at all (nothing resolves page ±2), showing blank space mid-flick before the
+    /// eventual `commitPageOffset` call catches back up -- clamping keeps every frame of the
+    /// animation showing real, already-resolved content throughout.
+    private func settleDrag(to target: CGFloat) {
+        let distance = abs(target - dragOffset)
+        let duration = min(0.5, max(0.2, Double(distance) / 2000))
+        animateAndCommit(to: target, duration: duration, animation: .easeOut(duration: duration))
+    }
+
+    /// Shared driver behind `animatedPageStep`/`settleDrag`: slide `dragOffset` to `target` under
+    /// `animation` immediately, but defer the actual page/chapter-crossing commit (`commitPageOffset`)
+    /// until that slide would have visually finished -- exactly `PagedChapterReaderView.
+    /// beginTransition`'s own `pendingTransitionTask` pattern for its 3 non-`.scroll` styles, and
+    /// distinct from a live finger-drag's immediate, un-animated `commitPageOffset` calls in
+    /// `scrollModeBody`'s `.onChanged`.
+    private func animateAndCommit(to target: CGFloat, duration: Double, animation: Animation) {
+        withAnimation(animation) {
+            dragOffset = target
         }
         pendingPageStepTask = Task {
-            try? await Task.sleep(for: .seconds(0.25))
+            try? await Task.sleep(for: .seconds(duration))
             guard !Task.isCancelled else { return }
-            commitPageOffset(targetOffset)
+            commitPageOffset(target)
             pendingPageStepTask = nil
         }
     }
@@ -1561,6 +1608,7 @@ struct ReaderView: View {
         }
         isLoading = false
         prefetchUpcomingChapters()
+        prefetchPreviousChapters()
         await loadPrevChapterPreview()
         await loadNextChapterPreview()
     }
@@ -1697,6 +1745,7 @@ struct ReaderView: View {
         }
         Task { await loadNextChapterPreview() }
         prefetchUpcomingChapters()
+        prefetchPreviousChapters()
     }
 
     /// Exact mirror of `commitToNextChapterPreview`, facing backward: the chapter that was "current"
@@ -1726,6 +1775,7 @@ struct ReaderView: View {
         }
         Task { await loadPrevChapterPreview() }
         prefetchUpcomingChapters()
+        prefetchPreviousChapters()
     }
 
     /// Same shape as `PagedChapterReaderView.paginationKey` -- everything that can change how a
@@ -1831,15 +1881,36 @@ struct ReaderView: View {
     /// "下一章" is usually an instant cache hit instead of a network wait -- the single most common
     /// action in a reading session, and previously always a fresh network round-trip no matter how
     /// predictable "the next chapter" is. Silent on failure/skip (a miss just falls back to `load()`'s
-    /// own normal network fetch, exactly like before this existed); re-checks `chapters.indices`
-    /// inside the loop rather than trusting a range computed once, since 换源 can shrink `chapters`
-    /// out from under an in-flight prefetch if the user switches source mid-fetch.
+    /// own normal network fetch, exactly like before this existed).
     private func prefetchUpcomingChapters() {
         guard prefetchChapterCount > 0 else { return }
-        let targetIndices = (currentIndex + 1)..<(currentIndex + 1 + prefetchChapterCount)
+        prefetchChapters(in: (currentIndex + 1)..<(currentIndex + 1 + prefetchChapterCount))
+    }
+
+    /// Backward mirror of `prefetchUpcomingChapters` -- confirmed against Legado_Max's own
+    /// `ReadBook.preDownload`, which warms raw chapter text on *both* sides of the resident reading
+    /// window (`backwardPreDownloadNum`, not just `preDownloadNum`), not only forward. Without this,
+    /// scrolling/paging backward past `prevChapterPreview`'s own one-chapter buffer (re-reading, or
+    /// just continuing a backward scroll) always hit the network fresh, unlike continuing forward.
+    /// Closest chapter first (`currentIndex - 1`, then `- 2`, ...) -- the reverse of
+    /// `prefetchUpcomingChapters`'s naturally-ascending order, since naively walking this range
+    /// ascending would fetch the *farthest* backward chapter first and the nearest (most likely to
+    /// actually be needed next) last.
+    private func prefetchPreviousChapters() {
+        guard backwardPrefetchChapterCount > 0 else { return }
+        let lowerBound = max(0, currentIndex - backwardPrefetchChapterCount)
+        prefetchChapters(in: lowerBound..<currentIndex, closestFirst: true)
+    }
+
+    /// Shared driver behind `prefetchUpcomingChapters`/`prefetchPreviousChapters` -- re-checks
+    /// `chapters.indices` inside the loop rather than trusting `indices` as computed, since 换源 can
+    /// shrink `chapters` out from under an in-flight prefetch if the user switches source mid-fetch.
+    private func prefetchChapters(in indices: Range<Int>, closestFirst: Bool = false) {
+        guard !indices.isEmpty else { return }
+        let orderedIndices = closestFirst ? Array(indices.reversed()) : Array(indices)
         Task {
-            for index in targetIndices {
-                guard chapters.indices.contains(index) else { break }
+            for index in orderedIndices {
+                guard chapters.indices.contains(index) else { continue }
                 if (try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: index)) != nil { continue }
                 guard let content = try? await ContentService.fetchContent(
                     source: source, chapter: chapters[index], httpClient: env.httpClient,
