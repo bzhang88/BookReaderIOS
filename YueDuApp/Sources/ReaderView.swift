@@ -14,19 +14,32 @@ import RuleEngine
 /// one-at-a-time; this reader's own `.scroll` mode used to be a raw continuous-paragraph flow with
 /// no page concept at all, which is what real usage feedback (with a reference screenshot showing a
 /// real "10/10" page-in-chapter indicator) asked to be corrected.
+///
+/// Keyed by the page's own scroll-content id string (`"prev-page-N"`/`"page-N"`/`"next-page-N"`),
+/// not a bare `Int` -- real usage feedback pointed out this reader only ever showed the *current*
+/// chapter plus one chapter ahead, never a chapter behind, and progress tracking silently froze the
+/// moment you scrolled into the appended next chapter (page indices reset to 0 there, colliding
+/// with the current chapter's own page 0 under the old `Int` key, and `currentPageIndexInChapter`
+/// only ever listened for the current chapter's own key range anyway). A chapter-scoped string id
+/// lets a single handler (`scrollModeBody`'s `.onPreferenceChange`) tell which of the three loaded
+/// chapters the topmost visible page actually belongs to.
 private struct PageTopOffsetKey: PreferenceKey {
-    static var defaultValue: [Int: CGFloat] = [:]
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+    static var defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
         value.merge(nextValue()) { _, new in new }
     }
 }
 
-/// Fully fetched-and-purified next-chapter content, ready to display immediately (see
-/// `ReaderView.nextChapterPreview`'s doc comment) or promote straight to "current" with no further
-/// network/purification work needed. `pageLayout` is filled in once pagination (which needs the
-/// measured screen size) has actually run against `text` -- may briefly be `nil` right after the
-/// text itself arrives.
-private struct NextChapterPreview {
+/// Fully fetched-and-purified adjacent-chapter content, ready to display immediately (see
+/// `ReaderView.prevChapterPreview`/`nextChapterPreview`'s doc comments) or promote straight to
+/// "current" with no further network/purification work needed. `pageLayout` is filled in once
+/// pagination (which needs the measured screen size) has actually run against `text` -- may briefly
+/// be `nil` right after the text itself arrives, and is recomputed by `repaginateForScroll` whenever
+/// reading settings that affect page breaks change, exactly like the current chapter's own
+/// `pageLayout`. Used for both the previous and the next chapter -- confirmed against Legado_Max's
+/// `ReadBook` (`prevTextChapter`/`curTextChapter`/`nextTextChapter`) that its scroll mode keeps
+/// exactly this same 3-chapter window resident, not just "current + next."
+private struct AdjacentChapterPreview {
     let index: Int
     let title: String
     let text: String
@@ -166,12 +179,25 @@ struct ReaderView: View {
     @State private var scrollPageSize: CGSize = .zero
     /// The next chapter's content, already fetched *and* purified (replace rules + Chinese
     /// conversion already applied, exactly like `text` itself), appended visually below the current
-    /// chapter's own paragraphs -- see the rendering code in `body` and `commitToNextChapterPreview`
-    /// for the full picture. Real usage feedback pointed at a reference app (screenshot: chapter 3's
-    /// ending, a gap, then chapter 4's title as a heading, then chapter 4's own text -- all in one
-    /// continuous scroll) where chapters visually flow into each other instead of this reader's
-    /// previous behavior (hit the bottom -> the whole screen reloads to a blank top).
-    @State private var nextChapterPreview: NextChapterPreview?
+    /// chapter's own paragraphs -- see the rendering code in `scrollModeBody` and
+    /// `commitToNextChapterPreview` for the full picture. Real usage feedback pointed at a reference
+    /// app (screenshot: chapter 3's ending, a gap, then chapter 4's title as a heading, then chapter
+    /// 4's own text -- all in one continuous scroll) where chapters visually flow into each other
+    /// instead of this reader's previous behavior (hit the bottom -> the whole screen reloads to a
+    /// blank top).
+    @State private var nextChapterPreview: AdjacentChapterPreview?
+    /// Same idea as `nextChapterPreview`, mirrored backward -- the previous chapter's content,
+    /// prepended above the current chapter's own heading, so scrolling *up* past the top connects
+    /// into the previous chapter exactly the same way scrolling down connects into the next one.
+    /// Real usage feedback: this reader only ever kept "current + next" resident, requiring an
+    /// explicit "下一章" tap to see anything beyond the one chapter ahead and never letting you
+    /// scroll backward at all -- confirmed against Legado_Max's `ReadBook` that it keeps a symmetric
+    /// 3-chapter window (`prevTextChapter`/`curTextChapter`/`nextTextChapter`) resident at all times,
+    /// not just one chapter ahead. See `commitToPrevChapterPreview` for how crossing into this
+    /// chapter promotes it to current (a pure pointer-shuffle, no refetch -- the chapter that was
+    /// "current" a moment ago becomes the new `nextChapterPreview` for free, exactly mirroring
+    /// `ReadBook.moveToPrevChapter`'s `nextTextChapter = curTextChapter; curTextChapter = prevTextChapter`).
+    @State private var prevChapterPreview: AdjacentChapterPreview?
     /// Set right before a seamless preview-commit changes `currentIndex` -- consumed by `load()` (see
     /// its own doc comment) so `.task(id:)` firing from that same `currentIndex` change doesn't
     /// redundantly re-fetch content that's already sitting on screen, which would also flash the
@@ -802,9 +828,10 @@ struct ReaderView: View {
     private func goTo(_ index: Int, anchor: PageAnchor = .first) {
         guard chapters.indices.contains(index) else { return }
         // An explicit jump (buttons/TOC/search/bookmark) invalidates whatever was queued as "the
-        // next chapter after wherever I currently am" -- if it's stale, `loadNextChapterPreview`
-        // (called again at the end of the resulting `load()`) fetches the right one for the new
-        // position instead.
+        // chapter before/after wherever I currently am" -- if either is stale, `loadPrevChapterPreview`/
+        // `loadNextChapterPreview` (called again at the end of the resulting `load()`) fetch the
+        // right ones for the new position instead.
+        prevChapterPreview = nil
         nextChapterPreview = nil
         pageAnchor = anchor
         currentIndex = index
@@ -1083,21 +1110,26 @@ struct ReaderView: View {
         return result
     }
 
-    /// Advances to the next chapter without requiring an explicit tap on "下一章" -- guarded by
-    /// `canAutoAdvance`'s grace period, and skipped while read-aloud is active (its own chapter
-    /// change already stops speech via `onChange(of: currentIndex)`; auto-advancing mid-sentence
-    /// while the user is listening, rather than reading, would be jarring rather than helpful).
+    /// Fallback for when the crossing-based promotion in `scrollModeBody`'s `.onPreferenceChange`
+    /// never got the chance to fire -- specifically, `nextChapterPreview.pageLayout` genuinely isn't
+    /// ready yet (slow connection, or this is the very last chapter and there's nothing to preview),
+    /// so there was never a "next-page-0" id for that crossing to land on and the user scrolled clear
+    /// past everything currently rendered down to the bottom sentinel instead. Guarded by
+    /// `canAutoAdvance`'s grace period (the sentinel can appear immediately on a short chapter, before
+    /// the user could realistically have read any of it), and skipped while read-aloud is active (its
+    /// own chapter change already stops speech via `onChange(of: currentIndex)`; auto-advancing
+    /// mid-sentence while the user is listening, rather than reading, would be jarring rather than
+    /// helpful).
     private func attemptAutoAdvance() {
         guard canAutoAdvance, !isReadAloudSpeaking, !isLoading else { return }
-        // Prefer the seamless path -- the preview is usually already sitting there since
-        // `loadNextChapterPreview` kicks off as soon as the current chapter finishes loading, well
-        // before the user could realistically scroll this far. Falls back to the old full-reload
-        // `goTo` path if the preview genuinely isn't ready yet (slow connection, or this is the very
-        // last chapter and there's nothing to preview) -- `pageLayout != nil` specifically, not just
-        // the preview existing, since committing a preview whose pages haven't finished computing
-        // yet would promote a chapter with nothing to actually render.
+        // `pageLayout != nil` specifically, not just the preview existing, since committing a preview
+        // whose pages haven't finished computing yet would promote a chapter with nothing to actually
+        // render. Reaching the sentinel means the user has scrolled past all of the preview's pages
+        // too, so page 0 (not preserving any particular page) is the right arrival point here --
+        // unlike the crossing-based path, which is `arrivingAtPageIndex`-precise because it fires the
+        // instant the boundary is crossed rather than only once everything beyond it is exhausted.
         if let preview = nextChapterPreview, preview.pageLayout != nil {
-            commitToNextChapterPreview(preview)
+            commitToNextChapterPreview(preview, arrivingAtPageIndex: 0)
             return
         }
         guard currentIndex < chapters.count - 1 else { return }
@@ -1241,6 +1273,24 @@ struct ReaderView: View {
             )
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    // Previous chapter, prepended above -- symmetric to the next-chapter block below.
+                    // Real usage feedback: this reader only ever showed "current + next," requiring an
+                    // explicit "下一章" tap to see anything beyond one chapter ahead and with no way to
+                    // scroll backward at all -- confirmed against Legado_Max that it keeps a real
+                    // prev/cur/next 3-chapter window (see `prevChapterPreview`'s doc comment). Once
+                    // `prevChapterPreview.pageLayout` is populated, `repaginateForScroll` re-anchors
+                    // the scroll position to compensate for content now appearing above the viewport
+                    // (see its own doc comment) -- without that, prepending here would visibly jump
+                    // whatever the user was already looking at.
+                    if let preview = prevChapterPreview, let previewLayout = preview.pageLayout {
+                        chapterHeading(preview.title)
+                            .id("prev-heading")
+
+                        ForEach(0..<previewLayout.pages.count, id: \.self) { pageIndex in
+                            pagePositionReportingBlock(pageIndex, layout: previewLayout, idPrefix: "prev-page-")
+                        }
+                    }
+
                     // Real usage feedback: only the *appended next chapter* got a heading before this
                     // -- the very first (current) chapter shown had no inline title at all, only the
                     // top bar's. Every chapter section, including this first one, now gets the same
@@ -1253,21 +1303,7 @@ struct ReaderView: View {
 
                     if let pageLayout {
                         ForEach(0..<pageLayout.pages.count, id: \.self) { pageIndex in
-                            pageBlock(pageIndex, layout: pageLayout)
-                                .id("page-\(pageIndex)")
-                                // Reports this page's position so `currentPageIndexInChapter` can
-                                // track real reading position (see its own doc comment) -- real usage
-                                // feedback: reopening a book always landed at the *start* of the
-                                // last-read chapter, never the exact spot, because nothing tracked
-                                // position within a chapter.
-                                .background(
-                                    GeometryReader { pageGeo in
-                                        Color.clear.preference(
-                                            key: PageTopOffsetKey.self,
-                                            value: [pageIndex: pageGeo.frame(in: .named("readerScroll")).minY]
-                                        )
-                                    }
-                                )
+                            pagePositionReportingBlock(pageIndex, layout: pageLayout, idPrefix: "page-")
                         }
                     }
 
@@ -1284,15 +1320,17 @@ struct ReaderView: View {
                             .id("next-heading")
 
                         ForEach(0..<previewLayout.pages.count, id: \.self) { pageIndex in
-                            pageBlock(pageIndex, layout: previewLayout)
-                                .id("next-page-\(pageIndex)")
+                            pagePositionReportingBlock(pageIndex, layout: previewLayout, idPrefix: "next-page-")
                         }
                     }
 
-                    // Invisible sentinel below the last page (of the current chapter, or of the
-                    // appended next-chapter preview when there is one) -- its appearance means the
-                    // user has scrolled (or the content was short enough to start fully visible) to
-                    // the very bottom.
+                    // Invisible sentinel below the last page of everything currently loaded (current
+                    // chapter, or the appended next-chapter preview when there is one) -- a fallback
+                    // for when `nextChapterPreview.pageLayout` genuinely isn't ready yet (slow
+                    // connection, or this is the last chapter), since in that case there's no
+                    // "next-page-0" id for the crossing-based promotion in `.onPreferenceChange` below
+                    // to ever land on. The normal case (preview already paginated) promotes well
+                    // before the user could scroll this far, via that crossing instead.
                     Color.clear
                         .frame(height: 1)
                         .onAppear { attemptAutoAdvance() }
@@ -1330,18 +1368,72 @@ struct ReaderView: View {
                 )
             }
             .coordinateSpace(name: "readerScroll")
+            // Whichever page's top edge is closest to the scroll viewport's own top edge is
+            // "currently being read" -- matches how a reader visually tracks position (whatever's at
+            // the top of the screen right now). Which of the three loaded chapters that page belongs
+            // to is read off its id prefix (see `pagePositionReportingBlock`'s doc comment): a
+            // "page-" id just updates position within the current chapter same as before, but a
+            // "prev-page-"/"next-page-" id means the user has scrolled clear across a chapter
+            // boundary -- promoting that chapter to current right here, the instant it becomes the
+            // topmost page, is what makes scrolling feel like one continuous book instead of separate
+            // per-chapter screens (confirmed against Legado_Max's `ContentTextView.scroll` that it
+            // promotes the moment a page crosses the viewport, not only once you've also scrolled
+            // through everything beyond it -- see `attemptAutoAdvance`'s doc comment for how the old
+            // bottom-sentinel path still exists as a fallback for when a preview isn't ready yet).
+            // Committing repoints `currentIndex` (see `commitToNextChapterPreview`/
+            // `commitToPrevChapterPreview`), which relabels this same page's id back to a bare
+            // "page-N" on the next layout pass, so this doesn't keep re-firing once promoted.
             .onPreferenceChange(PageTopOffsetKey.self) { offsets in
-                // Whichever page's top edge is closest to the scroll viewport's own top edge is
-                // "currently being read" -- matches how a reader visually tracks position (whatever's
-                // at the top of the screen right now).
-                if let closest = offsets.min(by: { abs($0.value) < abs($1.value) }) {
-                    currentPageIndexInChapter = closest.key
+                guard let closest = offsets.min(by: { abs($0.value) < abs($1.value) })?.key else { return }
+                if let pageIndex = pageIndex(fromID: closest, prefix: "prev-page-"),
+                   let preview = prevChapterPreview, preview.pageLayout != nil {
+                    commitToPrevChapterPreview(preview, arrivingAtPageIndex: pageIndex)
+                } else if let pageIndex = pageIndex(fromID: closest, prefix: "next-page-"),
+                          let preview = nextChapterPreview, preview.pageLayout != nil {
+                    commitToNextChapterPreview(preview, arrivingAtPageIndex: pageIndex)
+                } else if let pageIndex = pageIndex(fromID: closest, prefix: "page-") {
+                    currentPageIndexInChapter = pageIndex
                 }
             }
             .task(id: scrollPaginationKey(size: contentSize)) {
                 await repaginateForScroll(size: contentSize, proxy: scrollProxy)
             }
         }
+    }
+
+    /// Strips `prefix` off `id` and parses the remainder as the page index, or `nil` if `id` doesn't
+    /// start with that exact prefix -- e.g. `pageIndex(fromID: "next-page-3", prefix: "next-page-")
+    /// == 3`, and `pageIndex(fromID: "prev-page-3", prefix: "page-") == nil` (it starts with
+    /// `"prev-"`, not literally `"page-"`, so the two never collide despite one prefix containing the
+    /// other's text).
+    private func pageIndex(fromID id: String, prefix: String) -> Int? {
+        guard id.hasPrefix(prefix) else { return nil }
+        return Int(id.dropFirst(prefix.count))
+    }
+
+    /// One `pageBlock` plus the id + position-reporting wrapper every page in every one of the three
+    /// loaded chapters (`prevChapterPreview`/current/`nextChapterPreview`) needs -- factored out so
+    /// `scrollModeBody`'s three near-identical `ForEach` blocks don't each hand-roll the same
+    /// `.id`/`.background(GeometryReader{...preference...})` boilerplate. `idPrefix` is one of
+    /// `"prev-page-"`/`"page-"`/`"next-page-"`; `scrollModeBody`'s `.onPreferenceChange` reads that
+    /// same prefix back off the reported key to tell which of the three chapters the topmost visible
+    /// page belongs to (see its own doc comment).
+    @ViewBuilder
+    private func pagePositionReportingBlock(_ index: Int, layout: ChapterPageLayout, idPrefix: String) -> some View {
+        pageBlock(index, layout: layout)
+            .id("\(idPrefix)\(index)")
+            // Reports this page's position so `scrollModeBody`'s `.onPreferenceChange` can track real
+            // reading position and promote across chapter boundaries (see its own doc comment) --
+            // real usage feedback: reopening a book always landed at the *start* of the last-read
+            // chapter, never the exact spot, because nothing tracked position within a chapter.
+            .background(
+                GeometryReader { pageGeo in
+                    Color.clear.preference(
+                        key: PageTopOffsetKey.self,
+                        value: ["\(idPrefix)\(index)": pageGeo.frame(in: .named("readerScroll")).minY]
+                    )
+                }
+            )
     }
 
     /// Renders one screen-measured page's worth of chunks. `chunkOffset == 0` needing special
@@ -1432,7 +1524,51 @@ struct ReaderView: View {
         isLoading = false
         armAutoAdvance()
         prefetchUpcomingChapters()
+        await loadPrevChapterPreview()
         await loadNextChapterPreview()
+    }
+
+    /// Prefetches and fully purifies+paginates the *previous* chapter's content ahead of time so it
+    /// can be prepended above the current chapter's own heading (see `prevChapterPreview`'s doc
+    /// comment for why) -- exact mirror of `loadNextChapterPreview`, just facing the other direction.
+    private func loadPrevChapterPreview() async {
+        let prevIndex = currentIndex - 1
+        guard chapters.indices.contains(prevIndex) else {
+            prevChapterPreview = nil
+            return
+        }
+        let prevChapter = chapters[prevIndex]
+        let cached = try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: prevIndex)
+        let content: ChapterContent
+        if let cached {
+            content = cached
+        } else {
+            guard let fetched = try? await ContentService.fetchContent(
+                source: source, chapter: prevChapter, httpClient: env.httpClient
+            ) else {
+                prevChapterPreview = nil
+                return
+            }
+            content = fetched
+        }
+        // Guards against a stale response landing after the user has already moved past this
+        // chapter some other way (e.g. jumped via TOC/search while this fetch was still in flight).
+        guard prevIndex == currentIndex - 1 else { return }
+        let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
+        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+        let previewText = applyChineseConversion(purified.result)
+        var preview = AdjacentChapterPreview(
+            index: prevIndex, title: prevChapter.title, text: previewText, matchedRules: purified.matchedRules
+        )
+        if !pageTurnStyle.isPaginated, scrollPageSize.width > 0, scrollPageSize.height > 0 {
+            let font = UIFont.systemFont(ofSize: fontSize)
+            let pages = ChapterPaginator.paginate(
+                text: previewText, font: font, lineSpacing: lineSpacing, paragraphSpacing: paragraphSpacing,
+                pageSize: scrollPageSize
+            )
+            preview.pageLayout = ChapterPageLayout(paragraphs: previewText.components(separatedBy: "\n"), pages: pages)
+        }
+        prevChapterPreview = preview
     }
 
     /// Prefetches and fully purifies+paginates the *next* chapter's content ahead of time so it can
@@ -1441,7 +1577,8 @@ struct ReaderView: View {
     /// already warms -- so this is usually an instant cache hit rather than a second network
     /// request racing that one. Skips pagination (leaves `pageLayout` `nil` on the returned preview)
     /// if `scrollPageSize` hasn't been measured yet or the reader is in a paginated style -- either
-    /// way `attemptAutoAdvance` only commits a preview once its `pageLayout` is actually ready.
+    /// way `attemptAutoAdvance`/the crossing-based promotion in `scrollModeBody` only commit a
+    /// preview once its `pageLayout` is actually ready.
     private func loadNextChapterPreview() async {
         let nextIndex = currentIndex + 1
         guard chapters.indices.contains(nextIndex) else {
@@ -1468,7 +1605,7 @@ struct ReaderView: View {
         let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
         let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
         let previewText = applyChineseConversion(purified.result)
-        var preview = NextChapterPreview(
+        var preview = AdjacentChapterPreview(
             index: nextIndex, title: nextChapter.title, text: previewText, matchedRules: purified.matchedRules
         )
         if !pageTurnStyle.isPaginated, scrollPageSize.width > 0, scrollPageSize.height > 0 {
@@ -1489,16 +1626,27 @@ struct ReaderView: View {
     /// promoting it just relabels which pages count as "the current chapter" for read-aloud/
     /// highlight/bookmark/position-tracking purposes. The two "suppress" flags stop that relabeling
     /// from *also* triggering a redundant reload or an unwanted scroll-to-top -- both would undo the
-    /// whole point of committing silently.
-    private func commitToNextChapterPreview(_ preview: NextChapterPreview) {
+    /// whole point of committing silently. `arrivingAtPageIndex` is which page of `preview` the user
+    /// was actually looking at when the crossing was detected (see `scrollModeBody`'s
+    /// `.onPreferenceChange`) -- not necessarily page 0, since a fast fling can cross straight into
+    /// the middle of the next chapter's first visible page.
+    ///
+    /// The chapter that was "current" until now becomes the new `prevChapterPreview` for free -- it's
+    /// already fully fetched/purified/paginated, so no refetch is needed, exactly mirroring
+    /// Legado_Max's `ReadBook.moveToNextChapter` (`prevTextChapter = curTextChapter; curTextChapter =
+    /// nextTextChapter`): the 3-chapter window slides by one instead of growing or shrinking.
+    private func commitToNextChapterPreview(_ preview: AdjacentChapterPreview, arrivingAtPageIndex: Int) {
         justCommittedFromPreview = true
         suppressScrollResetOnNextChapterChange = true
+        prevChapterPreview = AdjacentChapterPreview(
+            index: currentIndex, title: chapter.title, text: text, matchedRules: matchedReplaceRules, pageLayout: pageLayout
+        )
         currentIndex = preview.index
         text = preview.text
         matchedReplaceRules = preview.matchedRules
         pageLayout = preview.pageLayout
         lastPaginatedScrollText = preview.text
-        currentPageIndexInChapter = 0
+        currentPageIndexInChapter = arrivingAtPageIndex
         nextChapterPreview = nil
         canAutoAdvance = false
         armAutoAdvance()
@@ -1511,6 +1659,37 @@ struct ReaderView: View {
             )) ?? false
         }
         Task { await loadNextChapterPreview() }
+        prefetchUpcomingChapters()
+    }
+
+    /// Exact mirror of `commitToNextChapterPreview`, facing backward: the chapter that was "current"
+    /// becomes the new `nextChapterPreview` for free (no refetch), matching Legado_Max's
+    /// `ReadBook.moveToPrevChapter` (`nextTextChapter = curTextChapter; curTextChapter =
+    /// prevTextChapter`).
+    private func commitToPrevChapterPreview(_ preview: AdjacentChapterPreview, arrivingAtPageIndex: Int) {
+        justCommittedFromPreview = true
+        suppressScrollResetOnNextChapterChange = true
+        nextChapterPreview = AdjacentChapterPreview(
+            index: currentIndex, title: chapter.title, text: text, matchedRules: matchedReplaceRules, pageLayout: pageLayout
+        )
+        currentIndex = preview.index
+        text = preview.text
+        matchedReplaceRules = preview.matchedRules
+        pageLayout = preview.pageLayout
+        lastPaginatedScrollText = preview.text
+        currentPageIndexInChapter = arrivingAtPageIndex
+        prevChapterPreview = nil
+        canAutoAdvance = false
+        armAutoAdvance()
+        Task {
+            try? await env.shelfStore.updateProgress(
+                bookUrl: bookUrl, chapterIndex: preview.index, chapterTitle: preview.title, characterOffset: 0
+            )
+            isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
+                bookIdentifier: bookUrl, chapterIndex: preview.index
+            )) ?? false
+        }
+        Task { await loadPrevChapterPreview() }
         prefetchUpcomingChapters()
     }
 
@@ -1551,23 +1730,38 @@ struct ReaderView: View {
         pageLayout = newLayout
         lastPaginatedScrollText = text
 
-        // Backfills the next-chapter preview's own pagination if it's still missing (see
-        // `NextChapterPreview.pageLayout`'s doc comment) -- `loadNextChapterPreview` skips pagination
-        // when `scrollPageSize` isn't known yet, which real-device testing showed happens on
-        // essentially every chapter, not just the first: `prefetchUpcomingChapters` keeps the next
-        // chapter's content warm in `ChapterCacheStore`, so `loadNextChapterPreview`'s cache hit
-        // routinely resolves before this function's own TextKit pagination work (and the `.task(id:)`
-        // hop that starts it) finishes measuring `scrollPageSize` for the first time. Without this,
-        // the preview's `pageLayout` stays `nil` forever, `body`'s appended-next-chapter block never
-        // renders it, and chapters never visually connect the way Legado's does -- the reader looks
-        // like it's stuck showing only the current chapter until "下一章" is tapped manually.
-        if var preview = nextChapterPreview, preview.pageLayout == nil {
-            let previewPages = ChapterPaginator.paginate(
-                text: preview.text, font: font, lineSpacing: lineSpacing, paragraphSpacing: paragraphSpacing,
-                pageSize: size
+        // Re-paginates both adjacent-chapter previews on *every* run here, not just once when
+        // `pageLayout` is still `nil` -- real usage feedback: after enlarging the font, the current
+        // chapter reflowed correctly, but scrolling into the next/previous chapter still showed the
+        // old, stale page breaks computed under the old font size, since a one-shot nil-check never
+        // revisits a preview that already has a `pageLayout`. `loadNextChapterPreview`/
+        // `loadPrevChapterPreview` skipping pagination when `scrollPageSize` isn't known yet also
+        // means this is genuinely the *first* pagination for a brand-new preview essentially every
+        // time (see their own doc comments: `prefetchUpcomingChapters` keeps neighboring chapters'
+        // content warm enough that the cache hit routinely beats this function's own TextKit work),
+        // so this one unconditional pass covers both "never paginated yet" and "stale from an old
+        // font size" with the same code path.
+        if var next = nextChapterPreview {
+            let nextPages = ChapterPaginator.paginate(
+                text: next.text, font: font, lineSpacing: lineSpacing, paragraphSpacing: paragraphSpacing, pageSize: size
             )
-            preview.pageLayout = ChapterPageLayout(paragraphs: preview.text.components(separatedBy: "\n"), pages: previewPages)
-            nextChapterPreview = preview
+            next.pageLayout = ChapterPageLayout(paragraphs: next.text.components(separatedBy: "\n"), pages: nextPages)
+            nextChapterPreview = next
+        }
+        // Unlike the next chapter (appended below, never affects anything above/at the current
+        // viewport), the previous chapter sits *above* the current heading -- its pagination
+        // appearing for the first time, or changing height because reading settings changed, shifts
+        // everything below it in the `ScrollView`'s content. `prevWasPresent` (captured before the
+        // regeneration below) drives the re-anchoring scroll further down, which keeps whatever page
+        // of the *current* chapter the user was actually looking at pinned in place instead of
+        // silently jumping when that height changes.
+        let prevWasPresent = prevChapterPreview != nil
+        if var prev = prevChapterPreview {
+            let prevPages = ChapterPaginator.paginate(
+                text: prev.text, font: font, lineSpacing: lineSpacing, paragraphSpacing: paragraphSpacing, pageSize: size
+            )
+            prev.pageLayout = ChapterPageLayout(paragraphs: prev.text.components(separatedBy: "\n"), pages: prevPages)
+            prevChapterPreview = prev
         }
 
         if let offset = pendingResumeCharacterOffset {
@@ -1578,6 +1772,17 @@ struct ReaderView: View {
             DispatchQueue.main.async {
                 withAnimation(nil) {
                     proxy.scrollTo(targetID, anchor: .top)
+                }
+            }
+        } else if prevWasPresent {
+            // `scrollTo` looks up `anchorID` in whatever the layout looks like *when this actually
+            // runs* (a moment later, after SwiftUI has laid out the just-changed previous-chapter
+            // content above), not a stale offset captured now -- so this stays correct regardless of
+            // how much taller or shorter the previous chapter's content just became.
+            let anchorID = "page-\(currentPageIndexInChapter)"
+            DispatchQueue.main.async {
+                withAnimation(nil) {
+                    proxy.scrollTo(anchorID, anchor: .top)
                 }
             }
         }
