@@ -1448,7 +1448,18 @@ struct ReaderView: View {
         guard pendingPageStepTask == nil else { return }
         let pageHeight = scrollPageSize.height
         guard pageHeight > 0 else { return }
-        let targetOffset = dragOffset + (direction > 0 ? -pageHeight : pageHeight)
+        // A *fixed* target (one page height, not `dragOffset` plus one page height) -- matches
+        // Legado_Max's own `calcNextPageOffset`/`calcPrevPageOffset`, which compute a turn distance
+        // from wherever the current page is already sitting, not always a blind full page's worth on
+        // top of that. A live drag can leave `dragOffset` resting at any sub-page position (that's
+        // the whole point of not snapping back on release -- see its own doc comment); if a button
+        // press right after that just added a fixed `±pageHeight` to whatever `dragOffset` already
+        // was, the result would overshoot the next boundary by however much of the current page was
+        // already scrolled, landing mid-page instead of cleanly on the next one. Animating toward
+        // this fixed target from `dragOffset`'s actual current value still gives a shorter/longer
+        // slide depending on how close the rest position already was -- just correctly *ends* exactly
+        // on the next/previous page boundary (`dragOffset` settling back to precisely 0) every time.
+        let targetOffset: CGFloat = direction > 0 ? -pageHeight : pageHeight
         withAnimation(.easeInOut(duration: 0.25)) {
             dragOffset = targetOffset
         }
