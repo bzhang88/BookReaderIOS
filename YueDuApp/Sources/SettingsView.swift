@@ -9,10 +9,33 @@ import SwiftUI
 /// doesn't have) -- the *grouping pattern* is what's being matched, not a literal row-for-row copy.
 struct SettingsView: View {
     @AppStorage(ReaderSettingsKey.appFontScale) private var appFontScale: AppFontScale = .standard
+    @AppStorage(ReaderSettingsKey.appAppearanceMode) private var appAppearanceMode: AppAppearanceMode = .system
 
     var body: some View {
         NavigationStack {
             List {
+                // 跟随系统/浅色/深色 for the *whole app*, not just the reader -- real usage feedback
+                // was that the reader's own day/night theme could end up looking nothing like every
+                // other screen, which read as jarring. Picking 深色/浅色 here forces every screen
+                // (including a reader left on "跟随系统") to match; see `YueDuApp.swift`'s
+                // `.preferredColorScheme` doc comment for the mechanism.
+                Section("外观") {
+                    Picker(selection: $appAppearanceMode) {
+                        ForEach(AppAppearanceMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    } label: {
+                        Label("外观模式", systemImage: "circle.lefthalf.filled")
+                    }
+                    Picker(selection: $appFontScale) {
+                        ForEach(AppFontScale.allCases) { scale in
+                            Text(scale.displayName).tag(scale)
+                        }
+                    } label: {
+                        Label("App 字体大小", systemImage: "textformat.size")
+                    }
+                }
+
                 Section {
                     NavigationLink {
                         SourceLibraryView()
@@ -76,13 +99,6 @@ struct SettingsView: View {
                         AppLockSettingsView()
                     } label: {
                         Label("本地密码锁", systemImage: "lock")
-                    }
-                    Picker(selection: $appFontScale) {
-                        ForEach(AppFontScale.allCases) { scale in
-                            Text(scale.displayName).tag(scale)
-                        }
-                    } label: {
-                        Label("App 字体大小", systemImage: "textformat.size")
                     }
                 }
 

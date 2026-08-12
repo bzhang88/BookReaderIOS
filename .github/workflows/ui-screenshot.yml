@@ -60,6 +60,15 @@ jobs:
           sleep 6
           xcrun simctl io "$DEVICE_ID" screenshot "screenshots/4-reader.png"
 
+          # Reader's left-sliding TOC drawer (目录/书签/全文搜索/净化规则 tabs) -- opened by default
+          # via `startWithTocOpen` since CI can't tap the 目录 button itself. Otherwise this new
+          # drawer would be, like everything else in this app, written and shipped without ever
+          # actually being seen.
+          xcrun simctl terminate "$DEVICE_ID" com.bzhang88.yuedu || true
+          xcrun simctl launch "$DEVICE_ID" com.bzhang88.yuedu -uiTestingScreen localReaderToc
+          sleep 6
+          xcrun simctl io "$DEVICE_ID" screenshot "screenshots/5-reader-toc-drawer.png"
+
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
         with:

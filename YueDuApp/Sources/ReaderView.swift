@@ -24,6 +24,8 @@ struct ReaderView: View {
     @State private var errorMessage: String?
     @State private var isShowingStyleSheet = false
     @State private var isShowingMoreSettings = false
+    @State private var isSettingsPanelVisible = false
+    @State private var isShowingTapZoneConfig = false
     @State private var isShowingChangeSource = false
     @State private var isShowingChapterSourceSwitch = false
     @State private var isShowingToc = false
@@ -169,6 +171,17 @@ struct ReaderView: View {
                             isReadAloudSpeaking && index == readAloudCurrentParagraphIndex
                                 ? Color.accentColor.opacity(0.15) : Color.clear
                         )
+                        // Real usage feedback pointed at a reference app whose long-press-to-select
+                        // popup has custom 净化/全文搜索/百科/网络搜索 buttons instead of the plain
+                        // system Copy menu. That specific customization needs UIKit (SwiftUI has no
+                        // documented hook to inject items into `.textSelection`'s own menu), and
+                        // doing that would mean routing a `UITextView` through this exact paragraph
+                        // loop -- the same `ScrollView` this session's other real fix (see the
+                        // `.simultaneousGesture` doc comment above) just untangled from a gesture
+                        // conflict real usage caught. Adding real selection at all (there was
+                        // previously no way to copy text out of this reader) without that riskier
+                        // rewrite is the safer increment; the custom menu is deferred.
+                        .textSelection(.enabled)
                         .id(index)
                 }
                 // Invisible sentinel below the last paragraph -- its appearance means the user has
@@ -330,6 +343,18 @@ struct ReaderView: View {
                             .disabled(currentIndex >= chapters.count - 1)
                     }
 
+                    // Inline expanding panel -- toggled by the "设置" icon just below, in place of
+                    // that icon opening `ReaderMoreSettingsSheet` directly. Real usage feedback
+                    // pointed at a reference reading app whose "设置" doesn't cover the screen with a
+                    // modal at all: the page itself grows a quick-controls panel right above the
+                    // primary icon row (theme swatches, font-size/line-spacing steppers, then 4
+                    // shortcuts), and only "更多" underneath that reaches the deeper, less-frequently
+                    // -touched settings (语速/简繁转换/护眼/触控灵敏度/净化规则报告) that still live
+                    // in the full `ReaderMoreSettingsSheet`.
+                    if isSettingsPanelVisible {
+                        inlineSettingsPanel(proxy: scrollProxy)
+                    }
+
                     // Bottom-most primary-function row -- matches the reference reading app's own
                     // 4-icon row exactly (目录/亮度/深色/设置), not Legado_Max's stock 目录/朗读/
                     // 界面/设置: the user pointed at a real screenshot of the app they like using,
@@ -353,7 +378,7 @@ struct ReaderView: View {
                         }
                         Spacer()
                         bottomFunctionButton(icon: "gearshape", label: "设置") {
-                            isShowingMoreSettings = true
+                            isSettingsPanelVisible.toggle()
                         }
                     }
                 }
@@ -511,6 +536,16 @@ struct ReaderView: View {
         .sheet(isPresented: $isShowingMoreSettings) {
             ReaderMoreSettingsSheet(matchedRules: matchedReplaceRules)
         }
+        .sheet(isPresented: $isShowingTapZoneConfig) {
+            NavigationStack {
+                TapZoneConfigView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { isShowingTapZoneConfig = false }
+                        }
+                    }
+            }
+        }
         .sheet(isPresented: $isShowingReplaceRules) {
             NavigationStack {
                 ReplaceRuleListView()
@@ -534,8 +569,18 @@ struct ReaderView: View {
                 }
             }
         }
-        .sheet(isPresented: $isShowingToc) {
-            tocSheet
+        .overlay {
+            ReaderTocDrawerView(
+                isPresented: $isShowingToc,
+                chapters: chapters.map { ReaderTocDrawerView.ChapterItem(id: $0.index, title: $0.title) },
+                currentIndex: currentIndex,
+                bookIdentifier: bookUrl,
+                bookmarkStore: env.bookmarkStore,
+                matchedReplaceRules: matchedReplaceRules,
+                searchScopeNotice: "仅搜索已下载缓存的章节，未下载的章节不在搜索范围内",
+                loadChaptersForSearch: loadCachedChaptersForSearch,
+                onSelectChapter: { index in goTo(index) }
+            )
         }
         .sheet(isPresented: $isShowingContentSearch) {
             ChapterContentSearchView(
@@ -707,6 +752,72 @@ struct ReaderView: View {
         }
     }
 
+    /// Quick-access controls shown above the primary icon row when "设置" is tapped -- see the call
+    /// site's doc comment for why this replaced opening `ReaderMoreSettingsSheet` directly. The 4
+    /// shortcuts at the bottom route into whichever existing sheet/action already owns that setting
+    /// rather than reimplementing it a second time inline (自动阅读 toggles the same auto-scroll/
+    /// auto-page state the old overflow menu item did; 翻页动画 and 更多 just open `ReaderStyleSheet`
+    /// /`ReaderMoreSettingsSheet` a click sooner than before).
+    private func inlineSettingsPanel(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ThemeSwatchPicker(theme: $theme)
+
+            HStack {
+                Text("字号").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Stepper(value: $fontSize, in: 12...32, step: 1) {
+                    Text("\(Int(fontSize))").font(.caption).monospacedDigit().frame(minWidth: 20)
+                }
+                .fixedSize()
+            }
+            HStack {
+                Text("行距").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Stepper(value: $lineSpacing, in: 0...24, step: 1) {
+                    Text("\(Int(lineSpacing))").font(.caption).monospacedDigit().frame(minWidth: 20)
+                }
+                .fixedSize()
+            }
+
+            Divider()
+
+            HStack {
+                settingsQuickLink(icon: pageTurnStyle.isPaginated ? (isAutoPaging ? "pause.circle" : "play.circle") : (isAutoScrolling ? "pause.circle" : "play.circle"), label: "自动阅读") {
+                    if pageTurnStyle.isPaginated {
+                        toggleAutoPage()
+                    } else {
+                        toggleAutoScroll(proxy: proxy)
+                    }
+                }
+                Spacer()
+                settingsQuickLink(icon: "square.grid.3x3", label: "点击区域") {
+                    isShowingTapZoneConfig = true
+                }
+                Spacer()
+                settingsQuickLink(icon: "rectangle.on.rectangle", label: "翻页动画") {
+                    isShowingStyleSheet = true
+                }
+                Spacer()
+                settingsQuickLink(icon: "ellipsis", label: "更多") {
+                    isShowingMoreSettings = true
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private func settingsQuickLink(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.body)
+                Text(label).font(.caption2)
+            }
+        }
+    }
+
     /// Resolves a raw tap location to one of the 3x3 zones and runs whatever action the user has
     /// configured for it (default: side columns turn chapters, middle column toggles chrome --
     /// see `ReaderTapZoneGrid.standard`). Zones are measured against the screen bounds rather than
@@ -731,40 +842,6 @@ struct ReaderView: View {
             goTo(currentIndex + 1)
         case .openToc:
             isShowingToc = true
-        }
-    }
-
-    /// A lightweight in-session chapter picker, deliberately *not* a reused `TocView` -- that view
-    /// fetches its own chapter list over the network and, on tap, pushes a brand-new `ReaderView`
-    /// via `NavigationLink`. Presented from inside an already-open reader as a sheet, that would
-    /// nest a second reader inside the sheet's own stack instead of just jumping the current
-    /// session to a different chapter. This reuses the `chapters` this reader already has in memory
-    /// and just moves `currentIndex`.
-    @ViewBuilder
-    private var tocSheet: some View {
-        NavigationStack {
-            List(chapters) { chapterItem in
-                Button {
-                    goTo(chapterItem.index)
-                    isShowingToc = false
-                } label: {
-                    HStack {
-                        Text(chapterItem.title)
-                        Spacer()
-                        if chapterItem.index == currentIndex {
-                            Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-            .navigationTitle("目录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { isShowingToc = false }
-                }
-            }
         }
     }
 

@@ -48,6 +48,10 @@ struct RootView: View {
                 NavigationStack {
                     LocalReaderView(book: Self.uiTestingSeedBook)
                 }
+            } else if uiTestingScreen == "localReaderToc" {
+                NavigationStack {
+                    LocalReaderView(book: Self.uiTestingSeedBook, startWithTocOpen: true)
+                }
             } else if isLocked && !isUITesting {
                 AppLockView(onUnlock: { isLocked = false })
             } else {

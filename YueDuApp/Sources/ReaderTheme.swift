@@ -232,6 +232,9 @@ enum ReaderSettingsKey {
     /// this is meant to scale the *whole app's* UI, not just the reader (which already has its own
     /// separate `fontSize` control). Stored as a `DynamicTypeSize` case name string.
     static let appFontScale = "app.fontScale"
+    /// Stores an `AppAppearanceMode` raw value -- see `YueDuApp.swift` for the enum and where this
+    /// gets applied (`.preferredColorScheme` at the root `WindowGroup`).
+    static let appAppearanceMode = "app.appearanceMode"
     /// Which of the 5 page-turn presentations (`PageTurnStyle`) the reader uses -- defaults to
     /// `.scroll` so upgrading doesn't silently change anyone's existing reading behavior.
     static let pageTurnStyle = "reader.pageTurnStyle"

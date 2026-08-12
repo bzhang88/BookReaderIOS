@@ -15,6 +15,7 @@ struct LocalReaderView: View {
     @State private var currentIndex: Int
     @State private var isShowingStyleSheet = false
     @State private var isShowingMoreSettings = false
+    @State private var isSettingsPanelVisible = false
     @State private var isCurrentChapterBookmarked = false
     @State private var matchedReplaceRules: [ReplaceRule] = []
     @State private var isShowingContentSearch = false
@@ -59,12 +60,16 @@ struct LocalReaderView: View {
     }
 
     /// `startChapterIndex` overrides the book's own last-read position -- used when jumping in from
-    /// a bookmark, which names an exact chapter rather than "wherever I left off."
-    init(book: LocalBook, startChapterIndex: Int? = nil) {
+    /// a bookmark, which names an exact chapter rather than "wherever I left off." `startWithTocOpen`
+    /// exists purely for CI's screenshot workflow (see `RootView`'s `-uiTestingScreen
+    /// localReaderToc`) -- there's no other way to get a screenshot of the drawer actually open,
+    /// since CI can't tap anything.
+    init(book: LocalBook, startChapterIndex: Int? = nil, startWithTocOpen: Bool = false) {
         self.book = book
         let fallback = book.lastReadChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? 0
         let start = startChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? fallback
         self._currentIndex = State(initialValue: start)
+        self._isShowingToc = State(initialValue: startWithTocOpen)
     }
 
     private var chapter: LocalChapter { book.chapters[currentIndex] }
@@ -116,6 +121,12 @@ struct LocalReaderView: View {
                         .lineSpacing(lineSpacing)
                         .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
                         .padding(.horizontal, 4)
+                        // See `ReaderView`'s matching change for why this stops at real selection
+                        // (there was previously no way to copy text out of either reader) rather
+                        // than also injecting a custom 净化/全文搜索/百科/网络搜索 menu -- that needs
+                        // UIKit-level work this app can't risk shipping blind into a `ScrollView`'s
+                        // gesture handling without a way to test it interactively.
+                        .textSelection(.enabled)
                         .id(index)
                 }
             }
@@ -178,6 +189,15 @@ struct LocalReaderView: View {
                         .disabled(currentIndex >= book.chapters.count - 1)
                 }
 
+                // Same inline-expanding-panel treatment as `ReaderView`'s "设置" icon -- see that
+                // file's `inlineSettingsPanel` doc comment. Only 2 shortcuts here (not 4): this
+                // reader has neither auto-scroll nor its own tap-zone grid yet, so there's nothing
+                // real for "自动阅读"/"点击区域" shortcuts to open -- a fake button that opens
+                // nothing would be worse than just not having it.
+                if isSettingsPanelVisible {
+                    inlineSettingsPanel
+                }
+
                 // Matches `ReaderView`'s primary row shape exactly: 目录/亮度/深色/设置. 书签
                 // moved up to the top bar instead (see `.toolbar` below) since this reader has no
                 // TOC entry point at all yet and gaining one here is worth more than keeping
@@ -197,7 +217,7 @@ struct LocalReaderView: View {
                     }
                     Spacer()
                     bottomFunctionButton(icon: "gearshape", label: "设置") {
-                        isShowingMoreSettings = true
+                        isSettingsPanelVisible.toggle()
                     }
                 }
             }
@@ -245,31 +265,19 @@ struct LocalReaderView: View {
             }
         }
         .task(id: currentIndex) { await load() }
-        .sheet(isPresented: $isShowingToc) {
-            NavigationStack {
-                List(book.chapters.indices, id: \.self) { index in
-                    Button {
-                        goTo(index)
-                        isShowingToc = false
-                    } label: {
-                        HStack {
-                            Text(book.chapters[index].title)
-                            Spacer()
-                            if index == currentIndex {
-                                Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-                .navigationTitle("目录")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("关闭") { isShowingToc = false }
-                    }
-                }
-            }
+        .overlay {
+            ReaderTocDrawerView(
+                isPresented: $isShowingToc,
+                chapters: book.chapters.indices.map { ReaderTocDrawerView.ChapterItem(id: $0, title: book.chapters[$0].title) },
+                currentIndex: currentIndex,
+                bookIdentifier: book.id,
+                bookmarkStore: env.bookmarkStore,
+                matchedReplaceRules: matchedReplaceRules,
+                loadChaptersForSearch: {
+                    book.chapters.enumerated().map { index, chapter in (index: index, title: chapter.title, text: chapter.text) }
+                },
+                onSelectChapter: { index in goTo(index) }
+            )
         }
         .sheet(isPresented: $isShowingStyleSheet) {
             LocalReaderStyleSheet()
@@ -350,6 +358,54 @@ struct LocalReaderView: View {
                     .font(.title3)
                 Text(label)
                     .font(.caption2)
+            }
+        }
+    }
+
+    private var inlineSettingsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ThemeSwatchPicker(theme: $theme)
+
+            HStack {
+                Text("字号").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Stepper(value: $fontSize, in: 12...32, step: 1) {
+                    Text("\(Int(fontSize))").font(.caption).monospacedDigit().frame(minWidth: 20)
+                }
+                .fixedSize()
+            }
+            HStack {
+                Text("行距").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Stepper(value: $lineSpacing, in: 0...24, step: 1) {
+                    Text("\(Int(lineSpacing))").font(.caption).monospacedDigit().frame(minWidth: 20)
+                }
+                .fixedSize()
+            }
+
+            Divider()
+
+            HStack {
+                settingsQuickLink(icon: "rectangle.on.rectangle", label: "翻页动画") {
+                    isShowingStyleSheet = true
+                }
+                Spacer()
+                settingsQuickLink(icon: "ellipsis", label: "更多") {
+                    isShowingMoreSettings = true
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private func settingsQuickLink(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.body)
+                Text(label).font(.caption2)
             }
         }
     }
