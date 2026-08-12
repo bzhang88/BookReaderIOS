@@ -6,10 +6,25 @@ import NetworkClient
 /// Fetches and extracts a chapter's readable text, mirroring Legado's `BookContent.analyzeContent`
 /// flow. `nextContentUrl` pagination follows the same three-way branch as `TocService` (0/1/2+).
 public enum ContentService {
+    /// - Parameter nextChapterUrl: The URL of the chapter *after* `chapter` in the book's own
+    ///   table of contents, if known -- passed through so the `nextContentUrl` pagination loop below
+    ///   can tell "this source's in-chapter-page-turn link" apart from "this source reused/mislabeled
+    ///   its actual next-*chapter* link as the page-turn rule." Both read as the exact same thing to
+    ///   `nextContentUrl` (a link to follow, `RuleEngine`-extracted the same way either way); real
+    ///   book-source data (confirmed against a live-imported source in this app's own library, whose
+    ///   `nextContentUrl` rule literally reads `text.下一章@href` -- "next *chapter*") shows sources
+    ///   do this. Legado guards against exactly this in `LazyContentManager`/`BookContent`
+    ///   (`nextUrl == nextChapterUrl` stops pagination rather than following it) -- without an
+    ///   equivalent check here, a source like that would keep chaining through every remaining
+    ///   chapter's content, appending the entire rest of the book into what's nominally one chapter.
+    ///   `nil` (the default) skips the check for callers that don't have a chapter list in hand
+    ///   (single-chapter previews, debug/validation tooling) -- those already can't reach this failure
+    ///   mode by construction, since nothing about a lone chapter fetch even implies "next chapter."
     public static func fetchContent(
         source: BookSource,
         chapter: BookChapter,
-        httpClient: HTTPClient
+        httpClient: HTTPClient,
+        nextChapterUrl: String? = nil
     ) async throws -> ChapterContent {
         let rule = source.ruleContent ?? ContentRule()
 
@@ -34,7 +49,7 @@ public enum ContentService {
 
         case 1:
             var nextURL: String? = firstNextURLs[0]
-            while let url = nextURL, !visitedPages.contains(url) {
+            while let url = nextURL, !visitedPages.contains(url), url != nextChapterUrl {
                 visitedPages.insert(url)
                 let response = try await httpClient.fetch(HTTPRequest(url: url, headers: source.parsedHeaders()))
                 let content = try RuleContent.parse(body: response.body, baseURL: response.finalURL)
@@ -43,7 +58,7 @@ public enum ContentService {
             }
 
         default:
-            let urls = firstNextURLs.filter { !visitedPages.contains($0) }
+            let urls = firstNextURLs.filter { !visitedPages.contains($0) && $0 != nextChapterUrl }
             var pagesByIndex: [Int: [String]] = [:]
             try await withThrowingTaskGroup(of: (Int, [String]).self) { group in
                 for (offset, url) in urls.enumerated() {

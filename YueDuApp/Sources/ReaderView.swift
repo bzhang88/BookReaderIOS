@@ -1177,7 +1177,10 @@ struct ReaderView: View {
                 isLoading = false
                 return
             }
-            let content = try await ContentService.fetchContent(source: newSource, chapter: matchedChapter, httpClient: env.httpClient)
+            let content = try await ContentService.fetchContent(
+                source: newSource, chapter: matchedChapter, httpClient: env.httpClient,
+                nextChapterUrl: altChapters.indices.contains(matchedChapter.index + 1) ? altChapters[matchedChapter.index + 1].url : nil
+            )
             try await env.chapterCacheStore.save(bookUrl: bookUrl, index: originalIndex, content: content)
         } catch {
             errorMessage = "本章换源失败: \(error)"
@@ -1532,7 +1535,10 @@ struct ReaderView: View {
             if let cached {
                 content = cached
             } else {
-                content = try await ContentService.fetchContent(source: source, chapter: chapter, httpClient: env.httpClient)
+                content = try await ContentService.fetchContent(
+                    source: source, chapter: chapter, httpClient: env.httpClient,
+                    nextChapterUrl: chapters.indices.contains(currentIndex + 1) ? chapters[currentIndex + 1].url : nil
+                )
             }
             let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
             let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
@@ -1575,7 +1581,8 @@ struct ReaderView: View {
             content = cached
         } else {
             guard let fetched = try? await ContentService.fetchContent(
-                source: source, chapter: prevChapter, httpClient: env.httpClient
+                source: source, chapter: prevChapter, httpClient: env.httpClient,
+                nextChapterUrl: chapters.indices.contains(prevIndex + 1) ? chapters[prevIndex + 1].url : nil
             ) else {
                 prevChapterPreview = nil
                 return
@@ -1622,7 +1629,8 @@ struct ReaderView: View {
             content = cached
         } else {
             guard let fetched = try? await ContentService.fetchContent(
-                source: source, chapter: nextChapter, httpClient: env.httpClient
+                source: source, chapter: nextChapter, httpClient: env.httpClient,
+                nextChapterUrl: chapters.indices.contains(nextIndex + 1) ? chapters[nextIndex + 1].url : nil
             ) else {
                 nextChapterPreview = nil
                 return
@@ -1834,7 +1842,8 @@ struct ReaderView: View {
                 guard chapters.indices.contains(index) else { break }
                 if (try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: index)) != nil { continue }
                 guard let content = try? await ContentService.fetchContent(
-                    source: source, chapter: chapters[index], httpClient: env.httpClient
+                    source: source, chapter: chapters[index], httpClient: env.httpClient,
+                    nextChapterUrl: chapters.indices.contains(index + 1) ? chapters[index + 1].url : nil
                 ) else { continue }
                 try? await env.chapterCacheStore.save(bookUrl: bookUrl, index: index, content: content)
             }

@@ -221,7 +221,10 @@ final class LANWebServer: ObservableObject {
         } else if let chapters = try? await TocService.fetchChapterList(
             source: source, tocURL: shelfBook.tocUrl, httpClient: httpClient
         ), chapters.indices.contains(index),
-           let content = try? await ContentService.fetchContent(source: source, chapter: chapters[index], httpClient: httpClient) {
+           let content = try? await ContentService.fetchContent(
+               source: source, chapter: chapters[index], httpClient: httpClient,
+               nextChapterUrl: chapters.indices.contains(index + 1) ? chapters[index + 1].url : nil
+           ) {
             text = content.text
         } else {
             return page("章节加载失败")

@@ -440,7 +440,9 @@ struct BookDetailView: View {
                 for chapter in batch {
                     group.addTask {
                         guard let content = try? await ContentService.fetchContent(
-                            source: source, chapter: chapter, httpClient: env.httpClient
+                            source: source, chapter: chapter, httpClient: env.httpClient,
+                            nextChapterUrl: previewChapters.indices.contains(chapter.index + 1)
+                                ? previewChapters[chapter.index + 1].url : nil
                         ) else { return }
                         try? await env.chapterCacheStore.save(bookUrl: bookUrl, index: chapter.index, content: content)
                     }
