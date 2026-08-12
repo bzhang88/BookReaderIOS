@@ -131,15 +131,12 @@ struct ReaderView: View {
     @State private var scheduleTick = Date()
     private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     /// Set from `init`'s `resumeCharacterOffset` when opening a book that was left mid-chapter;
-    /// consumed (scrolled-to, then cleared) the first time this chapter finishes loading, so it
-    /// never re-fires on a later ordinary chapter change. Only meaningful in `.scroll` mode -- see
-    /// `currentPageIndexInChapter`'s doc comment for why paginated mode doesn't track this.
+    /// consumed (scrolled-to, then cleared) the first time `repaginateForScroll` runs against this
+    /// chapter's real (non-empty) text -- converting a saved character offset into a scroll target
+    /// needs the actual page layout, which only exists once pagination has run. Only meaningful in
+    /// `.scroll` mode -- see `currentPageIndexInChapter`'s doc comment for why paginated mode doesn't
+    /// track this.
     @State private var pendingResumeCharacterOffset: Int?
-    /// Which page (by its scroll-content id, see `body`'s id scheme) to scroll to once the chapter
-    /// that was loading finishes *and* has been paginated -- set by `load()`/`repaginateForScroll`
-    /// when they consume `pendingResumeCharacterOffset`, consumed by `body`'s `.onChange(of:
-    /// pageLayout)` (which has access to `scrollProxy`, unlike those functions themselves).
-    @State private var pendingScrollToPageID: String?
     /// Which page is currently at (or nearest) the top of the visible screen in `.scroll` mode --
     /// tracked continuously via `PageTopOffsetKey` below purely in memory (cheap), but only
     /// *persisted* to `ShelfStore` periodically (`scheduleTimer`) and on `.onDisappear` (see those
@@ -263,121 +260,7 @@ struct ReaderView: View {
                     onPageChanged: { current, total in pagedPageProgress = (current, total) }
                 )
             } else {
-        // `GeometryReader` measures the actual on-screen content area, exactly like
-        // `PagedChapterReaderView` already does for its own 4 paginated styles -- `ChapterPaginator`
-        // needs to know how many points of height are actually available to know how much text fits
-        // one "page." Confirmed against Legado_Max's real source that `.scroll` mode there is built
-        // on this exact same screen-measured page-splitting engine, not a raw continuous-text flow;
-        // this whole branch replaces this reader's previous "just flow every paragraph in one long
-        // VStack" implementation to match.
-        GeometryReader { geo in
-            let contentSize = CGSize(
-                width: max(geo.size.width - pageMarginLeading - pageMarginTrailing, 0),
-                height: max(geo.size.height - pageMarginTop - pageMarginBottom, 0)
-            )
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Real usage feedback: only the *appended next chapter* got a heading before this
-                    // -- the very first (current) chapter shown had no inline title at all, only the
-                    // top bar's. Every chapter section, including this first one, now gets the same
-                    // bold centered heading so the reading area alone tells you which chapter you're
-                    // in. `"heading"`'s id is what `.onChange(of: currentIndex)`'s "scroll to top"
-                    // reset targets, so landing on a new chapter shows its heading too, not just its
-                    // first page.
-                    chapterHeading(chapter.title)
-                        .id("heading")
-
-                    if let pageLayout {
-                        ForEach(0..<pageLayout.pages.count, id: \.self) { pageIndex in
-                            pageBlock(pageIndex, layout: pageLayout)
-                                .id("page-\(pageIndex)")
-                                // Reports this page's position so `currentPageIndexInChapter` can
-                                // track real reading position (see its own doc comment) -- real usage
-                                // feedback: reopening a book always landed at the *start* of the
-                                // last-read chapter, never the exact spot, because nothing tracked
-                                // position within a chapter.
-                                .background(
-                                    GeometryReader { pageGeo in
-                                        Color.clear.preference(
-                                            key: PageTopOffsetKey.self,
-                                            value: [pageIndex: pageGeo.frame(in: .named("readerScroll")).minY]
-                                        )
-                                    }
-                                )
-                        }
-                    }
-
-                    // Next chapter, appended right below -- real usage feedback (with a reference
-                    // screenshot) asked for chapters to visually connect: the previous chapter's
-                    // ending, a gap, then the next chapter's title as a heading, then its own text,
-                    // all in one continuous scroll, instead of the screen reloading to a blank top
-                    // once you hit the bottom. `nextChapterPreview` is already fully fetched+purified
-                    // +paginated by the time it's showing here (see `loadNextChapterPreview`), so
-                    // there's no loading gap to paper over -- it's simply already there once you
-                    // scroll far enough.
-                    if let preview = nextChapterPreview, let previewLayout = preview.pageLayout {
-                        chapterHeading(preview.title)
-                            .id("next-heading")
-
-                        ForEach(0..<previewLayout.pages.count, id: \.self) { pageIndex in
-                            pageBlock(pageIndex, layout: previewLayout)
-                                .id("next-page-\(pageIndex)")
-                        }
-                    }
-
-                    // Invisible sentinel below the last page (of the current chapter, or of the
-                    // appended next-chapter preview when there is one) -- its appearance means the
-                    // user has scrolled (or the content was short enough to start fully visible) to
-                    // the very bottom.
-                    Color.clear
-                        .frame(height: 1)
-                        .onAppear { attemptAutoAdvance() }
-                }
-                .padding(EdgeInsets(top: pageMarginTop, leading: pageMarginLeading, bottom: pageMarginBottom, trailing: pageMarginTrailing))
-                .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height, alignment: .topLeading)
-                .contentShape(Rectangle())
-                // A zero-distance DragGesture rather than .onTapGesture -- SwiftUI's plain tap gesture
-                // doesn't expose *where* the tap landed, and the 3x3 zone grid needs that location to
-                // pick which of the 9 regions was hit (see `handleTap`). `touchSlop` filters out
-                // releases too far from where the finger went down -- a scroll attempt that only moved
-                // a little shouldn't also register as a tap-zone tap.
-                //
-                // `.simultaneousGesture`, not `.gesture` -- a plain `.gesture(DragGesture(minimumDistance:
-                // 0))` on content *inside* a `ScrollView` can win the touch outright and starve the
-                // ScrollView's own built-in pan/scroll gesture of it, which reads as "scrolling just
-                // doesn't work" (real-device feedback: the page never moves at all in `.scroll` mode).
-                // `.simultaneousGesture` lets both this tap-zone recognizer and the ScrollView's native
-                // scrolling see the same touch instead of one exclusively claiming it.
-                //
-                // `coordinateSpace: .global` -- real usage feedback: tap zones stopped doing anything
-                // once scrolled even a little way into a chapter. Root cause: `DragGesture`'s `.location`
-                // defaults to `.local`, i.e. relative to *this VStack's own bounds* -- which, now that
-                // pages plus a whole appended next-chapter preview can span many screens' worth of
-                // height, is nowhere close to the screen. `handleTap` compares that value against
-                // `UIScreen.main.bounds`, so any real scroll position produced a huge local Y that always
-                // clamped to the bottom row, no matter where on the actual screen the tap landed. `.global`
-                // makes `.location` screen-relative, matching what `handleTap` already assumes.
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                        .onEnded { value in
-                            guard hypot(value.translation.width, value.translation.height) <= touchSlop else { return }
-                            handleTap(at: value.location, proxy: scrollProxy)
-                        }
-                )
-            }
-            .coordinateSpace(name: "readerScroll")
-            .onPreferenceChange(PageTopOffsetKey.self) { offsets in
-                // Whichever page's top edge is closest to the scroll viewport's own top edge is
-                // "currently being read" -- matches how a reader visually tracks position (whatever's
-                // at the top of the screen right now).
-                if let closest = offsets.min(by: { abs($0.value) < abs($1.value) }) {
-                    currentPageIndexInChapter = closest.key
-                }
-            }
-            .task(id: scrollPaginationKey(size: contentSize)) {
-                await repaginateForScroll(size: contentSize, proxy: scrollProxy)
-            }
-        }
+                scrollModeBody(scrollProxy: scrollProxy)
             }
         }
         .background(theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)))
@@ -848,23 +731,6 @@ struct ReaderView: View {
                 }
             }
         }
-        .onChange(of: isLoading) { _, newValue in
-            guard !newValue, let target = pendingScrollToParagraph else { return }
-            pendingScrollToParagraph = nil
-            guard !pageTurnStyle.isPaginated else { return }
-            // Deferred one runloop tick -- at the exact moment `isLoading` flips to `false`, the new
-            // chapter's paragraphs have been assigned but SwiftUI hasn't necessarily laid them out
-            // yet, so `scrollProxy.scrollTo` could be asked to find an id that doesn't exist in the
-            // rendered hierarchy *yet*. Unlike the chapter-change-to-top reset above (safe to call
-            // immediately since offset 0 already means "top" regardless of which content is
-            // currently there), scrolling to an arbitrary mid-chapter paragraph genuinely needs that
-            // paragraph's view to exist first.
-            DispatchQueue.main.async {
-                withAnimation(nil) {
-                    scrollProxy.scrollTo(target, anchor: .top)
-                }
-            }
-        }
         }
     }
 
@@ -1327,6 +1193,128 @@ struct ReaderView: View {
             .padding(.top, 36)
             .padding(.bottom, 12)
             .padding(.horizontal, 4)
+    }
+
+    /// Real, screen-measured `.scroll` mode rendering -- pulled out of `body`'s `if`/`else` into its
+    /// own function because inlining this whole `GeometryReader`/`ScrollView`/`ForEach`/gesture tree
+    /// directly in `body` made the combined expression too large for the type checker to resolve in
+    /// reasonable time (`Xcode` build error: "unable to type-check this expression"). `GeometryReader`
+    /// measures the actual on-screen content area, exactly like `PagedChapterReaderView` already does
+    /// for its own 4 paginated styles -- `ChapterPaginator` needs to know how many points of height
+    /// are actually available to know how much text fits one "page." Confirmed against Legado_Max's
+    /// real source that `.scroll` mode there is built on this exact same screen-measured
+    /// page-splitting engine, not a raw continuous-text flow; this whole branch replaces this
+    /// reader's previous "just flow every paragraph in one long VStack" implementation to match.
+    @ViewBuilder
+    private func scrollModeBody(scrollProxy: ScrollViewProxy) -> some View {
+        GeometryReader { geo in
+            let contentSize = CGSize(
+                width: max(geo.size.width - pageMarginLeading - pageMarginTrailing, 0),
+                height: max(geo.size.height - pageMarginTop - pageMarginBottom, 0)
+            )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Real usage feedback: only the *appended next chapter* got a heading before this
+                    // -- the very first (current) chapter shown had no inline title at all, only the
+                    // top bar's. Every chapter section, including this first one, now gets the same
+                    // bold centered heading so the reading area alone tells you which chapter you're
+                    // in. `"heading"`'s id is what `.onChange(of: currentIndex)`'s "scroll to top"
+                    // reset targets, so landing on a new chapter shows its heading too, not just its
+                    // first page.
+                    chapterHeading(chapter.title)
+                        .id("heading")
+
+                    if let pageLayout {
+                        ForEach(0..<pageLayout.pages.count, id: \.self) { pageIndex in
+                            pageBlock(pageIndex, layout: pageLayout)
+                                .id("page-\(pageIndex)")
+                                // Reports this page's position so `currentPageIndexInChapter` can
+                                // track real reading position (see its own doc comment) -- real usage
+                                // feedback: reopening a book always landed at the *start* of the
+                                // last-read chapter, never the exact spot, because nothing tracked
+                                // position within a chapter.
+                                .background(
+                                    GeometryReader { pageGeo in
+                                        Color.clear.preference(
+                                            key: PageTopOffsetKey.self,
+                                            value: [pageIndex: pageGeo.frame(in: .named("readerScroll")).minY]
+                                        )
+                                    }
+                                )
+                        }
+                    }
+
+                    // Next chapter, appended right below -- real usage feedback (with a reference
+                    // screenshot) asked for chapters to visually connect: the previous chapter's
+                    // ending, a gap, then the next chapter's title as a heading, then its own text,
+                    // all in one continuous scroll, instead of the screen reloading to a blank top
+                    // once you hit the bottom. `nextChapterPreview` is already fully fetched+purified
+                    // +paginated by the time it's showing here (see `loadNextChapterPreview`), so
+                    // there's no loading gap to paper over -- it's simply already there once you
+                    // scroll far enough.
+                    if let preview = nextChapterPreview, let previewLayout = preview.pageLayout {
+                        chapterHeading(preview.title)
+                            .id("next-heading")
+
+                        ForEach(0..<previewLayout.pages.count, id: \.self) { pageIndex in
+                            pageBlock(pageIndex, layout: previewLayout)
+                                .id("next-page-\(pageIndex)")
+                        }
+                    }
+
+                    // Invisible sentinel below the last page (of the current chapter, or of the
+                    // appended next-chapter preview when there is one) -- its appearance means the
+                    // user has scrolled (or the content was short enough to start fully visible) to
+                    // the very bottom.
+                    Color.clear
+                        .frame(height: 1)
+                        .onAppear { attemptAutoAdvance() }
+                }
+                .padding(EdgeInsets(top: pageMarginTop, leading: pageMarginLeading, bottom: pageMarginBottom, trailing: pageMarginTrailing))
+                .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height, alignment: .topLeading)
+                .contentShape(Rectangle())
+                // A zero-distance DragGesture rather than .onTapGesture -- SwiftUI's plain tap gesture
+                // doesn't expose *where* the tap landed, and the 3x3 zone grid needs that location to
+                // pick which of the 9 regions was hit (see `handleTap`). `touchSlop` filters out
+                // releases too far from where the finger went down -- a scroll attempt that only moved
+                // a little shouldn't also register as a tap-zone tap.
+                //
+                // `.simultaneousGesture`, not `.gesture` -- a plain `.gesture(DragGesture(minimumDistance:
+                // 0))` on content *inside* a `ScrollView` can win the touch outright and starve the
+                // ScrollView's own built-in pan/scroll gesture of it, which reads as "scrolling just
+                // doesn't work" (real-device feedback: the page never moves at all in `.scroll` mode).
+                // `.simultaneousGesture` lets both this tap-zone recognizer and the ScrollView's native
+                // scrolling see the same touch instead of one exclusively claiming it.
+                //
+                // `coordinateSpace: .global` -- real usage feedback: tap zones stopped doing anything
+                // once scrolled even a little way into a chapter. Root cause: `DragGesture`'s `.location`
+                // defaults to `.local`, i.e. relative to *this VStack's own bounds* -- which, now that
+                // pages plus a whole appended next-chapter preview can span many screens' worth of
+                // height, is nowhere close to the screen. `handleTap` compares that value against
+                // `UIScreen.main.bounds`, so any real scroll position produced a huge local Y that always
+                // clamped to the bottom row, no matter where on the actual screen the tap landed. `.global`
+                // makes `.location` screen-relative, matching what `handleTap` already assumes.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                        .onEnded { value in
+                            guard hypot(value.translation.width, value.translation.height) <= touchSlop else { return }
+                            handleTap(at: value.location, proxy: scrollProxy)
+                        }
+                )
+            }
+            .coordinateSpace(name: "readerScroll")
+            .onPreferenceChange(PageTopOffsetKey.self) { offsets in
+                // Whichever page's top edge is closest to the scroll viewport's own top edge is
+                // "currently being read" -- matches how a reader visually tracks position (whatever's
+                // at the top of the screen right now).
+                if let closest = offsets.min(by: { abs($0.value) < abs($1.value) }) {
+                    currentPageIndexInChapter = closest.key
+                }
+            }
+            .task(id: scrollPaginationKey(size: contentSize)) {
+                await repaginateForScroll(size: contentSize, proxy: scrollProxy)
+            }
+        }
     }
 
     /// Renders one screen-measured page's worth of chunks. `chunkOffset == 0` needing special
