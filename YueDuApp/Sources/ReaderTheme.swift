@@ -243,6 +243,19 @@ enum ReaderSettingsKey {
     /// chapter, the overwhelmingly common next action) rather than something larger, to keep the
     /// default behavior's extra network usage modest.
     static let prefetchChapterCount = "reader.prefetchChapterCount"
+    /// Independent top/bottom/leading/trailing page margins -- real usage feedback wanted all 4
+    /// adjustable separately, not just one shared padding value. Each defaults to 16 (matching what
+    /// the previous hardcoded `.padding()` used).
+    static let pageMarginTop = "reader.pageMarginTop"
+    static let pageMarginBottom = "reader.pageMarginBottom"
+    static let pageMarginLeading = "reader.pageMarginLeading"
+    static let pageMarginTrailing = "reader.pageMarginTrailing"
+    /// How many full-width space characters ("　", not a regular ASCII space -- matches real Chinese
+    /// print typesetting) to prepend to every paragraph. Defaults to 2, the conventional "首行缩进
+    /// 两个字符" real Chinese novels use -- previously this only ever happened by accident, when a
+    /// book source's own optional `replaceRegex` rule happened to add it (see `ContentService
+    /// .applyReplaceRegex`'s doc comment), so most books had no indent at all.
+    static let paragraphIndent = "reader.paragraphIndent"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before

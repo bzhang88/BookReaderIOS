@@ -27,10 +27,16 @@ public struct LocalBook: Codable, Equatable, Identifiable, Sendable {
     public var chapters: [LocalChapter]
     public var lastReadChapterIndex: Int?
     public var lastReadAt: Date?
+    /// Character offset into `lastReadChapterIndex`'s text -- optional (not defaulted to 0) so a
+    /// `local_books.json` saved before this field existed still decodes fine (Swift's synthesized
+    /// `Decodable` requires a key to be present unless the property type itself is Optional; a
+    /// non-optional field with only a memberwise-init default would fail to decode old files
+    /// missing this key entirely).
+    public var lastReadCharacterOffset: Int?
 
     public init(
         id: String = UUID().uuidString, title: String, addedAt: Date = Date(), chapters: [LocalChapter],
-        lastReadChapterIndex: Int? = nil, lastReadAt: Date? = nil
+        lastReadChapterIndex: Int? = nil, lastReadAt: Date? = nil, lastReadCharacterOffset: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -38,5 +44,6 @@ public struct LocalBook: Codable, Equatable, Identifiable, Sendable {
         self.chapters = chapters
         self.lastReadChapterIndex = lastReadChapterIndex
         self.lastReadAt = lastReadAt
+        self.lastReadCharacterOffset = lastReadCharacterOffset
     }
 }

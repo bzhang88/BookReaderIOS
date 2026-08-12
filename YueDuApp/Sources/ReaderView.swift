@@ -4,6 +4,26 @@ import BookSourceModel
 import WebBookOrchestrator
 import Persistence
 
+/// Reports each paragraph's top edge position (in the `"readerScroll"` named coordinate space) as
+/// it renders/moves -- used to figure out which paragraph is currently at the top of the visible
+/// screen, the basis for real reading-position tracking (see `ReaderView.currentTopParagraphIndex`).
+private struct ParagraphTopOffsetKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// Fully fetched-and-purified next-chapter content, ready to display immediately (see
+/// `ReaderView.nextChapterPreview`'s doc comment) or promote straight to "current" with no further
+/// network/purification work needed.
+private struct NextChapterPreview {
+    let index: Int
+    let title: String
+    let text: String
+    let matchedRules: [ReplaceRule]
+}
+
 struct ReaderView: View {
     // These start as constructor params but can change in place when the user switches source
     // mid-read (see `switchSource`) -- kept as @State rather than the `let`s this started as so the
@@ -100,6 +120,50 @@ struct ReaderView: View {
     // stays open across the boundary, not just whenever the view happens to redraw for other reasons.
     @State private var scheduleTick = Date()
     private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    /// Set from `init`'s `resumeCharacterOffset` when opening a book that was left mid-chapter;
+    /// consumed (scrolled-to, then cleared) the first time this chapter finishes loading, so it
+    /// never re-fires on a later ordinary chapter change. Only meaningful in `.scroll` mode -- see
+    /// `currentTopParagraphIndex`'s doc comment for why paginated mode doesn't track this.
+    @State private var pendingResumeCharacterOffset: Int?
+    /// Which paragraph to scroll to once the chapter that was loading finishes -- set by `load()`
+    /// when it consumes `pendingResumeCharacterOffset`, consumed by `body`'s `.onChange(of:
+    /// isLoading)` (which has access to `scrollProxy`, unlike `load()` itself).
+    @State private var pendingScrollToParagraph: Int?
+    /// Which paragraph is currently at (or nearest) the top of the visible screen in `.scroll` mode
+    /// -- tracked continuously via `ParagraphTopOffsetKey` below purely in memory (cheap), but only
+    /// *persisted* to `ShelfStore` periodically (`scheduleTimer`) and on `.onDisappear` (see those
+    /// handlers), not on every scroll frame, since writing to disk that often would be wasteful.
+    /// Scoped to `.scroll` mode only -- `PagedChapterReaderView`'s pages are recomputed from screen
+    /// size/font on the fly, so "page N" isn't a stable, restorable position the way a character
+    /// offset into the chapter's own text is; extending resume-position tracking to paginated mode
+    /// would need its own separate mechanism, not this one.
+    @State private var currentTopParagraphIndex = 0
+    /// The next chapter's content, already fetched *and* purified (replace rules + Chinese
+    /// conversion already applied, exactly like `text` itself), appended visually below the current
+    /// chapter's own paragraphs -- see the rendering code in `body` and `commitToNextChapterPreview`
+    /// for the full picture. Real usage feedback pointed at a reference app (screenshot: chapter 3's
+    /// ending, a gap, then chapter 4's title as a heading, then chapter 4's own text -- all in one
+    /// continuous scroll) where chapters visually flow into each other instead of this reader's
+    /// previous behavior (hit the bottom -> the whole screen reloads to a blank top).
+    @State private var nextChapterPreview: NextChapterPreview?
+    /// Set right before a seamless preview-commit changes `currentIndex` -- consumed by `load()` (see
+    /// its own doc comment) so `.task(id:)` firing from that same `currentIndex` change doesn't
+    /// redundantly re-fetch content that's already sitting on screen, which would also flash the
+    /// loading spinner over it.
+    @State private var justCommittedFromPreview = false
+    /// Same idea as `justCommittedFromPreview` but for `.onChange(of: currentIndex)`'s scroll-to-top
+    /// reset (see item 6's fix there) -- a seamless commit must *not* jump the scroll position, since
+    /// nothing about what's on screen actually changed, only which paragraphs count as "current."
+    /// Kept as its own separate flag rather than reusing `justCommittedFromPreview` because there's no
+    /// guaranteed ordering between `.task(id:)` and `.onChange(of:)` both firing off the same
+    /// `currentIndex` mutation -- two independent one-shot flags avoid depending on that ordering.
+    @State private var suppressScrollResetOnNextChapterChange = false
+
+    @AppStorage(ReaderSettingsKey.pageMarginTop) private var pageMarginTop: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginBottom) private var pageMarginBottom: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginLeading) private var pageMarginLeading: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginTrailing) private var pageMarginTrailing: Double = 16
+    @AppStorage(ReaderSettingsKey.paragraphIndent) private var paragraphIndent: Int = 2
 
     private var isEyeCareActive: Bool {
         eyeCareEnabled || (eyeCareScheduleEnabled && EyeCareSchedule.isActive(
@@ -107,13 +171,23 @@ struct ReaderView: View {
         ))
     }
 
-    init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
+    /// `resumeCharacterOffset` -- real usage feedback: reopening a book from the shelf always
+    /// landed at the *start* of the last-read chapter, never the exact spot the user actually
+    /// stopped at, even though `ShelfBook.lastReadCharacterOffset` already existed as a field --
+    /// nothing ever wrote a real value into it (every call site hardcoded `characterOffset: 0`) or
+    /// read it back on resume. This is that missing other half, threaded in from whichever call
+    /// site knows the book's saved position (see `BookOpenerView`).
+    init(
+        source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int,
+        bookTitle: String, resumeCharacterOffset: Int = 0
+    ) {
         self._source = State(initialValue: source)
         self._bookUrl = State(initialValue: bookUrl)
         self._tocUrl = State(initialValue: tocUrl)
         self._chapters = State(initialValue: chapters)
         self._bookTitle = State(initialValue: bookTitle)
         self._currentIndex = State(initialValue: currentIndex)
+        self._pendingResumeCharacterOffset = State(initialValue: resumeCharacterOffset > 0 ? resumeCharacterOffset : nil)
     }
 
     private var chapter: BookChapter { chapters[currentIndex] }
@@ -164,7 +238,7 @@ struct ReaderView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                    highlightedText(paragraph)
+                    indentedText(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
                         .padding(.horizontal, 4)
@@ -184,17 +258,55 @@ struct ReaderView: View {
                         // rewrite is the safer increment; the custom menu is deferred.
                         .textSelection(.enabled)
                         .id(index)
+                        // Reports this paragraph's position so `currentTopParagraphIndex` can track
+                        // real reading position (see its own doc comment) -- real usage feedback:
+                        // reopening a book always landed at the *start* of the last-read chapter,
+                        // never the exact spot, because nothing tracked position within a chapter.
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: ParagraphTopOffsetKey.self,
+                                    value: [index: geo.frame(in: .named("readerScroll")).minY]
+                                )
+                            }
+                        )
                 }
-                // Invisible sentinel below the last paragraph -- its appearance means the user has
-                // scrolled (or the chapter was short enough to start fully visible) to the bottom.
-                // Real-device feedback specifically asked for chapters to "just connect" without an
-                // explicit tap, matching this rather than a full continuous multi-chapter scroll
-                // buffer, which would need a much larger rewrite of how content is rendered.
+
+                // Next chapter, appended right below -- real usage feedback (with a reference
+                // screenshot) asked for chapters to visually connect: the previous chapter's ending,
+                // a gap, then the next chapter's title as a heading, then its own text, all in one
+                // continuous scroll, instead of the screen reloading to a blank top once you hit the
+                // bottom. `nextChapterPreview` is already fully fetched+purified by the time it's
+                // showing here (see `loadNextChapterPreview`), so there's no loading gap to paper
+                // over -- it's simply already there once you scroll far enough.
+                if let preview = nextChapterPreview {
+                    VStack(spacing: 12) {
+                        Divider().padding(.vertical, 24)
+                        Text(preview.title)
+                            .font(.title3.bold())
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .padding(.horizontal, 4)
+
+                    ForEach(Array(preview.text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, paragraph in
+                        indentedText(paragraph)
+                            .font(.system(size: fontSize))
+                            .lineSpacing(lineSpacing)
+                            .padding(.horizontal, 4)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                // Invisible sentinel below the last paragraph (of the current chapter, or of the
+                // appended next-chapter preview when there is one) -- its appearance means the user
+                // has scrolled (or the content was short enough to start fully visible) to the very
+                // bottom.
                 Color.clear
                     .frame(height: 1)
                     .onAppear { attemptAutoAdvance() }
             }
-            .padding()
+            .padding(EdgeInsets(top: pageMarginTop, leading: pageMarginLeading, bottom: pageMarginBottom, trailing: pageMarginTrailing))
             .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height, alignment: .topLeading)
             .contentShape(Rectangle())
             // A zero-distance DragGesture rather than .onTapGesture -- SwiftUI's plain tap gesture
@@ -216,6 +328,15 @@ struct ReaderView: View {
                         handleTap(at: value.location)
                     }
             )
+        }
+        .coordinateSpace(name: "readerScroll")
+        .onPreferenceChange(ParagraphTopOffsetKey.self) { offsets in
+            // Whichever paragraph's top edge is closest to the scroll viewport's own top edge is
+            // "currently being read" -- matches how a reader visually tracks position (whatever's at
+            // the top of the screen right now).
+            if let closest = offsets.min(by: { abs($0.value) < abs($1.value) }) {
+                currentTopParagraphIndex = closest.key
+            }
         }
             }
         }
@@ -257,7 +378,7 @@ struct ReaderView: View {
                 .padding(.bottom, 8)
             }
         }
-        .onReceive(scheduleTimer) { scheduleTick = $0 }
+        .onReceive(scheduleTimer) { scheduleTick = $0; saveReadingProgress() }
         // `.overlay`, not `.safeAreaInset` -- real usage feedback: opening/closing the menu was
         // visibly shifting where the text sat on screen, because `.safeAreaInset` *reserves* space
         // for its content, shrinking the reading area (and reflowing every line in it) every time
@@ -317,9 +438,15 @@ struct ReaderView: View {
                     // `volumeScrollIndex` approximation used elsewhere) -- showing a seekbar there
                     // would risk being actively misleading rather than just plain, so it stays as
                     // text-only progress for that mode.
-                    HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        // `.padding` + `.contentShape(Rectangle())` so the tappable area is a real
+                        // ~44pt-tall button, not just the tiny `.caption`-sized text glyphs -- same
+                        // "too small to reliably tap" feedback as the top bar's icons.
                         Button("上一章") { goTo(currentIndex - 1) }
                             .font(.caption)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
                             .disabled(currentIndex <= 0)
 
                         if pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
@@ -341,6 +468,9 @@ struct ReaderView: View {
 
                         Button("下一章") { goTo(currentIndex + 1) }
                             .font(.caption)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
                             .disabled(currentIndex >= chapters.count - 1)
                     }
 
@@ -422,11 +552,18 @@ struct ReaderView: View {
         .toolbar(.hidden, for: .tabBar)
         .overlay(alignment: .top) {
             if isChromeVisible {
-                HStack(spacing: 16) {
+                HStack(spacing: 8) {
+                    // Real usage feedback: these top-bar icons were too small to reliably tap --
+                    // only the bare SF Symbol glyph itself was tappable (maybe 20pt), well under
+                    // Apple's own 44x44pt minimum touch-target guidance. `.frame(width: 44, height:
+                    // 44).contentShape(Rectangle())` on every icon here (and the bottom bar's) makes
+                    // the whole 44x44 square tappable, not just the visible glyph inside it.
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "chevron.left")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     Text(chapter.title)
                         .font(.headline)
@@ -445,6 +582,8 @@ struct ReaderView: View {
                         }
                     } label: {
                         Image(systemName: "arrow.triangle.2.circlepath")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     Menu {
                         Button {
@@ -500,10 +639,12 @@ struct ReaderView: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
                 .frame(maxWidth: .infinity)
                 .background(.bar)
             } else {
@@ -614,6 +755,7 @@ struct ReaderView: View {
             stopAutoScroll()
             stopAutoPage()
             volumeButtonController.stop()
+            saveReadingProgress()
         }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
@@ -642,6 +784,43 @@ struct ReaderView: View {
             stopAutoScroll()
             volumeScrollIndex = 0
             pagedPageProgress = nil
+            // Real usage feedback: tapping "下一章"/"上一章" landed at the *same scroll offset* as
+            // before instead of the top of the new chapter -- `ScrollView` preserves its raw pixel
+            // scroll offset across a content swap; it has no idea "chapter changed" should mean
+            // "start over at the top." Calling this now (against what's still the *old* chapter's
+            // paragraph 0, since `load()` for the new chapter hasn't run yet) still works: a
+            // `ScrollView`'s position is a raw offset, not tied to which content is showing, so
+            // resetting that offset to 0 now is what actually lands at the top once the new
+            // chapter's content swaps in a moment later, without needing to wait for `load()` and
+            // add a second asynchronous scroll step.
+            // A seamless preview-commit (see `commitToNextChapterPreview`) must *not* jump the scroll
+            // position -- nothing about what's on screen actually changed, only which paragraphs
+            // count as "current." Skipping this only for that one path (not paginated mode's own
+            // separate anchor system) is exactly what `suppressScrollResetOnNextChapterChange` is for.
+            if suppressScrollResetOnNextChapterChange {
+                suppressScrollResetOnNextChapterChange = false
+            } else if !pageTurnStyle.isPaginated {
+                withAnimation(nil) {
+                    scrollProxy.scrollTo(0, anchor: .top)
+                }
+            }
+        }
+        .onChange(of: isLoading) { _, newValue in
+            guard !newValue, let target = pendingScrollToParagraph else { return }
+            pendingScrollToParagraph = nil
+            guard !pageTurnStyle.isPaginated else { return }
+            // Deferred one runloop tick -- at the exact moment `isLoading` flips to `false`, the new
+            // chapter's paragraphs have been assigned but SwiftUI hasn't necessarily laid them out
+            // yet, so `scrollProxy.scrollTo` could be asked to find an id that doesn't exist in the
+            // rendered hierarchy *yet*. Unlike the chapter-change-to-top reset above (safe to call
+            // immediately since offset 0 already means "top" regardless of which content is
+            // currently there), scrolling to an arbitrary mid-chapter paragraph genuinely needs that
+            // paragraph's view to exist first.
+            DispatchQueue.main.async {
+                withAnimation(nil) {
+                    scrollProxy.scrollTo(target, anchor: .top)
+                }
+            }
         }
         }
     }
@@ -686,6 +865,11 @@ struct ReaderView: View {
     /// buttons, paging forward across a boundary) wants the default `.first`.
     private func goTo(_ index: Int, anchor: PageAnchor = .first) {
         guard chapters.indices.contains(index) else { return }
+        // An explicit jump (buttons/TOC/search/bookmark) invalidates whatever was queued as "the
+        // next chapter after wherever I currently am" -- if it's stale, `loadNextChapterPreview`
+        // (called again at the end of the resulting `load()`) fetches the right one for the new
+        // position instead.
+        nextChapterPreview = nil
         pageAnchor = anchor
         currentIndex = index
     }
@@ -750,6 +934,10 @@ struct ReaderView: View {
                 Text(label)
                     .font(.caption2)
             }
+            // Same "too small to tap" fix as the top bar -- the icon+label VStack's own natural
+            // bounds were the entire touch target before this, well under a comfortable tap size.
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
     }
 
@@ -816,6 +1004,8 @@ struct ReaderView: View {
                 Image(systemName: icon).font(.body)
                 Text(label).font(.caption2)
             }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
     }
 
@@ -943,6 +1133,15 @@ struct ReaderView: View {
     /// while the user is listening, rather than reading, would be jarring rather than helpful).
     private func attemptAutoAdvance() {
         guard canAutoAdvance, !isReadAloudSpeaking, !isLoading else { return }
+        // Prefer the seamless path -- the preview is usually already sitting there since
+        // `loadNextChapterPreview` kicks off as soon as the current chapter finishes loading, well
+        // before the user could realistically scroll this far. Falls back to the old full-reload
+        // `goTo` path only if the preview genuinely isn't ready yet (slow connection, or this is the
+        // very last chapter and there's nothing to preview), so auto-advance still works either way.
+        if let preview = nextChapterPreview {
+            commitToNextChapterPreview(preview)
+            return
+        }
         guard currentIndex < chapters.count - 1 else { return }
         goTo(currentIndex + 1)
     }
@@ -1037,7 +1236,29 @@ struct ReaderView: View {
         }
     }
 
+    /// Prepends `paragraphIndent` full-width spaces before running the paragraph through
+    /// `highlightedText` -- real usage feedback wanted every paragraph's first line indented like
+    /// real Chinese print typesetting, not just the ones lucky enough to come from a book source
+    /// whose own `replaceRegex` happened to add it (see `ReaderSettingsKey.paragraphIndent`'s doc
+    /// comment). Prepending before highlighting is safe: the indent is plain, unstyled leading
+    /// whitespace, so it can't shift where a highlight rule's own match offsets land in the rest of
+    /// the (unindented) source text used to compute `segments`.
+    private func indentedText(_ paragraph: String) -> Text {
+        guard paragraphIndent > 0 else { return highlightedText(paragraph) }
+        return Text(String(repeating: "　", count: paragraphIndent)) + highlightedText(paragraph)
+    }
+
     private func load() async {
+        if justCommittedFromPreview {
+            // A seamless preview-commit (see `commitToNextChapterPreview`) already set `text`/
+            // `matchedReplaceRules` correctly for this `currentIndex` without any network round trip
+            // -- re-running the full fetch+purify pipeline here (which `.task(id:)` would otherwise
+            // trigger just from `currentIndex` changing) would both waste a redundant fetch and,
+            // worse, flash the loading spinner over content that's already sitting on screen mid-
+            // scroll, undoing the whole point of committing seamlessly in the first place.
+            justCommittedFromPreview = false
+            return
+        }
         isLoading = true
         errorMessage = nil
         canAutoAdvance = false
@@ -1060,12 +1281,115 @@ struct ReaderView: View {
             isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
                 bookIdentifier: bookUrl, chapterIndex: chapter.index
             )) ?? false
+            // Resuming mid-chapter (see `init`'s `resumeCharacterOffset` doc comment) -- picked up
+            // once `isLoading` flips back to `false` (see `body`'s matching `.onChange`), since the
+            // new paragraphs need to actually exist on screen before `scrollProxy.scrollTo` can find
+            // the target one.
+            if let offset = pendingResumeCharacterOffset {
+                pendingResumeCharacterOffset = nil
+                pendingScrollToParagraph = paragraphIndex(forCharacterOffset: offset)
+            }
         } catch {
             errorMessage = "\(error)"
         }
         isLoading = false
         armAutoAdvance()
         prefetchUpcomingChapters()
+        await loadNextChapterPreview()
+    }
+
+    /// Prefetches and fully purifies the *next* chapter's content ahead of time so it can be
+    /// appended right below the current chapter's own paragraphs (see `nextChapterPreview`'s doc
+    /// comment for why). Reuses `ChapterCacheStore` -- the same cache `prefetchUpcomingChapters`
+    /// already warms -- so this is usually an instant cache hit rather than a second network
+    /// request racing that one.
+    private func loadNextChapterPreview() async {
+        let nextIndex = currentIndex + 1
+        guard chapters.indices.contains(nextIndex) else {
+            nextChapterPreview = nil
+            return
+        }
+        let nextChapter = chapters[nextIndex]
+        let cached = try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: nextIndex)
+        let content: ChapterContent
+        if let cached {
+            content = cached
+        } else {
+            guard let fetched = try? await ContentService.fetchContent(
+                source: source, chapter: nextChapter, httpClient: env.httpClient
+            ) else {
+                nextChapterPreview = nil
+                return
+            }
+            content = fetched
+        }
+        // Guards against a stale response landing after the user has already moved past this
+        // chapter some other way (e.g. jumped via TOC/search while this fetch was still in flight).
+        guard nextIndex == currentIndex + 1 else { return }
+        let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
+        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+        nextChapterPreview = NextChapterPreview(
+            index: nextIndex, title: nextChapter.title,
+            text: applyChineseConversion(purified.result), matchedRules: purified.matchedRules
+        )
+    }
+
+    /// Promotes an already-fetched-and-purified preview straight to "current" -- no network round
+    /// trip, and critically no `ScrollView` content-swap-then-reset-to-top the way `goTo` needs (see
+    /// `onChange(of: currentIndex)`'s doc comment): the preview's paragraphs are already sitting in
+    /// the same `ScrollView` right where they've been all along, so promoting it just relabels which
+    /// paragraphs count as "the current chapter" for read-aloud/highlight/bookmark/position-tracking
+    /// purposes. The two "suppress" flags stop that relabeling from *also* triggering a redundant
+    /// reload or an unwanted scroll-to-top -- both would undo the whole point of committing silently.
+    private func commitToNextChapterPreview(_ preview: NextChapterPreview) {
+        justCommittedFromPreview = true
+        suppressScrollResetOnNextChapterChange = true
+        currentIndex = preview.index
+        text = preview.text
+        matchedReplaceRules = preview.matchedRules
+        nextChapterPreview = nil
+        canAutoAdvance = false
+        armAutoAdvance()
+        Task {
+            try? await env.shelfStore.updateProgress(
+                bookUrl: bookUrl, chapterIndex: preview.index, chapterTitle: preview.title, characterOffset: 0
+            )
+            isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
+                bookIdentifier: bookUrl, chapterIndex: preview.index
+            )) ?? false
+        }
+        Task { await loadNextChapterPreview() }
+        prefetchUpcomingChapters()
+    }
+
+    private func characterOffset(forParagraphIndex index: Int) -> Int {
+        guard index > 0, index <= paragraphs.count else { return 0 }
+        return paragraphs.prefix(index).reduce(0) { $0 + $1.count + 1 }
+    }
+
+    private func paragraphIndex(forCharacterOffset offset: Int) -> Int {
+        guard offset > 0, !paragraphs.isEmpty else { return 0 }
+        var accumulated = 0
+        for (index, paragraph) in paragraphs.enumerated() {
+            accumulated += paragraph.count + 1
+            if accumulated > offset { return index }
+        }
+        return max(0, paragraphs.count - 1)
+    }
+
+    /// Persists `currentTopParagraphIndex` (converted to an actual character offset) as this
+    /// chapter's exact resume position -- called periodically (`scheduleTimer`, already firing every
+    /// 60s for the eye-care schedule) and on `.onDisappear`, not on every scroll frame, since writing
+    /// to disk that often would be wasteful. Scroll-mode only, matching `currentTopParagraphIndex`'s
+    /// own scope.
+    private func saveReadingProgress() {
+        guard !pageTurnStyle.isPaginated, !isLoading else { return }
+        let offset = characterOffset(forParagraphIndex: currentTopParagraphIndex)
+        Task {
+            try? await env.shelfStore.updateProgress(
+                bookUrl: bookUrl, chapterIndex: chapter.index, chapterTitle: chapter.title, characterOffset: offset
+            )
+        }
     }
 
     /// Fires a best-effort background fetch for the next `prefetchChapterCount` chapters so tapping

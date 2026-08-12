@@ -14,6 +14,11 @@ struct ReaderStyleSheet: View {
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
+    @AppStorage(ReaderSettingsKey.pageMarginTop) private var pageMarginTop: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginBottom) private var pageMarginBottom: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginLeading) private var pageMarginLeading: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginTrailing) private var pageMarginTrailing: Double = 16
+    @AppStorage(ReaderSettingsKey.paragraphIndent) private var paragraphIndent: Int = 2
 
     @Environment(\.dismiss) private var dismiss
 
@@ -49,6 +54,17 @@ struct ReaderStyleSheet: View {
                         Text("段间距: \(Int(paragraphSpacing))")
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
                     }
+                    Stepper("首行缩进: \(paragraphIndent) 字符", value: $paragraphIndent, in: 0...4)
+                }
+
+                // Real usage feedback wanted all 4 margins adjustable independently, not one shared
+                // padding value -- matches print-book terminology (页边距) more than a single "边距"
+                // slider would.
+                Section("页边距") {
+                    marginSlider("上边距", value: $pageMarginTop)
+                    marginSlider("下边距", value: $pageMarginBottom)
+                    marginSlider("左边距", value: $pageMarginLeading)
+                    marginSlider("右边距", value: $pageMarginTrailing)
                 }
             }
             .navigationTitle("界面")
@@ -60,6 +76,13 @@ struct ReaderStyleSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func marginSlider(_ label: String, value: Binding<Double>) -> some View {
+        VStack(alignment: .leading) {
+            Text("\(label): \(Int(value.wrappedValue))")
+            Slider(value: value, in: 0...48, step: 2)
+        }
     }
 }
 

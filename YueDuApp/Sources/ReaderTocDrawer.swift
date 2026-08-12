@@ -60,7 +60,11 @@ struct ReaderTocDrawerView: View {
     var body: some View {
         ZStack(alignment: .leading) {
             if isPresented {
-                Color.black.opacity(0.35)
+                // Real usage feedback: the scrim behind the drawer wasn't noticeable enough to tell
+                // the drawer is actually "on top" (reference screenshot shows a clearly darkened
+                // reading area behind it). 0.35 read as too subtle on a light-themed background;
+                // bumped to 0.55 to match.
+                Color.black.opacity(0.55)
                     .ignoresSafeArea()
                     .onTapGesture { isPresented = false }
                     .transition(.opacity)

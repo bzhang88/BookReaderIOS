@@ -555,7 +555,8 @@ struct ShelfBookResumeView: View {
             if let source, !chapters.isEmpty {
                 BookOpenerView(
                     source: source, bookUrl: book.bookUrl, tocUrl: book.tocUrl, chapters: chapters,
-                    currentIndex: resumeIndex, bookTitle: book.name
+                    currentIndex: resumeIndex, bookTitle: book.name,
+                    resumeCharacterOffset: book.lastReadChapterIndex == resumeIndex ? book.lastReadCharacterOffset : 0
                 )
             } else if let errorMessage {
                 ContentUnavailableView("无法打开", systemImage: "exclamationmark.triangle", description: Text(errorMessage))

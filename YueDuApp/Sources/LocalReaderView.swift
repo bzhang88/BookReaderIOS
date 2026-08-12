@@ -4,10 +4,26 @@ import BookSourceModel
 import WebBookOrchestrator
 import Persistence
 
+/// Same idea as `ReaderView`'s `ParagraphTopOffsetKey`, kept as a separate type (not shared) since
+/// the two readers' coordinate spaces are named differently and there's no other reason to couple
+/// them.
+private struct LocalParagraphTopOffsetKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 /// Reader for a locally-imported .txt book. Deliberately simpler than `ReaderView`: no network
 /// fetch (all chapter text is already in `book.chapters`), no read-aloud/TTS in this first
 /// increment. Shares its typography/theme `@AppStorage` keys with `ReaderView` so font size and
 /// theme choice carry over between network and local books rather than needing to be set twice.
+/// Deliberately does *not* get `ReaderView`'s new continuous-chapter-connection feature (chapters
+/// visually flowing into each other while scrolling) -- local books have no auto-advance/bottom-
+/// sentinel mechanism to begin with, and building that pairing twice in one pass (once for the
+/// network reader, which needed an async fetch+purify preview step; once here, which wouldn't) was
+/// more risk than this batch of fixes could responsibly take on at once. Real reading-position
+/// tracking (item 7) and page margins/paragraph indent (item 2) are still fully implemented here.
 struct LocalReaderView: View {
     let book: LocalBook
 
@@ -52,6 +68,18 @@ struct LocalReaderView: View {
     @State private var pageSeekDragValue: Double?
     @State private var scheduleTick = Date()
     private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    /// See `ReaderView`'s matching properties for the full reasoning -- same real-usage-feedback fix
+    /// (reopening a book always landed at the *start* of the last-read chapter, never the exact
+    /// spot), same mechanism, scoped to `.scroll` mode only.
+    @State private var pendingResumeCharacterOffset: Int?
+    @State private var pendingScrollToParagraph: Int?
+    @State private var currentTopParagraphIndex = 0
+
+    @AppStorage(ReaderSettingsKey.pageMarginTop) private var pageMarginTop: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginBottom) private var pageMarginBottom: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginLeading) private var pageMarginLeading: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginTrailing) private var pageMarginTrailing: Double = 16
+    @AppStorage(ReaderSettingsKey.paragraphIndent) private var paragraphIndent: Int = 2
 
     private var isEyeCareActive: Bool {
         eyeCareEnabled || (eyeCareScheduleEnabled && EyeCareSchedule.isActive(
@@ -70,11 +98,24 @@ struct LocalReaderView: View {
         let start = startChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? fallback
         self._currentIndex = State(initialValue: start)
         self._isShowingToc = State(initialValue: startWithTocOpen)
+        // Only resume to a saved mid-chapter position when actually landing on the book's own
+        // last-read chapter via the natural fallback path -- an explicit `startChapterIndex` (e.g. a
+        // bookmark jump) means "start this specific chapter from the top," not "continue where I
+        // left off," even if that happens to be the same chapter index.
+        if startChapterIndex == nil, book.lastReadChapterIndex == start, let offset = book.lastReadCharacterOffset, offset > 0 {
+            self._pendingResumeCharacterOffset = State(initialValue: offset)
+        }
     }
 
     private var chapter: LocalChapter { book.chapters[currentIndex] }
     private var paragraphs: [String] { purifiedText.components(separatedBy: "\n") }
     @State private var purifiedText: String = ""
+
+    /// See `ReaderView.indentedText`'s matching doc comment.
+    private func indentedText(_ paragraph: String) -> Text {
+        guard paragraphIndent > 0 else { return Text(paragraph) }
+        return Text(String(repeating: "　", count: paragraphIndent) + paragraph)
+    }
 
     private var chapterProgressText: String {
         let chapterPart = "第 \(currentIndex + 1) / \(book.chapters.count) 章"
@@ -116,7 +157,7 @@ struct LocalReaderView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                    Text(paragraph)
+                    indentedText(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
                         .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
@@ -128,10 +169,24 @@ struct LocalReaderView: View {
                         // gesture handling without a way to test it interactively.
                         .textSelection(.enabled)
                         .id(index)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: LocalParagraphTopOffsetKey.self,
+                                    value: [index: geo.frame(in: .named("localReaderScroll")).minY]
+                                )
+                            }
+                        )
                 }
             }
-            .padding()
+            .padding(EdgeInsets(top: pageMarginTop, leading: pageMarginLeading, bottom: pageMarginBottom, trailing: pageMarginTrailing))
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .coordinateSpace(name: "localReaderScroll")
+        .onPreferenceChange(LocalParagraphTopOffsetKey.self) { offsets in
+            if let closest = offsets.min(by: { abs($0.value) < abs($1.value) }) {
+                currentTopParagraphIndex = closest.key
+            }
         }
             }
         }
@@ -143,7 +198,7 @@ struct LocalReaderView: View {
                     .allowsHitTesting(false)
             }
         }
-        .onReceive(scheduleTimer) { scheduleTick = $0 }
+        .onReceive(scheduleTimer) { scheduleTick = $0; saveReadingProgress() }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 10) {
                 // Toggled by the "亮度" icon below, matching `ReaderView`'s equivalent (and the
@@ -162,9 +217,12 @@ struct LocalReaderView: View {
                 // Chapter-progress row -- prev/next chapter text flanking a real draggable seekbar
                 // in paginated mode, same shape as `ReaderView`'s (see its own doc comment for why
                 // `.scroll` mode stays text-only instead of a misleading approximate seekbar).
-                HStack(spacing: 12) {
+                HStack(spacing: 4) {
                     Button("上一章") { goTo(currentIndex - 1) }
                         .font(.caption)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 8)
+                        .contentShape(Rectangle())
                         .disabled(currentIndex <= 0)
 
                     if pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
@@ -186,6 +244,9 @@ struct LocalReaderView: View {
 
                     Button("下一章") { goTo(currentIndex + 1) }
                         .font(.caption)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 8)
+                        .contentShape(Rectangle())
                         .disabled(currentIndex >= book.chapters.count - 1)
                 }
 
@@ -309,6 +370,7 @@ struct LocalReaderView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             volumeButtonController.stop()
+            saveReadingProgress()
         }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
@@ -323,6 +385,28 @@ struct LocalReaderView: View {
         .onChange(of: currentIndex) { _, _ in
             volumeScrollIndex = 0
             pagedPageProgress = nil
+            // See `ReaderView`'s matching fix for why this works despite firing before the new
+            // chapter's content has rendered -- `ScrollView` position is a raw offset, not tied to
+            // which content is currently showing.
+            if !pageTurnStyle.isPaginated {
+                withAnimation(nil) {
+                    scrollProxy.scrollTo(0, anchor: .top)
+                }
+            }
+        }
+        .onChange(of: purifiedText) { _, _ in
+            // Resuming mid-chapter (see `init`'s doc comment) -- picked up once `purifiedText`
+            // actually updates (guaranteed to fire after `load()` sets it), unlike `ReaderView`
+            // there's no `isLoading` flag here to hook since a local book's `load()` has no network
+            // wait to speak of.
+            guard let target = pendingScrollToParagraph else { return }
+            pendingScrollToParagraph = nil
+            guard !pageTurnStyle.isPaginated else { return }
+            DispatchQueue.main.async {
+                withAnimation(nil) {
+                    scrollProxy.scrollTo(target, anchor: .top)
+                }
+            }
         }
         }
     }
@@ -359,6 +443,8 @@ struct LocalReaderView: View {
                 Text(label)
                     .font(.caption2)
             }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
     }
 
@@ -407,6 +493,8 @@ struct LocalReaderView: View {
                 Image(systemName: icon).font(.body)
                 Text(label).font(.caption2)
             }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
     }
 
@@ -440,6 +528,34 @@ struct LocalReaderView: View {
         isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
             bookIdentifier: book.id, chapterIndex: currentIndex
         )) ?? false
+        if let offset = pendingResumeCharacterOffset {
+            pendingResumeCharacterOffset = nil
+            pendingScrollToParagraph = paragraphIndex(forCharacterOffset: offset)
+        }
+    }
+
+    private func characterOffset(forParagraphIndex index: Int) -> Int {
+        guard index > 0, index <= paragraphs.count else { return 0 }
+        return paragraphs.prefix(index).reduce(0) { $0 + $1.count + 1 }
+    }
+
+    private func paragraphIndex(forCharacterOffset offset: Int) -> Int {
+        guard offset > 0, !paragraphs.isEmpty else { return 0 }
+        var accumulated = 0
+        for (index, paragraph) in paragraphs.enumerated() {
+            accumulated += paragraph.count + 1
+            if accumulated > offset { return index }
+        }
+        return max(0, paragraphs.count - 1)
+    }
+
+    /// See `ReaderView.saveReadingProgress`'s matching doc comment.
+    private func saveReadingProgress() {
+        guard !pageTurnStyle.isPaginated else { return }
+        let offset = characterOffset(forParagraphIndex: currentTopParagraphIndex)
+        Task {
+            try? await env.localBookStore.updateProgress(id: book.id, chapterIndex: currentIndex, characterOffset: offset)
+        }
     }
 
     private func toggleBookmark() async {
@@ -466,6 +582,11 @@ struct LocalReaderStyleSheet: View {
     @AppStorage(ReaderSettingsKey.paragraphSpacing) private var paragraphSpacing: Double = 8
     @AppStorage(ReaderSettingsKey.theme) private var theme: ReaderTheme = .day
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
+    @AppStorage(ReaderSettingsKey.pageMarginTop) private var pageMarginTop: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginBottom) private var pageMarginBottom: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginLeading) private var pageMarginLeading: Double = 16
+    @AppStorage(ReaderSettingsKey.pageMarginTrailing) private var pageMarginTrailing: Double = 16
+    @AppStorage(ReaderSettingsKey.paragraphIndent) private var paragraphIndent: Int = 2
 
     @Environment(\.dismiss) private var dismiss
 
@@ -498,6 +619,14 @@ struct LocalReaderStyleSheet: View {
                         Text("段间距: \(Int(paragraphSpacing))")
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
                     }
+                    Stepper("首行缩进: \(paragraphIndent) 字符", value: $paragraphIndent, in: 0...4)
+                }
+
+                Section("页边距") {
+                    marginSlider("上边距", value: $pageMarginTop)
+                    marginSlider("下边距", value: $pageMarginBottom)
+                    marginSlider("左边距", value: $pageMarginLeading)
+                    marginSlider("右边距", value: $pageMarginTrailing)
                 }
             }
             .navigationTitle("界面")
@@ -509,6 +638,13 @@ struct LocalReaderStyleSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func marginSlider(_ label: String, value: Binding<Double>) -> some View {
+        VStack(alignment: .leading) {
+            Text("\(label): \(Int(value.wrappedValue))")
+            Slider(value: value, in: 0...48, step: 2)
+        }
     }
 }
 

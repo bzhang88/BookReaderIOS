@@ -12,6 +12,10 @@ struct BookOpenerView: View {
     let chapters: [BookChapter]
     let currentIndex: Int
     let bookTitle: String
+    /// Only meaningful for the text-reader (`default`) case -- audio/manga sources have no notion of
+    /// a character offset into chapter text. Defaults to 0 (no saved position) so every existing
+    /// call site that doesn't know/care about this keeps compiling unchanged.
+    var resumeCharacterOffset: Int = 0
 
     var body: some View {
         switch source.bookSourceType {
@@ -28,7 +32,7 @@ struct BookOpenerView: View {
         default:
             ReaderView(
                 source: source, bookUrl: bookUrl, tocUrl: tocUrl, chapters: chapters,
-                currentIndex: currentIndex, bookTitle: bookTitle
+                currentIndex: currentIndex, bookTitle: bookTitle, resumeCharacterOffset: resumeCharacterOffset
             )
         }
     }
