@@ -210,6 +210,21 @@ struct ReaderView: View {
     /// guaranteed ordering between `.task(id:)` and `.onChange(of:)` both firing off the same
     /// `currentIndex` mutation -- two independent one-shot flags avoid depending on that ordering.
     @State private var suppressScrollResetOnNextChapterChange = false
+    /// Set for the brief window between "the previous chapter's content just got prepended (or
+    /// resized) above the current heading" and "the compensating scroll in `repaginateForScroll` has
+    /// actually landed" -- real-device testing found the reader would keep auto-jumping backward,
+    /// one chapter at a time, all the way to chapter 1. Root cause: prepending content above the
+    /// viewport shifts what the `ScrollView`'s *unchanged* raw offset happens to be looking at, and
+    /// that shift lands *before* `repaginateForScroll`'s own re-anchoring scroll (deferred one
+    /// runloop tick via `DispatchQueue.main.async`, same as every other `proxy.scrollTo` in this file
+    /// -- an id-based scroll needs the target view to already exist in the laid-out hierarchy first)
+    /// gets a chance to correct it. For that one frame, the crossing-based promotion in
+    /// `scrollModeBody`'s `.onPreferenceChange` -- which fires synchronously as part of the very same
+    /// render pass that did the prepending -- sees a "prev-page-" id sitting at the top and commits
+    /// it as the new current chapter, which loads yet another chapter further back and repeats the
+    /// exact same prepend-before-compensate window, cascading all the way to chapter 1. This flag
+    /// tells that handler to sit out entirely until the compensating scroll (if any) has landed.
+    @State private var isCompensatingForPrevChapterHeightChange = false
 
     @AppStorage(ReaderSettingsKey.pageMarginTop) private var pageMarginTop: Double = 16
     @AppStorage(ReaderSettingsKey.pageMarginBottom) private var pageMarginBottom: Double = 16
@@ -681,6 +696,7 @@ struct ReaderView: View {
                 matchedReplaceRules: matchedReplaceRules,
                 searchScopeNotice: "仅搜索已下载缓存的章节，未下载的章节不在搜索范围内",
                 loadChaptersForSearch: loadCachedChaptersForSearch,
+                loadDownloadedIndices: { (try? await env.chapterCacheStore.downloadedIndices(bookUrl: bookUrl)) ?? [] },
                 onSelectChapter: { index in goTo(index) }
             )
         }
@@ -1384,6 +1400,11 @@ struct ReaderView: View {
             // `commitToPrevChapterPreview`), which relabels this same page's id back to a bare
             // "page-N" on the next layout pass, so this doesn't keep re-firing once promoted.
             .onPreferenceChange(PageTopOffsetKey.self) { offsets in
+                // See `isCompensatingForPrevChapterHeightChange`'s doc comment -- for this one brief
+                // window, whatever's reported here is a transient artifact of content just having
+                // shifted above the viewport, not a real scroll from the user, so sitting out
+                // entirely avoids misreading it as "the user scrolled into the previous chapter."
+                guard !isCompensatingForPrevChapterHeightChange else { return }
                 guard let closest = offsets.min(by: { abs($0.value) < abs($1.value) })?.key else { return }
                 if let pageIndex = pageIndex(fromID: closest, prefix: "prev-page-"),
                    let preview = prevChapterPreview, preview.pageLayout != nil {
@@ -1754,8 +1775,14 @@ struct ReaderView: View {
         // everything below it in the `ScrollView`'s content. `prevWasPresent` (captured before the
         // regeneration below) drives the re-anchoring scroll further down, which keeps whatever page
         // of the *current* chapter the user was actually looking at pinned in place instead of
-        // silently jumping when that height changes.
+        // silently jumping when that height changes. Setting the guard flag *before* mutating
+        // `prevChapterPreview` (see its own doc comment) matters -- both this and that mutation are
+        // synchronous, so SwiftUI batches them into the same render pass, meaning the flag is already
+        // `true` by the time the prepended content could otherwise be misread as a real scroll.
         let prevWasPresent = prevChapterPreview != nil
+        if prevWasPresent {
+            isCompensatingForPrevChapterHeightChange = true
+        }
         if var prev = prevChapterPreview {
             let prevPages = ChapterPaginator.paginate(
                 text: prev.text, font: font, lineSpacing: lineSpacing, paragraphSpacing: paragraphSpacing, pageSize: size
@@ -1773,6 +1800,7 @@ struct ReaderView: View {
                 withAnimation(nil) {
                     proxy.scrollTo(targetID, anchor: .top)
                 }
+                isCompensatingForPrevChapterHeightChange = false
             }
         } else if prevWasPresent {
             // `scrollTo` looks up `anchorID` in whatever the layout looks like *when this actually
@@ -1784,6 +1812,7 @@ struct ReaderView: View {
                 withAnimation(nil) {
                     proxy.scrollTo(anchorID, anchor: .top)
                 }
+                isCompensatingForPrevChapterHeightChange = false
             }
         }
     }

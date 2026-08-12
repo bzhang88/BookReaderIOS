@@ -33,6 +33,13 @@ struct ReaderTocDrawerView: View {
     /// chapters are searchable; a local book (already fully in memory) passes nil.
     var searchScopeNotice: String? = nil
     let loadChaptersForSearch: () async -> [(index: Int, title: String, text: String)]
+    /// Which chapter indices already have their content saved to disk (so opening them needs no
+    /// network) -- real usage feedback, with a reference screenshot, wanted the chapter list to show
+    /// this directly (a small cloud glyph on chapters that would need a network fetch) rather than
+    /// making you tap in and find out. `nil` (the default) means "not applicable" -- a local `.txt`
+    /// book is already entirely on disk, so `LocalReaderView` doesn't pass this at all and no chapter
+    /// ever shows the glyph. `ReaderView` passes `env.chapterCacheStore.downloadedIndices(bookUrl:)`.
+    var loadDownloadedIndices: (() async -> Set<Int>)? = nil
     let onSelectChapter: (Int) -> Void
 
     @State private var selectedTab: Tab = .toc
@@ -41,6 +48,7 @@ struct ReaderTocDrawerView: View {
     @State private var searchableChapters: [(index: Int, title: String, text: String)] = []
     @State private var searchResults: [ChapterSearchMatch] = []
     @State private var isLoadingSearchChapters = true
+    @State private var downloadedIndices: Set<Int>?
 
     private enum Tab: String, CaseIterable, Identifiable {
         case toc, bookmark, search, purify
@@ -90,6 +98,9 @@ struct ReaderTocDrawerView: View {
             searchableChapters = await loadedChapters
             isLoadingSearchChapters = false
             searchResults = ChapterContentSearch.search(chapters: searchableChapters, keyword: searchKeyword)
+            if let loadDownloadedIndices {
+                downloadedIndices = await loadDownloadedIndices()
+            }
         }
     }
 
@@ -129,11 +140,23 @@ struct ReaderTocDrawerView: View {
                     onSelectChapter(item.id)
                     isPresented = false
                 } label: {
-                    HStack {
-                        Text(item.title).lineLimit(1)
-                        Spacer()
-                        if item.id == currentIndex {
-                            Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                    // No `.lineLimit` -- real usage feedback, with a reference screenshot, pointed out
+                    // a long chapter title just vanished (clipped to one line with no ellipsis given
+                    // the plain `HStack` layout) instead of wrapping to a second line the way the
+                    // reference app shows it.
+                    HStack(alignment: .top) {
+                        Text(item.title)
+                            .foregroundStyle(chapterTextColor(for: item.id))
+                            .fontWeight(item.id == currentIndex ? .semibold : .regular)
+                        Spacer(minLength: 8)
+                        // Real usage feedback, same screenshot: chapters already saved to disk (read,
+                        // or simply prefetched ahead of where you are) show nothing extra; chapters
+                        // that would still need a network fetch get a small cloud glyph, so you can
+                        // tell at a glance how far ahead you can keep reading offline.
+                        if let downloadedIndices, !downloadedIndices.contains(item.id) {
+                            Image(systemName: "icloud")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -143,6 +166,17 @@ struct ReaderTocDrawerView: View {
             .listStyle(.plain)
             .onAppear { proxy.scrollTo(currentIndex, anchor: .center) }
         }
+    }
+
+    /// Matches the reference screenshot's three-way distinction: chapters before wherever you
+    /// currently are read as already-read (dimmed), the current chapter itself stands out (accent
+    /// color, bold), and everything after it reads as plain not-yet-read text. Purely index-relative
+    /// to `currentIndex` -- no separate "read" bit is persisted anywhere, matching how a linear novel
+    /// reader is actually used (you don't jump around and mark chapters read out of order).
+    private func chapterTextColor(for index: Int) -> Color {
+        if index == currentIndex { return .accentColor }
+        if index < currentIndex { return .secondary }
+        return .primary
     }
 
     private var bookmarkList: some View {
