@@ -86,6 +86,7 @@ struct ReaderView: View {
     @StateObject private var httpReadAloud = HttpReadAloudController()
     @State private var httpTTSEngines: [HttpTTSEngine] = []
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage(ReaderSettingsKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderSettingsKey.lineSpacing) private var lineSpacing: Double = 8
@@ -218,10 +219,20 @@ struct ReaderView: View {
     private var chapter: BookChapter { chapters[currentIndex] }
     private var paragraphs: [String] { text.components(separatedBy: "\n") }
 
+    /// Real usage feedback, with a reference screenshot, pointed at a bottom-left "10/10" indicator
+    /// showing which page of the current chapter you're on -- paginated mode already had this via
+    /// `pagedPageProgress`, but `.scroll` mode showed only the chapter number, nothing about position
+    /// *within* it, even though `pageLayout`/`currentPageIndexInChapter` (added for real progress
+    /// tracking, see their own doc comments) already carry exactly that information.
     private var chapterProgressText: String {
         let chapterPart = "第 \(currentIndex + 1) / \(chapters.count) 章"
-        guard pageTurnStyle.isPaginated, let pagedPageProgress else { return chapterPart }
-        return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
+        if pageTurnStyle.isPaginated, let pagedPageProgress {
+            return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
+        }
+        if let pageLayout, !pageLayout.pages.isEmpty {
+            return "\(chapterPart) · 第 \(currentPageIndexInChapter + 1) / \(pageLayout.pages.count) 页"
+        }
+        return chapterPart
     }
 
     /// Drives the paginated-mode progress seekbar -- while a drag is in flight, shows the finger's
@@ -680,6 +691,19 @@ struct ReaderView: View {
             volumeButtonController.stop()
             saveReadingProgress()
         }
+        // `.onDisappear` alone only covers leaving the reader *within* the app (back button, TOC nav,
+        // etc.) -- it never fires for backgrounding the app itself (home button/app switch/incoming
+        // call), which SwiftUI treats as the view staying mounted, just not visible. Real usage
+        // feedback: reading to the middle of a chapter then leaving the app (not tapping back) and
+        // reopening it later landed back on the chapter's first page -- the only other save path was
+        // the 60s `scheduleTimer` tick, so anyone backgrounding sooner than that lost their exact spot
+        // even though the chapter-level position was remembered fine. Any transition away from
+        // `.active` (backgrounding or the app being interrupted) now saves immediately too.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                saveReadingProgress()
+            }
+        }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
         }
@@ -724,10 +748,13 @@ struct ReaderView: View {
                 suppressScrollResetOnNextChapterChange = false
             } else if !pageTurnStyle.isPaginated {
                 withAnimation(nil) {
-                    // -1 is the chapter heading's id (see `chapterHeading`'s call site), not
-                    // paragraph 0 -- landing on a new chapter should show its title too, not leave
-                    // it scrolled just out of view above the first paragraph.
-                    scrollProxy.scrollTo(-1, anchor: .top)
+                    // "heading" is the chapter heading's id (see `chapterHeading`'s call site in
+                    // `scrollModeBody`), not page 0 -- landing on a new chapter should show its title
+                    // too, not leave it scrolled just out of view above the first page. This was still
+                    // targeting the pre-repagination-rewrite id (`-1`, a paragraph index) until real
+                    // usage testing showed "下一章"/"上一章" no longer jumped to the top at all --
+                    // scrolling to a nonexistent id is silently a no-op.
+                    scrollProxy.scrollTo("heading", anchor: .top)
                 }
             }
         }
@@ -1523,6 +1550,25 @@ struct ReaderView: View {
         }
         pageLayout = newLayout
         lastPaginatedScrollText = text
+
+        // Backfills the next-chapter preview's own pagination if it's still missing (see
+        // `NextChapterPreview.pageLayout`'s doc comment) -- `loadNextChapterPreview` skips pagination
+        // when `scrollPageSize` isn't known yet, which real-device testing showed happens on
+        // essentially every chapter, not just the first: `prefetchUpcomingChapters` keeps the next
+        // chapter's content warm in `ChapterCacheStore`, so `loadNextChapterPreview`'s cache hit
+        // routinely resolves before this function's own TextKit pagination work (and the `.task(id:)`
+        // hop that starts it) finishes measuring `scrollPageSize` for the first time. Without this,
+        // the preview's `pageLayout` stays `nil` forever, `body`'s appended-next-chapter block never
+        // renders it, and chapters never visually connect the way Legado's does -- the reader looks
+        // like it's stuck showing only the current chapter until "下一章" is tapped manually.
+        if var preview = nextChapterPreview, preview.pageLayout == nil {
+            let previewPages = ChapterPaginator.paginate(
+                text: preview.text, font: font, lineSpacing: lineSpacing, paragraphSpacing: paragraphSpacing,
+                pageSize: size
+            )
+            preview.pageLayout = ChapterPageLayout(paragraphs: preview.text.components(separatedBy: "\n"), pages: previewPages)
+            nextChapterPreview = preview
+        }
 
         if let offset = pendingResumeCharacterOffset {
             pendingResumeCharacterOffset = nil
