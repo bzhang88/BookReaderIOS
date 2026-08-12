@@ -58,6 +58,25 @@ final class BookmarkStoreTests: XCTestCase {
         XCTAssertTrue(all.isEmpty)
     }
 
+    func testUpdateEditsInPlaceRatherThanDuplicating() async throws {
+        let store = BookmarkStore(fileURL: tempFileURL())
+        var bookmark = sampleBookmark()
+        try await store.add(bookmark)
+        bookmark.note = "记得回来看这段"
+        try await store.update(bookmark)
+        let all = try await store.all()
+        XCTAssertEqual(all.count, 1)
+        XCTAssertEqual(all.first?.note, "记得回来看这段")
+    }
+
+    func testUpdateFallsBackToAppendingWhenIdNotFound() async throws {
+        let store = BookmarkStore(fileURL: tempFileURL())
+        let bookmark = sampleBookmark()
+        try await store.update(bookmark)
+        let all = try await store.all()
+        XCTAssertEqual(all.count, 1)
+    }
+
     func testBookmarksSurviveSimulatedAppRelaunch() async throws {
         let fileURL = tempFileURL()
         let session1 = BookmarkStore(fileURL: fileURL)

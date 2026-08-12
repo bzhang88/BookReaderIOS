@@ -283,7 +283,7 @@ struct LocalReaderView: View {
             LocalReaderStyleSheet()
         }
         .sheet(isPresented: $isShowingMoreSettings) {
-            LocalReaderMoreSettingsSheet(matchedRules: matchedReplaceRules)
+            LocalReaderMoreSettingsSheet()
         }
         .sheet(isPresented: $isShowingContentSearch) {
             ChapterContentSearchView(
@@ -512,10 +512,11 @@ struct LocalReaderStyleSheet: View {
     }
 }
 
-/// "设置" -- matches `ReaderMoreSettingsSheet`'s split (everything not visual/typographic).
+/// "设置" -- matches `ReaderMoreSettingsSheet`'s split (everything not visual/typographic). Which
+/// purification rules matched the current chapter lives only in the TOC drawer's own 净化规则 tab
+/// now (see `ReaderMoreSettingsSheet`'s doc comment for why the old duplicate section here was
+/// removed).
 struct LocalReaderMoreSettingsSheet: View {
-    var matchedRules: [ReplaceRule] = []
-
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
     @AppStorage(ReaderSettingsKey.volumeKeyPage) private var volumeKeyPageEnabled: Bool = false
@@ -563,16 +564,6 @@ struct LocalReaderMoreSettingsSheet: View {
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
                     Toggle("音量键翻页", isOn: $volumeKeyPageEnabled)
-                }
-
-                Section("本章生效的净化规则") {
-                    if matchedRules.isEmpty {
-                        Text("本章没有命中任何净化规则").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(matchedRules) { rule in
-                            Text(rule.name)
-                        }
-                    }
                 }
             }
             .navigationTitle("设置")

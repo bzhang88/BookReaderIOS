@@ -8,9 +8,15 @@ import Foundation
 /// entries, which use `{{speakText}}` inside JS expressions, sometimes with a whole OAuth-signing
 /// `loginUrl` script) -- a materially bigger feature than this app's `HttpTTSEngine`, which only
 /// does a plain `{{text}}` string substitution; importing one of these and claiming it "works" would
-/// produce an engine that silently fails the moment it's actually used. `theme` has nothing to
-/// import into at all yet -- this app has no custom/importable theme system (see the still-pending
-/// "主题 RGB 取色器+导入导出" backlog item).
+/// produce an engine that silently fails the moment it's actually used. `theme` still isn't
+/// importable, but NOT because this app has no theme system anymore -- `ReaderTheme.CustomThemeEditor`
+/// already has its own RGB-picker custom theme with JSON export/import. The real blocker is a format
+/// mismatch: confirmed against Legado_Max's actual `ThemeConfig.Config` (`themeName`/`isNightTheme`/
+/// `primaryColor`/`accentColor`/`backgroundColor`/`bottomBackground`/`transparentNavBar`/
+/// `backgroundImgPath`/`backgroundImgBlur`) that real Legado themes describe the *whole app's* UI
+/// chrome (toolbar/accent/nav-bar/background-image), not just a reader page's background+text pair --
+/// this app has no app-wide primary/accent/bottom-bar/background-image theming to map those fields
+/// onto, so even a "successful" import would have to silently drop most of the real file's content.
 enum LegadoImportKind {
     case bookSource, rssSource, replaceRule, txtRule, dictRule
     case httpTts, theme

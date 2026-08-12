@@ -534,7 +534,7 @@ struct ReaderView: View {
             ReaderStyleSheet()
         }
         .sheet(isPresented: $isShowingMoreSettings) {
-            ReaderMoreSettingsSheet(matchedRules: matchedReplaceRules)
+            ReaderMoreSettingsSheet()
         }
         .sheet(isPresented: $isShowingTapZoneConfig) {
             NavigationStack {

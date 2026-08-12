@@ -93,19 +93,24 @@ struct RootView: View {
     // menu XML in that local reference repo, not guessed from memory. "书源库" isn't a tab anymore;
     // it's reachable from "我的" (see SettingsView), matching how Legado's own book-source manager
     // is a settings entry, not a bottom-nav destination.
+    // Icon-only tab items (no text label) -- confirmed against Legado_Max's real `activity_main.xml`,
+    // which sets `app:labelVisibilityMode="unlabeled"` on its bottom nav. A `.tabItem` whose content
+    // is a bare `Image` (no `Text`/`Label`) is SwiftUI's own idiom for suppressing the title, so this
+    // doesn't need a `UITabBarAppearance` proxy hack -- just not wrapping the icon in `Label(_:
+    // systemImage:)` (which always renders icon+text) like the previous version did.
     private var mainTabView: some View {
         TabView(selection: $selectedTab) {
             ShelfView()
-                .tabItem { Label("书架", systemImage: "books.vertical") }
+                .tabItem { Image(systemName: "books.vertical") }
                 .tag(0)
             ExploreView()
-                .tabItem { Label("发现", systemImage: "safari") }
+                .tabItem { Image(systemName: "safari") }
                 .tag(1)
             RssListView()
-                .tabItem { Label("订阅", systemImage: "dot.radiowaves.up.forward") }
+                .tabItem { Image(systemName: "dot.radiowaves.up.forward") }
                 .tag(2)
             SettingsView()
-                .tabItem { Label("我的", systemImage: "person.circle") }
+                .tabItem { Image(systemName: "person.circle") }
                 .tag(3)
         }
         .onChange(of: scenePhase) { _, newPhase in

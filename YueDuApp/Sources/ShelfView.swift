@@ -16,6 +16,8 @@ struct ShelfView: View {
     @State private var isShowingBatchExportSheet = false
     @State private var batchExportItems: [Any] = []
     @State private var isBatchExporting = false
+    @State private var isBatchChangingSource = false
+    @State private var batchChangeSourceSummary: String?
     @State private var registeredGroupNames: [String] = []
 
     /// Sections books by `group` -- a mix of names assigned by the "自动分组" tag-rule sweep and
@@ -105,6 +107,13 @@ struct ShelfView: View {
             .sheet(isPresented: $isShowingBatchExportSheet) {
                 ShareSheet(items: batchExportItems)
             }
+            .alert("批量换源", isPresented: Binding(
+                get: { batchChangeSourceSummary != nil }, set: { if !$0 { batchChangeSourceSummary = nil } }
+            )) {
+                Button("好") { batchChangeSourceSummary = nil }
+            } message: {
+                Text(batchChangeSourceSummary ?? "")
+            }
         }
     }
 
@@ -167,6 +176,13 @@ struct ShelfView: View {
             Text("已选 \(selectedBookUrls.count) 本")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Spacer()
+            if isBatchChangingSource {
+                ProgressView()
+            } else {
+                Button("换源") { batchChangeSource() }
+                    .disabled(selectedBookUrls.isEmpty)
+            }
             Spacer()
             Button("移动分组") { isShowingBatchGroupPicker = true }
                 .disabled(selectedBookUrls.isEmpty)
@@ -471,6 +487,51 @@ struct ShelfView: View {
         try? await env.shelfStore.remove(bookUrl: oldBook.bookUrl)
         try? await env.shelfStore.addOrUpdate(newBook)
         await reload()
+    }
+
+    /// Batch 换源 -- the per-row/swipe 换源 already existed, but selecting multiple books had no
+    /// equivalent, even though 移动分组/导出/删除 all did. Unlike the single-book flow (which opens
+    /// `ChangeSourceView` and lets the user pick among candidates), there's no per-book UI here to
+    /// resolve ambiguity across N books at once, so this only acts on an unambiguous exact name+author
+    /// match on a *different* source and leaves anything less certain alone -- the user can still fix
+    /// those one at a time afterward.
+    private func batchChangeSource() {
+        let targets = books.filter { selectedBookUrls.contains($0.bookUrl) }
+        guard !targets.isEmpty else { return }
+        isBatchChangingSource = true
+        Task {
+            let sources = (try? await env.bookSourceStore.enabled()) ?? []
+            var succeeded = 0
+            var failed = 0
+            for book in targets {
+                if let (newSource, match) = await findExactMatchSource(for: book, in: sources) {
+                    await switchSource(of: book, to: newSource, match: match)
+                    succeeded += 1
+                } else {
+                    failed += 1
+                }
+            }
+            isBatchChangingSource = false
+            isSelecting = false
+            selectedBookUrls.removeAll()
+            batchChangeSourceSummary = failed == 0
+                ? "已为 \(succeeded) 本书换源"
+                : "已为 \(succeeded) 本书换源，\(failed) 本没有找到精确匹配的源（可以在书架里单本手动换源）"
+        }
+    }
+
+    private func findExactMatchSource(for book: ShelfBook, in sources: [BookSource]) async -> (BookSource, SearchResult)? {
+        guard !sources.isEmpty else { return nil }
+        let stream = MultiSourceSearchService.search(sources: sources, keyword: book.name, httpClient: env.httpClient)
+        var allResults: [SearchResult] = []
+        for await outcome in stream {
+            allResults.append(contentsOf: outcome.results)
+        }
+        guard let match = allResults.first(where: {
+            $0.name == book.name && $0.author == book.author && $0.bookSourceUrl != book.bookSourceUrl
+        }) else { return nil }
+        guard let source = sources.first(where: { $0.bookSourceUrl == match.bookSourceUrl }) else { return nil }
+        return (source, match)
     }
 }
 

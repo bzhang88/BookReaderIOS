@@ -27,6 +27,21 @@ public actor BookmarkStore {
         return bookmarks
     }
 
+    /// Replaces an existing bookmark by `id` (falls back to appending if it's somehow not found) --
+    /// used to edit a bookmark's `note` after the fact. `add` always appends, so calling it a second
+    /// time with the same bookmark's id would create a duplicate rather than editing it in place.
+    @discardableResult
+    public func update(_ bookmark: Bookmark) async throws -> [Bookmark] {
+        var bookmarks = try await all()
+        if let index = bookmarks.firstIndex(where: { $0.id == bookmark.id }) {
+            bookmarks[index] = bookmark
+        } else {
+            bookmarks.append(bookmark)
+        }
+        try await store.save(bookmarks)
+        return bookmarks
+    }
+
     /// Removes whatever bookmark exists for this exact (book, chapter) pair -- used by the
     /// reader's toggle button, which only ever has one bookmark per chapter to remove.
     public func remove(bookIdentifier: String, chapterIndex: Int) async throws {

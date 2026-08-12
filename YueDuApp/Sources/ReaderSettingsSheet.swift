@@ -64,15 +64,14 @@ struct ReaderStyleSheet: View {
 }
 
 /// "设置" -- everything that isn't visual/typographic: read-aloud, simplified/traditional
-/// conversion, auto-page/scroll timing, eye care, screen/touch behavior, and the currently-matched
-/// purification rules. Matches Legado_Max's real `MoreConfigDialog`, a long scrollable preference
-/// list kept separate from "界面" (`ReaderStyleSheet`).
+/// conversion, auto-page/scroll timing, eye care, screen/touch behavior. Matches Legado_Max's real
+/// `MoreConfigDialog`, a long scrollable preference list kept separate from "界面"
+/// (`ReaderStyleSheet`). Which purification rules matched the current chapter now lives only in the
+/// TOC drawer's own 净化规则 tab (`ReaderTocDrawerView`) -- this sheet used to show the exact same
+/// `matchedRules` list a second time under different wording ("本章生效的净化规则" here vs. "本章
+/// 命中的净化规则" there), which read as an accidental duplication rather than two deliberate entry
+/// points once the drawer tab existed.
 struct ReaderMoreSettingsSheet: View {
-    /// Which of the user's purification rules actually fired on the chapter currently on screen --
-    /// passed in rather than recomputed here, since the sheet has no access to the chapter text
-    /// itself (only `ReaderView`/`LocalReaderView` do, right after fetching/loading it).
-    var matchedRules: [ReplaceRule] = []
-
     @AppStorage(ReaderSettingsKey.keepScreenOn) private var keepScreenOn: Bool = true
     @AppStorage(ReaderSettingsKey.readAloudRate) private var readAloudRate: Double = 0.5
     @AppStorage(ReaderSettingsKey.chineseConversion) private var chineseConversion: ChineseConversionMode = .off
@@ -151,10 +150,23 @@ struct ReaderMoreSettingsSheet: View {
                     }
                 }
 
-                Section("其他") {
+                Section {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
                     Toggle("音量键翻页", isOn: $volumeKeyPageEnabled)
-                    if !pageTurnStyle.isPaginated {
+                    if pageTurnStyle.isPaginated {
+                        // Previously this row just vanished with no explanation once the user
+                        // switched to a paginated style -- `ReaderTapZoneGrid` only ever governed
+                        // `.scroll` mode's 3x3 zones (the 4 paginated styles use their own fixed L/M/R
+                        // zones), so a configured grid silently stopped applying with nothing telling
+                        // the user why the row was gone. A disabled, explained row is more honest
+                        // than pretending the setting doesn't exist.
+                        HStack {
+                            Text("点击区域设置")
+                            Spacer()
+                            Text("仅滚动模式可用").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .foregroundStyle(.secondary)
+                    } else {
                         NavigationLink("点击区域设置") {
                             TapZoneConfigView()
                         }
@@ -166,16 +178,8 @@ struct ReaderMoreSettingsSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                }
-
-                Section("本章生效的净化规则") {
-                    if matchedRules.isEmpty {
-                        Text("本章没有命中任何净化规则").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(matchedRules) { rule in
-                            Text(rule.name)
-                        }
-                    }
+                } header: {
+                    Text("其他")
                 }
             }
             .navigationTitle("设置")

@@ -10,6 +10,15 @@ struct BookmarkListView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var bookmarks: [Bookmark] = []
     @State private var target: Bookmark?
+    // Editing a note used to be dead-end UI -- `Bookmark.note` was displayed if present, but nothing
+    // anywhere ever set it (every bookmark-creation call site is a bare one-tap toggle with no note
+    // prompt, matching how quickly you actually want to bookmark a spot while reading). This adds the
+    // missing write path via a leading swipe action instead of turning bookmarking itself into a
+    // two-step flow.
+    @State private var editingNoteBookmark: Bookmark?
+    @State private var noteDraft = ""
+    @State private var exportURL: URL?
+    @State private var isShowingExportSheet = false
 
     var body: some View {
         List {
@@ -32,13 +41,45 @@ struct BookmarkListView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .swipeActions(edge: .leading) {
+                    Button {
+                        editingNoteBookmark = bookmark
+                        noteDraft = bookmark.note ?? ""
+                    } label: {
+                        Label("备注", systemImage: "pencil")
+                    }
+                    .tint(.blue)
+                }
             }
             .onDelete(perform: delete)
         }
         .navigationTitle("书签")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("导出为 Markdown") { exportMarkdown() }
+                    Button("导出为 JSON") { exportJSON() }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .disabled(bookmarks.isEmpty)
+            }
+        }
         .navigationDestination(item: $target) { bookmark in
             BookmarkResumeView(bookmark: bookmark)
+        }
+        .alert("编辑备注", isPresented: Binding(
+            get: { editingNoteBookmark != nil }, set: { if !$0 { editingNoteBookmark = nil } }
+        )) {
+            TextField("备注", text: $noteDraft)
+            Button("保存") { Task { await saveNote() } }
+            Button("取消", role: .cancel) { editingNoteBookmark = nil }
+        }
+        .sheet(isPresented: $isShowingExportSheet) {
+            if let exportURL {
+                ShareSheet(items: [exportURL])
+            }
         }
         .task { await reload() }
     }
@@ -56,6 +97,41 @@ struct BookmarkListView: View {
             }
             await reload()
         }
+    }
+
+    private func saveNote() async {
+        guard var bookmark = editingNoteBookmark else { return }
+        editingNoteBookmark = nil
+        bookmark.note = noteDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteDraft
+        try? await env.bookmarkStore.update(bookmark)
+        await reload()
+    }
+
+    private func exportMarkdown() {
+        var lines = ["# 书签\n"]
+        for (bookTitle, group) in Dictionary(grouping: bookmarks, by: \.bookTitle).sorted(by: { $0.key < $1.key }) {
+            lines.append("## \(bookTitle)\n")
+            for bookmark in group.sorted(by: { $0.chapterIndex < $1.chapterIndex }) {
+                lines.append("- \(bookmark.chapterTitle)" + (bookmark.note.map { " —— \($0)" } ?? ""))
+            }
+            lines.append("")
+        }
+        writeAndShare(content: lines.joined(separator: "\n"), fileName: "书签.md")
+    }
+
+    private func exportJSON() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(bookmarks), let json = String(data: data, encoding: .utf8) else { return }
+        writeAndShare(content: json, fileName: "书签.json")
+    }
+
+    private func writeAndShare(content: String, fileName: String) {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        guard (try? content.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        exportURL = url
+        isShowingExportSheet = true
     }
 }
 
