@@ -172,6 +172,11 @@ struct BookDetailView: View {
                 } label: {
                     Label("导出 txt", systemImage: "square.and.arrow.up")
                 }
+                Button {
+                    Task { await exportEpub() }
+                } label: {
+                    Label("导出 epub", systemImage: "book.closed")
+                }
             }
             Button(role: .destructive) {
                 Task { await deleteCache() }
@@ -468,6 +473,25 @@ struct BookDetailView: View {
         let fileName = TxtExporter.sanitizedFileName(name)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).txt")
         guard (try? combined.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        exportURL = url
+        isShowingExportSheet = true
+    }
+
+    /// Same cached-chapters-only precondition as `exportTxt` -- EPUB is the other local export
+    /// format real e-readers expect (this app previously only offered TXT).
+    private func exportEpub() async {
+        isExporting = true
+        defer { isExporting = false }
+        var chapterTexts: [(title: String, text: String)] = []
+        for chapter in previewChapters {
+            guard let content = try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: chapter.index) else { continue }
+            chapterTexts.append((title: chapter.title, text: content.text))
+        }
+        guard !chapterTexts.isEmpty else { return }
+        let data = EpubExporter.build(bookTitle: name, author: author, chapters: chapterTexts)
+        let fileName = TxtExporter.sanitizedFileName(name)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).epub")
+        guard (try? data.write(to: url)) != nil else { return }
         exportURL = url
         isShowingExportSheet = true
     }

@@ -16,6 +16,7 @@ struct LocalBookListView: View {
     @State private var isImporting = false
     @State private var exportURL: URL?
     @State private var isShowingExportSheet = false
+    @State private var exportTarget: LocalBook?
 
     var body: some View {
         List {
@@ -42,7 +43,7 @@ struct LocalBookListView: View {
                 }
                 .swipeActions(edge: .leading) {
                     Button {
-                        exportTxt(book)
+                        exportTarget = book
                     } label: {
                         Label("导出", systemImage: "square.and.arrow.up")
                     }
@@ -87,6 +88,14 @@ struct LocalBookListView: View {
                 ShareSheet(items: [exportURL])
             }
         }
+        .confirmationDialog(
+            "导出格式", isPresented: Binding(get: { exportTarget != nil }, set: { if !$0 { exportTarget = nil } }),
+            presenting: exportTarget
+        ) { book in
+            Button("导出为 TXT") { exportTxt(book) }
+            Button("导出为 EPUB") { exportEpub(book) }
+            Button("取消", role: .cancel) {}
+        }
         .task { await reload() }
     }
 
@@ -99,6 +108,20 @@ struct LocalBookListView: View {
         let fileName = TxtExporter.sanitizedFileName(book.title)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).txt")
         guard (try? combined.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        exportURL = url
+        isShowingExportSheet = true
+    }
+
+    /// A local book has no author metadata (`LocalBook` doesn't track one -- plain .txt imports never
+    /// had a reliable way to extract it), so the EPUB's `dc:creator` falls back to "佚名" (see
+    /// `EpubExporter`'s own default for a nil author).
+    private func exportEpub(_ book: LocalBook) {
+        let data = EpubExporter.build(
+            bookTitle: book.title, author: nil, chapters: book.chapters.map { (title: $0.title, text: $0.text) }
+        )
+        let fileName = TxtExporter.sanitizedFileName(book.title)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).epub")
+        guard (try? data.write(to: url)) != nil else { return }
         exportURL = url
         isShowingExportSheet = true
     }
