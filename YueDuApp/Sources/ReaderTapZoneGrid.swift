@@ -1,15 +1,14 @@
 import Foundation
 
 /// What tapping one of the reader's 9 screen zones does -- matches Legado's own configurable
-/// tap-zone actions, scoped down to the subset that makes sense for a continuous-scroll reader: no
-/// "next/prev page" since there are no pages, but chapter nav + TOC + the existing chrome-toggle
-/// all carry over directly. Only governs `.scroll` mode (see `PageTurnStyle`) -- the 4 paginated
-/// styles use their own fixed left/middle/right tap zones inside `PagedChapterReaderView` instead
-/// of this configurable grid, since "turn a page, falling through to the next/previous chapter at
-/// the boundary" doesn't map cleanly onto this type's fixed action set without adding new cases
-/// this first pass doesn't need.
+/// tap-zone actions. Only governs `.scroll` mode (see `PageTurnStyle`) -- the 4 paginated styles use
+/// their own fixed left/middle/right tap zones inside `PagedChapterReaderView` instead of this
+/// configurable grid. `.nextPage`/`.previousPage` are the scroll-mode reader's honest
+/// approximation of "turn a page" -- there's no real page boundary to speak of in continuous text,
+/// so these just step forward/backward by a few paragraphs, reusing the exact same mechanism the
+/// volume-key paging feature already uses (see `ReaderView.handleVolumeKeyTurn`).
 enum ReaderTapZoneAction: String, CaseIterable, Identifiable, Codable {
-    case none, toggleChrome, previousChapter, nextChapter, openToc
+    case none, toggleChrome, previousChapter, nextChapter, openToc, nextPage, previousPage, exitReader
 
     var id: String { rawValue }
 
@@ -20,6 +19,9 @@ enum ReaderTapZoneAction: String, CaseIterable, Identifiable, Codable {
         case .previousChapter: return "上一章"
         case .nextChapter: return "下一章"
         case .openToc: return "打开目录"
+        case .nextPage: return "下一页（向下滚动几段）"
+        case .previousPage: return "上一页（向上滚动几段）"
+        case .exitReader: return "退出阅读"
         }
     }
 }

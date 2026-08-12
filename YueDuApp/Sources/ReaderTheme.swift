@@ -235,6 +235,10 @@ enum ReaderSettingsKey {
     /// Stores an `AppAppearanceMode` raw value -- see `YueDuApp.swift` for the enum and where this
     /// gets applied (`.preferredColorScheme` at the root `WindowGroup`).
     static let appAppearanceMode = "app.appearanceMode"
+    /// `#RRGGBB`, or empty string for "use the system default blue" -- real usage feedback: 浅色/
+    /// 深色 alone still only gave 2 fixed states, this is the actual "choose the color I want" lever
+    /// (applied via `.tint` at the root, see `YueDuApp.swift`).
+    static let appAccentColorHex = "app.accentColorHex"
     /// Which of the 5 page-turn presentations (`PageTurnStyle`) the reader uses -- defaults to
     /// `.scroll` so upgrading doesn't silently change anyone's existing reading behavior.
     static let pageTurnStyle = "reader.pageTurnStyle"

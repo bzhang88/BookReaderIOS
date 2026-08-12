@@ -5,6 +5,7 @@ struct YueDuApp: App {
     @StateObject private var environment = AppEnvironment()
     @AppStorage(ReaderSettingsKey.appFontScale) private var appFontScale: AppFontScale = .standard
     @AppStorage(ReaderSettingsKey.appAppearanceMode) private var appAppearanceMode: AppAppearanceMode = .system
+    @AppStorage(ReaderSettingsKey.appAccentColorHex) private var appAccentColorHex: String = ""
 
     var body: some Scene {
         WindowGroup {
@@ -23,6 +24,14 @@ struct YueDuApp: App {
                 // `.system` maps to `nil`, which per SwiftUI's documented behavior just lets the real
                 // OS appearance flow through unchanged.
                 .preferredColorScheme(appAppearanceMode.colorScheme)
+                // Real usage feedback: 浅色/深色 alone still only gave 2 fixed states, not "choose
+                // the color I want." iOS's system chrome (List backgrounds, nav bars) genuinely only
+                // has light/dark as real states -- there's no continuous brightness dial for that --
+                // but `.tint` (which every standard control already respects for its own accent) is
+                // a real, app-wide "the color I want" lever independent of light/dark. Empty string
+                // (the default) means "don't override" -- `.tint(nil)` leaves the system default
+                // blue exactly as it was before this setting existed.
+                .tint(Color(hex: appAccentColorHex))
         }
     }
 }

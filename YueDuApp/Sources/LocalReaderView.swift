@@ -117,6 +117,19 @@ struct LocalReaderView: View {
         return Text(String(repeating: "　", count: paragraphIndent) + paragraph)
     }
 
+    /// See `ReaderView.chapterHeading`'s matching doc comment -- same real usage feedback applies
+    /// here regardless of reader type.
+    private func chapterHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.bold())
+            .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+            .padding(.bottom, 12)
+            .padding(.horizontal, 4)
+    }
+
     private var chapterProgressText: String {
         let chapterPart = "第 \(currentIndex + 1) / \(book.chapters.count) 章"
         guard pageTurnStyle.isPaginated, let pagedPageProgress else { return chapterPart }
@@ -156,6 +169,9 @@ struct LocalReaderView: View {
             } else {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
+                chapterHeading(chapter.title)
+                    .id(-1)
+
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
                     indentedText(paragraph)
                         .font(.system(size: fontSize))
@@ -390,7 +406,9 @@ struct LocalReaderView: View {
             // which content is currently showing.
             if !pageTurnStyle.isPaginated {
                 withAnimation(nil) {
-                    scrollProxy.scrollTo(0, anchor: .top)
+                    // -1 is the chapter heading's id, not paragraph 0 -- see `ReaderView`'s matching
+                    // comment.
+                    scrollProxy.scrollTo(-1, anchor: .top)
                 }
             }
         }
@@ -465,6 +483,14 @@ struct LocalReaderView: View {
                 Spacer()
                 Stepper(value: $lineSpacing, in: 0...24, step: 1) {
                     Text("\(Int(lineSpacing))").font(.caption).monospacedDigit().frame(minWidth: 20)
+                }
+                .fixedSize()
+            }
+            HStack {
+                Text("段距").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Stepper(value: $paragraphSpacing, in: 0...32, step: 1) {
+                    Text("\(Int(paragraphSpacing))").font(.caption).monospacedDigit().frame(minWidth: 20)
                 }
                 .fixedSize()
             }

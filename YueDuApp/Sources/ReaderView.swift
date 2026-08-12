@@ -237,6 +237,16 @@ struct ReaderView: View {
             } else {
         ScrollView {
             VStack(alignment: .leading, spacing: paragraphSpacing) {
+                // Real usage feedback: only the *appended next chapter* got a heading before this --
+                // the very first (current) chapter shown had no inline title at all, only the top
+                // bar's. Every chapter section, including this first one, now gets the same bold
+                // centered heading so the reading area alone tells you which chapter you're in.
+                // `.id(-1)` (distinct from any real paragraph index, which is always >= 0) is what
+                // `.onChange(of: currentIndex)`'s "scroll to top" reset targets, so landing on a new
+                // chapter shows its heading too, not just its first paragraph.
+                chapterHeading(chapter.title)
+                    .id(-1)
+
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
                     indentedText(paragraph)
                         .font(.system(size: fontSize))
@@ -280,14 +290,7 @@ struct ReaderView: View {
                 // showing here (see `loadNextChapterPreview`), so there's no loading gap to paper
                 // over -- it's simply already there once you scroll far enough.
                 if let preview = nextChapterPreview {
-                    VStack(spacing: 12) {
-                        Divider().padding(.vertical, 24)
-                        Text(preview.title)
-                            .font(.title3.bold())
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .padding(.horizontal, 4)
+                    chapterHeading(preview.title)
 
                     ForEach(Array(preview.text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, paragraph in
                         indentedText(paragraph)
@@ -321,11 +324,20 @@ struct ReaderView: View {
             // doesn't work" (real-device feedback: the page never moves at all in `.scroll` mode).
             // `.simultaneousGesture` lets both this tap-zone recognizer and the ScrollView's native
             // scrolling see the same touch instead of one exclusively claiming it.
+            //
+            // `coordinateSpace: .global` -- real usage feedback: tap zones stopped doing anything
+            // once scrolled even a little way into a chapter. Root cause: `DragGesture`'s `.location`
+            // defaults to `.local`, i.e. relative to *this VStack's own bounds* -- which, now that
+            // paragraphs plus a whole appended next-chapter preview can span many screens' worth of
+            // height, is nowhere close to the screen. `handleTap` compares that value against
+            // `UIScreen.main.bounds`, so any real scroll position produced a huge local Y that always
+            // clamped to the bottom row, no matter where on the actual screen the tap landed. `.global`
+            // makes `.location` screen-relative, matching what `handleTap` already assumes.
             .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onEnded { value in
                         guard hypot(value.translation.width, value.translation.height) <= touchSlop else { return }
-                        handleTap(at: value.location)
+                        handleTap(at: value.location, proxy: scrollProxy)
                     }
             )
         }
@@ -801,7 +813,10 @@ struct ReaderView: View {
                 suppressScrollResetOnNextChapterChange = false
             } else if !pageTurnStyle.isPaginated {
                 withAnimation(nil) {
-                    scrollProxy.scrollTo(0, anchor: .top)
+                    // -1 is the chapter heading's id (see `chapterHeading`'s call site), not
+                    // paragraph 0 -- landing on a new chapter should show its title too, not leave
+                    // it scrolled just out of view above the first paragraph.
+                    scrollProxy.scrollTo(-1, anchor: .top)
                 }
             }
         }
@@ -967,6 +982,17 @@ struct ReaderView: View {
                 }
                 .fixedSize()
             }
+            // Real usage feedback: the inline panel had 字号/行距 quick steppers but not 段距,
+            // even though the full "界面" sheet always had all three -- an easy thing to miss if
+            // you never happened to open "更多"/"翻页动画" to find the full sheet underneath.
+            HStack {
+                Text("段距").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Stepper(value: $paragraphSpacing, in: 0...32, step: 1) {
+                    Text("\(Int(paragraphSpacing))").font(.caption).monospacedDigit().frame(minWidth: 20)
+                }
+                .fixedSize()
+            }
 
             Divider()
 
@@ -1014,14 +1040,14 @@ struct ReaderView: View {
     /// see `ReaderTapZoneGrid.standard`). Zones are measured against the screen bounds rather than
     /// a `GeometryReader`-measured local size, matching the same approximation already used for the
     /// scroll content's `minHeight` a few lines up in `body`.
-    private func handleTap(at location: CGPoint) {
+    private func handleTap(at location: CGPoint, proxy: ScrollViewProxy) {
         let screenSize = UIScreen.main.bounds.size
         let col = min(2, max(0, Int(location.x / (screenSize.width / 3))))
         let row = min(2, max(0, Int(location.y / (screenSize.height / 3))))
-        perform(ReaderTapZoneGrid.decode(tapZoneGridRaw).action(row: row, col: col))
+        perform(ReaderTapZoneGrid.decode(tapZoneGridRaw).action(row: row, col: col), proxy: proxy)
     }
 
-    private func perform(_ action: ReaderTapZoneAction) {
+    private func perform(_ action: ReaderTapZoneAction, proxy: ScrollViewProxy) {
         switch action {
         case .none:
             break
@@ -1033,6 +1059,15 @@ struct ReaderView: View {
             goTo(currentIndex + 1)
         case .openToc:
             isShowingToc = true
+        case .nextPage:
+            // Reuses the exact same step-based scroll the volume-key paging already does -- there
+            // are no real "pages" in a continuous-scroll reader, so this is the same honest
+            // paragraph-step approximation, just triggered by a tap zone instead of a hardware key.
+            handleVolumeKeyTurn(direction: 1, proxy: proxy)
+        case .previousPage:
+            handleVolumeKeyTurn(direction: -1, proxy: proxy)
+        case .exitReader:
+            dismiss()
         }
     }
 
@@ -1246,6 +1281,22 @@ struct ReaderView: View {
     private func indentedText(_ paragraph: String) -> Text {
         guard paragraphIndent > 0 else { return highlightedText(paragraph) }
         return Text(String(repeating: "　", count: paragraphIndent)) + highlightedText(paragraph)
+    }
+
+    /// Bold, centered chapter title shown inline in the reading area itself -- real usage feedback,
+    /// with a reference screenshot, wanted this for *every* chapter section (including the very
+    /// first/current one, which previously relied on the top bar alone) and wanted the gap before it
+    /// to read as genuine blank space, not a drawn rule -- a plain `Divider()` line was tried first
+    /// and reads as "a UI element," not "empty space between chapters," so this is just padding.
+    private func chapterHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.bold())
+            .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+            .padding(.bottom, 12)
+            .padding(.horizontal, 4)
     }
 
     private func load() async {

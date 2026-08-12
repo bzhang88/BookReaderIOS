@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage(ReaderSettingsKey.appFontScale) private var appFontScale: AppFontScale = .standard
     @AppStorage(ReaderSettingsKey.appAppearanceMode) private var appAppearanceMode: AppAppearanceMode = .system
+    @AppStorage(ReaderSettingsKey.appAccentColorHex) private var appAccentColorHex: String = ""
 
     var body: some View {
         NavigationStack {
@@ -19,13 +20,27 @@ struct SettingsView: View {
                 // other screen, which read as jarring. Picking 深色/浅色 here forces every screen
                 // (including a reader left on "跟随系统") to match; see `YueDuApp.swift`'s
                 // `.preferredColorScheme` doc comment for the mechanism.
-                Section("外观") {
+                Section {
                     Picker(selection: $appAppearanceMode) {
                         ForEach(AppAppearanceMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
                         }
                     } label: {
                         Label("外观模式", systemImage: "circle.lefthalf.filled")
+                    }
+                    // Real usage feedback: 浅色/深色 alone still only felt like "2 fixed colors, not
+                    // a color I actually chose." `.tint` is the real per-app "pick any color" lever
+                    // (every standard control already respects it for its own accent) -- separate
+                    // from light/dark, which iOS's system chrome genuinely only has 2 real states
+                    // for, no continuous dial.
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: appAccentColorHex) ?? .accentColor },
+                        set: { appAccentColorHex = $0.toHex() }
+                    )) {
+                        Label("主题强调色", systemImage: "paintpalette")
+                    }
+                    if !appAccentColorHex.isEmpty {
+                        Button("恢复默认颜色", role: .destructive) { appAccentColorHex = "" }
                     }
                     Picker(selection: $appFontScale) {
                         ForEach(AppFontScale.allCases) { scale in
@@ -34,6 +49,8 @@ struct SettingsView: View {
                     } label: {
                         Label("App 字体大小", systemImage: "textformat.size")
                     }
+                } header: {
+                    Text("外观")
                 }
 
                 Section {
