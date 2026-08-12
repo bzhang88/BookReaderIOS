@@ -238,6 +238,11 @@ enum ReaderSettingsKey {
     /// Which of the 5 page-turn presentations (`PageTurnStyle`) the reader uses -- defaults to
     /// `.scroll` so upgrading doesn't silently change anyone's existing reading behavior.
     static let pageTurnStyle = "reader.pageTurnStyle"
+    /// How many chapters *ahead* of the current one to speculatively fetch into `ChapterCacheStore`
+    /// in the background -- 0 disables prefetching entirely. Defaults to 1 (just the very next
+    /// chapter, the overwhelmingly common next action) rather than something larger, to keep the
+    /// default behavior's extra network usage modest.
+    static let prefetchChapterCount = "reader.prefetchChapterCount"
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before

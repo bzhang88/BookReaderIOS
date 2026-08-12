@@ -82,6 +82,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.customThemeBackgroundHex) private var customThemeBackgroundHex: String = "#FFFFFF"
     @AppStorage(ReaderSettingsKey.customThemeTextHex) private var customThemeTextHex: String = "#0D0D0D"
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
+    @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
     // Only ever set to `.last` right before `goTo` steps backward across a paginated chapter's
     // boundary (see `goTo`'s doc comment) -- every other navigation path defaults back to `.first`.
     @State private var pageAnchor: PageAnchor = .first
@@ -1064,6 +1065,29 @@ struct ReaderView: View {
         }
         isLoading = false
         armAutoAdvance()
+        prefetchUpcomingChapters()
+    }
+
+    /// Fires a best-effort background fetch for the next `prefetchChapterCount` chapters so tapping
+    /// "下一章" is usually an instant cache hit instead of a network wait -- the single most common
+    /// action in a reading session, and previously always a fresh network round-trip no matter how
+    /// predictable "the next chapter" is. Silent on failure/skip (a miss just falls back to `load()`'s
+    /// own normal network fetch, exactly like before this existed); re-checks `chapters.indices`
+    /// inside the loop rather than trusting a range computed once, since 换源 can shrink `chapters`
+    /// out from under an in-flight prefetch if the user switches source mid-fetch.
+    private func prefetchUpcomingChapters() {
+        guard prefetchChapterCount > 0 else { return }
+        let targetIndices = (currentIndex + 1)..<(currentIndex + 1 + prefetchChapterCount)
+        Task {
+            for index in targetIndices {
+                guard chapters.indices.contains(index) else { break }
+                if (try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: index)) != nil { continue }
+                guard let content = try? await ContentService.fetchContent(
+                    source: source, chapter: chapters[index], httpClient: env.httpClient
+                ) else { continue }
+                try? await env.chapterCacheStore.save(bookUrl: bookUrl, index: index, content: content)
+            }
+        }
     }
 
     /// Bookmarks are chapter-level (this reader doesn't track a finer scroll position anywhere),

@@ -85,6 +85,7 @@ struct ReaderMoreSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
     @AppStorage(ReaderSettingsKey.selectedHttpTTSEngineID) private var selectedHttpTTSEngineID: String = ""
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
+    @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
 
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
@@ -178,8 +179,11 @@ struct ReaderMoreSettingsSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    Stepper("预下载章节数: \(prefetchChapterCount)", value: $prefetchChapterCount, in: 0...5)
                 } header: {
                     Text("其他")
+                } footer: {
+                    Text("提前在后台下载接下来几章的正文，翻到下一章时可以直接秒开，不用等网络。设为 0 关闭。")
                 }
             }
             .navigationTitle("设置")
