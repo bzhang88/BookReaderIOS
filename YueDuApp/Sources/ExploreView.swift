@@ -1,6 +1,7 @@
 import SwiftUI
 import BookSourceModel
 import WebBookOrchestrator
+import Persistence
 
 /// "发现" tab -- browse book-source-provided category listings without typing a search keyword.
 /// Confirmed via the user's own real reference screenshots: this is a single flat screen (a source
