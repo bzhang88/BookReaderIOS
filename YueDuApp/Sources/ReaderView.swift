@@ -94,6 +94,12 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
     @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
     @AppStorage(ReaderSettingsKey.backwardPrefetchChapterCount) private var backwardPrefetchChapterCount: Int = 1
+    // Shared between `prefetchUpcomingChapters`/`prefetchPreviousChapters` so together they never
+    // have more than 2 chapter fetches in flight -- see `PrefetchLimiter`'s doc comment. `@State`
+    // (not a plain `let`) because a SwiftUI View struct's stored properties are recreated on every
+    // body re-evaluation; only `@State`'s underlying storage survives across those, which this needs
+    // to stay one actor instance for the life of the reading session, not a fresh one per re-render.
+    @State private var prefetchLimiter = PrefetchLimiter(limit: 2)
     // Only ever set to `.last` right before `goTo` steps backward across a paginated chapter's
     // boundary (see `goTo`'s doc comment) -- every other navigation path defaults back to `.first`.
     @State private var pageAnchor: PageAnchor = .first
@@ -2029,6 +2035,13 @@ struct ReaderView: View {
     /// Shared driver behind `prefetchUpcomingChapters`/`prefetchPreviousChapters` -- re-checks
     /// `chapters.indices` inside the loop rather than trusting `indices` as computed, since 换源 can
     /// shrink `chapters` out from under an in-flight prefetch if the user switches source mid-fetch.
+    /// Throttled to match Legado_Max's own `ReadBook.downloadIndex`: a `PRE_DOWNLOAD_DELAY_MS` (1s)
+    /// pacing delay before each network fetch a cache-miss actually needs (no delay for a cache hit,
+    /// same as Legado skipping `downloadIndex` entirely for an already-downloaded chapter), plus
+    /// `prefetchLimiter` capping how many of those fetches run at once across both this loop and its
+    /// forward/backward counterpart -- without it, jumping several chapters in a row (each firing its
+    /// own forward+backward prefetch pair) could pile up many simultaneous requests against a book
+    /// source's server instead of a bounded, gentle trickle.
     private func prefetchChapters(in indices: Range<Int>, closestFirst: Bool = false) {
         guard !indices.isEmpty else { return }
         let orderedIndices = closestFirst ? Array(indices.reversed()) : Array(indices)
@@ -2036,11 +2049,15 @@ struct ReaderView: View {
             for index in orderedIndices {
                 guard chapters.indices.contains(index) else { continue }
                 if (try? await env.chapterCacheStore.chapter(bookUrl: bookUrl, index: index)) != nil { continue }
-                guard let content = try? await ContentService.fetchContent(
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await prefetchLimiter.acquire()
+                if let content = try? await ContentService.fetchContent(
                     source: source, chapter: chapters[index], httpClient: env.httpClient,
                     nextChapterUrl: chapters.indices.contains(index + 1) ? chapters[index + 1].url : nil
-                ) else { continue }
-                try? await env.chapterCacheStore.save(bookUrl: bookUrl, index: index, content: content)
+                ) {
+                    try? await env.chapterCacheStore.save(bookUrl: bookUrl, index: index, content: content)
+                }
+                await prefetchLimiter.release()
             }
         }
     }
@@ -2070,6 +2087,38 @@ struct ReaderView: View {
             )
             try? await env.bookmarkStore.add(bookmark)
             isCurrentChapterBookmarked = true
+        }
+    }
+}
+
+/// A counting semaphore for `async`/`await` code -- mirrors Legado_Max's own
+/// `ReadBook.preDownloadSemaphore` (`kotlinx.coroutines.sync.Semaphore(PRE_DOWNLOAD_CONCURRENCY)`),
+/// which Swift Concurrency has no direct standard-library equivalent for. `acquire()` returns
+/// immediately while under `limit`; once at capacity, callers suspend on a FIFO queue of
+/// continuations and are resumed one at a time as `release()` is called, so no acquired permit is
+/// ever handed out beyond `limit` concurrently.
+private actor PrefetchLimiter {
+    private let limit: Int
+    private var active = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) {
+        self.limit = limit
+    }
+
+    func acquire() async {
+        if active < limit {
+            active += 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+        active += 1
+    }
+
+    func release() {
+        active -= 1
+        if !waiters.isEmpty {
+            waiters.removeFirst().resume()
         }
     }
 }
