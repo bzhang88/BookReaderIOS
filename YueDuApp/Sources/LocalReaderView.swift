@@ -136,8 +136,40 @@ struct LocalReaderView: View {
 
     private var chapterProgressText: String {
         let chapterPart = "第 \(currentIndex + 1) / \(book.chapters.count) 章"
-        guard pageTurnStyle.isPaginated, let pagedPageProgress else { return chapterPart }
-        return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
+        if pageTurnStyle.isPaginated, let pagedPageProgress {
+            return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页 · \(wholeBookProgressText)"
+        }
+        return "\(chapterPart) · \(wholeBookProgressText)"
+    }
+
+    /// See `ReaderView.wholeBookProgressText`'s doc comment for the formula and its Legado source.
+    /// `.scroll` mode here has no page concept (this view still scrolls by raw paragraph position,
+    /// not the pixel-offset/page-layout model `ReaderView` was rewritten to use) -- `paragraphs.count`
+    /// / `currentTopParagraphIndex` stand in for `pageSize`/`pageIndex` as the closest equivalent
+    /// "how far into this chapter" fraction available here.
+    private var wholeBookProgressText: String {
+        let chapterSize = book.chapters.count
+        guard chapterSize > 0 else { return "0.0%" }
+        let pageIndex: Int
+        let pageSize: Int
+        if pageTurnStyle.isPaginated, let pagedPageProgress {
+            pageIndex = pagedPageProgress.current - 1
+            pageSize = pagedPageProgress.total
+        } else if !paragraphs.isEmpty {
+            pageIndex = currentTopParagraphIndex
+            pageSize = paragraphs.count
+        } else {
+            pageIndex = 0
+            pageSize = 0
+        }
+        guard pageSize > 0 else {
+            return String(format: "%.1f%%", Double(currentIndex + 1) / Double(chapterSize) * 100)
+        }
+        let percent = Double(currentIndex) / Double(chapterSize)
+            + (1 / Double(chapterSize)) * Double(pageIndex + 1) / Double(pageSize)
+        let formatted = String(format: "%.1f%%", percent * 100)
+        let isTrulyLast = currentIndex + 1 == chapterSize && pageIndex + 1 == pageSize
+        return (formatted == "100.0%" && !isTrulyLast) ? "99.9%" : formatted
     }
 
     private var pageSeekBinding: Binding<Double> {

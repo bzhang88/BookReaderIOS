@@ -264,12 +264,42 @@ struct ReaderView: View {
     private var chapterProgressText: String {
         let chapterPart = "第 \(currentIndex + 1) / \(chapters.count) 章"
         if pageTurnStyle.isPaginated, let pagedPageProgress {
-            return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页"
+            return "\(chapterPart) · 第 \(pagedPageProgress.current) / \(pagedPageProgress.total) 页 · \(wholeBookProgressText)"
         }
         if let pageLayout, !pageLayout.pages.isEmpty {
-            return "\(chapterPart) · 第 \(currentPageIndexInChapter + 1) / \(pageLayout.pages.count) 页"
+            return "\(chapterPart) · 第 \(currentPageIndexInChapter + 1) / \(pageLayout.pages.count) 页 · \(wholeBookProgressText)"
         }
-        return chapterPart
+        return "\(chapterPart) · \(wholeBookProgressText)"
+    }
+
+    /// Whole-book reading percentage -- confirmed against Legado_Max's own `TextPage.readProgress`
+    /// (`TextPage.kt:245-259`): `chapterIndex/chapterSize + (1/chapterSize)*(pageIndex+1)/pageSize`,
+    /// one decimal place, with the same "never actually show 100.0% unless this really is the very
+    /// last page of the very last chapter" clamp -- rounding tipping the number over to "100%" a
+    /// page or two early reads as a bug once you notice it, same as it would in Legado.
+    private var wholeBookProgressText: String {
+        let chapterSize = chapters.count
+        guard chapterSize > 0 else { return "0.0%" }
+        let pageIndex: Int
+        let pageSize: Int
+        if pageTurnStyle.isPaginated, let pagedPageProgress {
+            pageIndex = pagedPageProgress.current - 1
+            pageSize = pagedPageProgress.total
+        } else if let pageLayout, !pageLayout.pages.isEmpty {
+            pageIndex = currentPageIndexInChapter
+            pageSize = pageLayout.pages.count
+        } else {
+            pageIndex = 0
+            pageSize = 0
+        }
+        guard pageSize > 0 else {
+            return String(format: "%.1f%%", Double(currentIndex + 1) / Double(chapterSize) * 100)
+        }
+        let percent = Double(currentIndex) / Double(chapterSize)
+            + (1 / Double(chapterSize)) * Double(pageIndex + 1) / Double(pageSize)
+        let formatted = String(format: "%.1f%%", percent * 100)
+        let isTrulyLast = currentIndex + 1 == chapterSize && pageIndex + 1 == pageSize
+        return (formatted == "100.0%" && !isTrulyLast) ? "99.9%" : formatted
     }
 
     /// Drives the paginated-mode progress seekbar -- while a drag is in flight, shows the finger's
