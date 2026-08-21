@@ -399,8 +399,15 @@ struct ReaderView: View {
         }
     }
 
+    // `body`'s modifier chain is split into `stage1`/`stage2`/(the final `return`) purely to keep CI's
+    // real `xcodebuild` (Release, whole-module optimization) type-checker from timing out on it as
+    // one giant expression -- confirmed to actually happen this session ("the compiler is unable to
+    // type-check this expression in reasonable time"), and Windows `swift build` can't reproduce or
+    // catch it since it only ever compiles the cross-platform package, never this app target. Each
+    // stage gets its own independently-inferred `some View` type instead of one combined one; no
+    // modifier's content or order changes at all, this is a pure compile-time-cost split.
     var body: some View {
-        Group {
+        let stage1 = Group {
             if pageTurnStyle.isPaginated {
                 PagedChapterReaderView(
                     text: text,
@@ -613,8 +620,9 @@ struct ReaderView: View {
                     .background(.ultraThinMaterial)
             }
         }
-        .navigationTitle(chapter.title)
-        .navigationBarTitleDisplayMode(.inline)
+        let stage2 = stage1
+            .navigationTitle(chapter.title)
+            .navigationBarTitleDisplayMode(.inline)
         // Permanently hidden (not conditional on `isChromeVisible`) -- a custom `.overlay(alignment:
         // .top)` below draws the same buttons instead. Toggling the *native* bar's visibility was
         // the other half of the "menu open/closed changes where the safe area starts, so the text
@@ -755,7 +763,8 @@ struct ReaderView: View {
         // `.task(id:)` only refires when its id value actually changes.
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
         .task { httpTTSEngines = (try? await env.httpTTSEngineStore.all()) ?? [] }
-        .sheet(isPresented: $isShowingStyleSheet) {
+        return stage2
+            .sheet(isPresented: $isShowingStyleSheet) {
             ReaderStyleSheet()
         }
         .sheet(isPresented: $isShowingMoreSettings) {
