@@ -1098,6 +1098,20 @@ struct ReaderView: View {
             animatedPageStep(direction: -1)
         case .exitReader:
             dismiss()
+        case .readAloudPreviousParagraph:
+            readAloudPreviousParagraph()
+        case .readAloudNextParagraph:
+            readAloudNextParagraph()
+        case .toggleReadAloudPauseResume:
+            toggleReadAloudPause()
+        case .toggleBookmark:
+            Task { await toggleBookmark() }
+        case .editContent:
+            isShowingContentEdit = true
+        case .togglePurification:
+            isShowingReplaceRules = true
+        case .contentSearch:
+            isShowingContentSearch = true
         }
     }
 
