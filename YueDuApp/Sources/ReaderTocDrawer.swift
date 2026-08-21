@@ -40,7 +40,11 @@ struct ReaderTocDrawerView: View {
     /// book is already entirely on disk, so `LocalReaderView` doesn't pass this at all and no chapter
     /// ever shows the glyph. `ReaderView` passes `env.chapterCacheStore.downloadedIndices(bookUrl:)`.
     var loadDownloadedIndices: (() async -> Set<Int>)? = nil
-    let onSelectChapter: (Int) -> Void
+    /// `(chapterIndex, characterOffset)` -- the offset is `nil` for a plain 目录/全文搜索 jump (go to
+    /// the chapter's own start), but carries `bookmark.characterOffset` through for a 书签 tap, so
+    /// jumping to a bookmark saved mid-chapter (see `Bookmark.characterOffset`'s doc comment) lands
+    /// on the actual spot instead of the chapter's first page.
+    let onSelectChapter: (Int, Int?) -> Void
 
     @State private var selectedTab: Tab = .toc
     @State private var bookmarks: [Bookmark] = []
@@ -137,7 +141,7 @@ struct ReaderTocDrawerView: View {
         ScrollViewReader { proxy in
             List(chapters) { item in
                 Button {
-                    onSelectChapter(item.id)
+                    onSelectChapter(item.id, nil)
                     isPresented = false
                 } label: {
                     // No `.lineLimit` -- real usage feedback, with a reference screenshot, pointed out
@@ -186,7 +190,7 @@ struct ReaderTocDrawerView: View {
             } else {
                 List(bookmarks) { bookmark in
                     Button {
-                        onSelectChapter(bookmark.chapterIndex)
+                        onSelectChapter(bookmark.chapterIndex, bookmark.characterOffset)
                         isPresented = false
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
@@ -233,7 +237,7 @@ struct ReaderTocDrawerView: View {
                 }
                 ForEach(searchResults) { match in
                     Button {
-                        onSelectChapter(match.chapterIndex)
+                        onSelectChapter(match.chapterIndex, nil)
                         isPresented = false
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {

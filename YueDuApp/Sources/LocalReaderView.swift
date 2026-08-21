@@ -88,21 +88,25 @@ struct LocalReaderView: View {
     }
 
     /// `startChapterIndex` overrides the book's own last-read position -- used when jumping in from
-    /// a bookmark, which names an exact chapter rather than "wherever I left off." `startWithTocOpen`
-    /// exists purely for CI's screenshot workflow (see `RootView`'s `-uiTestingScreen
-    /// localReaderToc`) -- there's no other way to get a screenshot of the drawer actually open,
-    /// since CI can't tap anything.
-    init(book: LocalBook, startChapterIndex: Int? = nil, startWithTocOpen: Bool = false) {
+    /// a bookmark, which names an exact chapter rather than "wherever I left off." `startCharacterOffset`
+    /// carries a bookmark's own `Bookmark.characterOffset` (distinct from the book's last-read
+    /// position below) so a bookmark saved mid-chapter lands on its exact spot, not the chapter's
+    /// first paragraph. `startWithTocOpen` exists purely for CI's screenshot workflow (see
+    /// `RootView`'s `-uiTestingScreen localReaderToc`) -- there's no other way to get a screenshot of
+    /// the drawer actually open, since CI can't tap anything.
+    init(book: LocalBook, startChapterIndex: Int? = nil, startCharacterOffset: Int? = nil, startWithTocOpen: Bool = false) {
         self.book = book
         let fallback = book.lastReadChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? 0
         let start = startChapterIndex.flatMap { book.chapters.indices.contains($0) ? $0 : nil } ?? fallback
         self._currentIndex = State(initialValue: start)
         self._isShowingToc = State(initialValue: startWithTocOpen)
-        // Only resume to a saved mid-chapter position when actually landing on the book's own
-        // last-read chapter via the natural fallback path -- an explicit `startChapterIndex` (e.g. a
-        // bookmark jump) means "start this specific chapter from the top," not "continue where I
-        // left off," even if that happens to be the same chapter index.
-        if startChapterIndex == nil, book.lastReadChapterIndex == start, let offset = book.lastReadCharacterOffset, offset > 0 {
+        if let startCharacterOffset, startCharacterOffset > 0 {
+            self._pendingResumeCharacterOffset = State(initialValue: startCharacterOffset)
+        } else if startChapterIndex == nil, book.lastReadChapterIndex == start, let offset = book.lastReadCharacterOffset, offset > 0 {
+            // Only resume to a saved mid-chapter position when actually landing on the book's own
+            // last-read chapter via the natural fallback path -- an explicit `startChapterIndex` (e.g.
+            // a bookmark jump with no offset of its own) means "start this specific chapter from the
+            // top," not "continue where I left off," even if that happens to be the same chapter index.
             self._pendingResumeCharacterOffset = State(initialValue: offset)
         }
     }
@@ -353,7 +357,10 @@ struct LocalReaderView: View {
                 loadChaptersForSearch: {
                     book.chapters.enumerated().map { index, chapter in (index: index, title: chapter.title, text: chapter.text) }
                 },
-                onSelectChapter: { index in goTo(index) }
+                onSelectChapter: { index, offset in
+                    if let offset, offset > 0 { pendingResumeCharacterOffset = offset }
+                    goTo(index)
+                }
             )
         }
         .sheet(isPresented: $isShowingStyleSheet) {
@@ -589,9 +596,10 @@ struct LocalReaderView: View {
             try? await env.bookmarkStore.remove(bookIdentifier: book.id, chapterIndex: currentIndex)
             isCurrentChapterBookmarked = false
         } else {
+            let offset: Int? = pageTurnStyle.isPaginated ? nil : characterOffset(forParagraphIndex: currentTopParagraphIndex)
             let bookmark = Bookmark(
                 isLocal: true, bookIdentifier: book.id, bookTitle: book.title,
-                chapterIndex: currentIndex, chapterTitle: chapter.title
+                chapterIndex: currentIndex, chapterTitle: chapter.title, characterOffset: offset
             )
             try? await env.bookmarkStore.add(bookmark)
             isCurrentChapterBookmarked = true

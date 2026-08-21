@@ -151,7 +151,7 @@ private struct BookmarkResumeView: View {
         Group {
             if bookmark.isLocal {
                 if let localBook {
-                    LocalReaderView(book: localBook, startChapterIndex: bookmark.chapterIndex)
+                    LocalReaderView(book: localBook, startChapterIndex: bookmark.chapterIndex, startCharacterOffset: bookmark.characterOffset)
                 } else if let errorMessage {
                     ContentUnavailableView("无法打开", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
                 } else {
@@ -161,7 +161,7 @@ private struct BookmarkResumeView: View {
                 BookOpenerView(
                     source: source, bookUrl: bookmark.bookIdentifier, tocUrl: bookmark.tocUrl ?? "",
                     chapters: chapters, currentIndex: min(bookmark.chapterIndex, chapters.count - 1),
-                    bookTitle: bookmark.bookTitle
+                    bookTitle: bookmark.bookTitle, resumeCharacterOffset: bookmark.characterOffset ?? 0
                 )
             } else if let errorMessage {
                 ContentUnavailableView("无法打开", systemImage: "exclamationmark.triangle", description: Text(errorMessage))

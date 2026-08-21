@@ -685,7 +685,10 @@ struct ReaderView: View {
                 searchScopeNotice: "仅搜索已下载缓存的章节，未下载的章节不在搜索范围内",
                 loadChaptersForSearch: loadCachedChaptersForSearch,
                 loadDownloadedIndices: { (try? await env.chapterCacheStore.downloadedIndices(bookUrl: bookUrl)) ?? [] },
-                onSelectChapter: { index in goTo(index) }
+                onSelectChapter: { index, offset in
+                    if let offset, offset > 0 { pendingResumeCharacterOffset = offset }
+                    goTo(index)
+                }
             )
         }
         .sheet(isPresented: $isShowingContentSearch) {
@@ -2028,16 +2031,28 @@ struct ReaderView: View {
         }
     }
 
-    /// Bookmarks are chapter-level (this reader doesn't track a finer scroll position anywhere),
-    /// so the button is a simple toggle -- one bookmark per (book, chapter) at most.
+    /// One bookmark per (book, chapter) at most -- the button is a simple toggle, not a "add
+    /// another one here" action (see `Bookmark.characterOffset`'s doc comment for why that's a
+    /// deliberately separate, larger feature this doesn't attempt). In `.scroll` mode, captures the
+    /// exact character offset of whatever page is currently showing -- the same value
+    /// `saveReadingProgress` computes -- so jumping back to this bookmark later (via
+    /// `BookmarkListView`'s `BookOpenerView`, or the in-reader 书签 tab's `onSelectChapter`) lands
+    /// on the actual spot, not just the chapter's first page. `nil` in paginated mode, which has no
+    /// equivalent character-offset exposed back to this function.
     private func toggleBookmark() async {
         if isCurrentChapterBookmarked {
             try? await env.bookmarkStore.remove(bookIdentifier: bookUrl, chapterIndex: chapter.index)
             isCurrentChapterBookmarked = false
         } else {
+            let offset: Int? = {
+                guard !pageTurnStyle.isPaginated, let pageLayout,
+                      pageLayout.pages.indices.contains(currentPageIndexInChapter) else { return nil }
+                return pageLayout.pages[currentPageIndexInChapter].location
+            }()
             let bookmark = Bookmark(
                 isLocal: false, bookSourceUrl: source.bookSourceUrl, bookIdentifier: bookUrl,
-                tocUrl: tocUrl, bookTitle: bookTitle, chapterIndex: chapter.index, chapterTitle: chapter.title
+                tocUrl: tocUrl, bookTitle: bookTitle, chapterIndex: chapter.index, chapterTitle: chapter.title,
+                characterOffset: offset
             )
             try? await env.bookmarkStore.add(bookmark)
             isCurrentChapterBookmarked = true
