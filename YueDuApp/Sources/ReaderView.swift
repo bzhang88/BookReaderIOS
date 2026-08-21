@@ -1423,6 +1423,21 @@ struct ReaderView: View {
             }
             offset += pageHeight
         }
+        // Real-device testing: holding a finger down past a page boundary (not lifting, sometimes
+        // barely moving at all) kept advancing pages over and over for as long as the touch stayed
+        // down. Root cause -- `scrollModeBody`'s `.onChanged` always recomputes `newOffset` as
+        // `dragGestureBaseOffset + value.translation.height`, an *absolute* target from the gesture's
+        // fixed starting point, not an incremental delta since the last call. Real touch hardware
+        // keeps redelivering `.onChanged` continuously while a finger is down -- natural hand tremor
+        // alone produces a stream of near-identical `translation` values even when the finger "isn't
+        // moving." Every one of those redeliveries was recomputing the *same* already-consumed
+        // pre-crossing total from the untouched baseline and re-running the exact same page advance
+        // against it, because nothing here ever told `dragGestureBaseOffset` that part of its
+        // distance had already been spent. Subtracting exactly what this call consumed
+        // (`newOffset - offset`) back out of it means the next callback -- even carrying the same raw
+        // `translation.height` as this one -- recomputes the already-settled `offset`, not the
+        // original oversized `newOffset`, so it becomes a no-op instead of repeating the crossing.
+        dragGestureBaseOffset -= (newOffset - offset)
         dragOffset = offset
     }
 
