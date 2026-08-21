@@ -192,6 +192,41 @@ struct LocalReaderView: View {
         )
     }
 
+    /// See `ReaderView`'s matching properties -- same fix for the same CI-only ("the compiler is
+    /// unable to type-check this expression in reasonable time") failure.
+    private var showsChapterSeekbar: Bool {
+        progressBarBehavior == .chapter && book.chapters.count > 1
+    }
+
+    private var showsPageSeekbar: Bool {
+        guard progressBarBehavior == .page, pageTurnStyle.isPaginated, let pagedPageProgress else { return false }
+        return pagedPageProgress.total > 1
+    }
+
+    private var chapterSeekbar: some View {
+        Slider(
+            value: chapterSeekBinding, in: 0...Double(book.chapters.count - 1), step: 1,
+            onEditingChanged: { isEditing in
+                if !isEditing {
+                    if let chapterSeekDragValue { requestChapterJump(to: Int(chapterSeekDragValue)) }
+                    chapterSeekDragValue = nil
+                }
+            }
+        )
+    }
+
+    private var pageSeekbar: some View {
+        Slider(
+            value: pageSeekBinding, in: 0...Double((pagedPageProgress?.total ?? 1) - 1), step: 1,
+            onEditingChanged: { isEditing in
+                if !isEditing {
+                    if let pageSeekDragValue { pageJumpRequest = Int(pageSeekDragValue) }
+                    pageSeekDragValue = nil
+                }
+            }
+        )
+    }
+
     /// See `ReaderView.requestChapterJump`'s doc comment.
     private func requestChapterJump(to index: Int) {
         guard book.chapters.indices.contains(index), index != currentIndex else { return }
@@ -300,26 +335,10 @@ struct LocalReaderView: View {
                         .contentShape(Rectangle())
                         .disabled(currentIndex <= 0)
 
-                    if progressBarBehavior == .chapter, book.chapters.count > 1 {
-                        Slider(
-                            value: chapterSeekBinding, in: 0...Double(book.chapters.count - 1), step: 1,
-                            onEditingChanged: { isEditing in
-                                if !isEditing {
-                                    if let chapterSeekDragValue { requestChapterJump(to: Int(chapterSeekDragValue)) }
-                                    chapterSeekDragValue = nil
-                                }
-                            }
-                        )
-                    } else if progressBarBehavior == .page, pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
-                        Slider(
-                            value: pageSeekBinding, in: 0...Double(pagedPageProgress.total - 1), step: 1,
-                            onEditingChanged: { isEditing in
-                                if !isEditing {
-                                    if let pageSeekDragValue { pageJumpRequest = Int(pageSeekDragValue) }
-                                    pageSeekDragValue = nil
-                                }
-                            }
-                        )
+                    if showsChapterSeekbar {
+                        chapterSeekbar
+                    } else if showsPageSeekbar {
+                        pageSeekbar
                     } else {
                         Text(chapterProgressText)
                             .font(.caption)

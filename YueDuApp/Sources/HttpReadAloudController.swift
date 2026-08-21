@@ -38,14 +38,18 @@ final class HttpReadAloudController: NSObject, ObservableObject {
         configureRemoteCommands()
     }
 
-    func start(paragraphs: [String], engine: HttpTTSEngine, cache: HttpTTSCache, bookTitle: String, chapterTitle: String) {
+    /// See `ReadAloudController.start`'s matching doc comment for `startIndex`.
+    func start(
+        paragraphs: [String], engine: HttpTTSEngine, cache: HttpTTSCache, bookTitle: String, chapterTitle: String,
+        startIndex: Int = 0
+    ) {
         activateAudioSession()
         self.paragraphs = paragraphs
         self.engine = engine
         self.cache = cache
         self.bookTitle = bookTitle
         self.chapterTitle = chapterTitle
-        currentParagraphIndex = 0
+        currentParagraphIndex = paragraphs.indices.contains(startIndex) ? startIndex : 0
         errorMessage = nil
         speakCurrentParagraph()
     }

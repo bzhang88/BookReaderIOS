@@ -70,4 +70,21 @@ final class ChapterPageLayoutTests: XCTestCase {
         let layout = ChapterPageLayout(paragraphs: [], pages: [NSRange(location: 0, length: 0)])
         XCTAssertEqual(layout.chunks(forPage: 0), [ChapterPageLayout.Chunk(paragraphIndex: 0, text: "")])
     }
+
+    /// Backs the long-press paragraph menu's "添加书签" action (`ReaderView.addBookmark(forParagraph:)`)
+    /// -- the inverse of `paragraphIndex(forCharacterOffset:)`'s own private logic.
+    func testCharacterOffsetForParagraphIndexReturnsEachParagraphsStartingOffset() {
+        let layout = makeMidParagraphSplitLayout()
+        // "Hello world" starts at 0; "ABCDEFGHIJ" starts right after "Hello world\n" (12); "Last
+        // paragraph" starts right after that plus "ABCDEFGHIJ\n" (12 + 11 = 23).
+        XCTAssertEqual(layout.characterOffset(forParagraphIndex: 0), 0)
+        XCTAssertEqual(layout.characterOffset(forParagraphIndex: 1), 12)
+        XCTAssertEqual(layout.characterOffset(forParagraphIndex: 2), 23)
+    }
+
+    func testCharacterOffsetForOutOfRangeParagraphIndexReturnsNil() {
+        let layout = makeMidParagraphSplitLayout()
+        XCTAssertNil(layout.characterOffset(forParagraphIndex: -1))
+        XCTAssertNil(layout.characterOffset(forParagraphIndex: 999))
+    }
 }

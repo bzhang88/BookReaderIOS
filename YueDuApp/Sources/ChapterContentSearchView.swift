@@ -9,12 +9,28 @@ struct ChapterContentSearchView: View {
     let loadChapters: () async -> [(index: Int, title: String, text: String)]
     let onSelect: (Int) -> Void
     var scopeNotice: String?
+    /// Pre-fills the search field -- used by the reader's long-press paragraph menu's 搜索本书 action
+    /// (see `DictLookupView.initialWord`/`WebSearchPanelView.initialQuery` for the same pattern) so
+    /// tapping it searches for the pressed paragraph's own text immediately instead of landing on an
+    /// empty search field the user has to retype into.
+    var initialKeyword: String = ""
 
-    @State private var keyword = ""
+    @State private var keyword: String
     @State private var allChapters: [(index: Int, title: String, text: String)] = []
     @State private var results: [ChapterSearchMatch] = []
     @State private var isLoadingChapters = true
     @Environment(\.dismiss) private var dismiss
+
+    init(
+        loadChapters: @escaping () async -> [(index: Int, title: String, text: String)],
+        onSelect: @escaping (Int) -> Void, scopeNotice: String? = nil, initialKeyword: String = ""
+    ) {
+        self.loadChapters = loadChapters
+        self.onSelect = onSelect
+        self.scopeNotice = scopeNotice
+        self.initialKeyword = initialKeyword
+        _keyword = State(initialValue: initialKeyword)
+    }
 
     var body: some View {
         NavigationStack {
@@ -54,6 +70,9 @@ struct ChapterContentSearchView: View {
             .task {
                 allChapters = await loadChapters()
                 isLoadingChapters = false
+                if !keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    results = ChapterContentSearch.search(chapters: allChapters, keyword: keyword)
+                }
             }
         }
     }

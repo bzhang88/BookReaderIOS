@@ -34,12 +34,16 @@ final class ReadAloudController: NSObject, ObservableObject {
         configureRemoteCommands()
     }
 
-    func start(paragraphs: [String], bookTitle: String, chapterTitle: String) {
+    /// `startIndex` lets the reader's long-press paragraph menu start speech from wherever was
+    /// pressed ("朗读，从这里开始") instead of always the chapter's first paragraph -- clamped into
+    /// bounds rather than trusted as-is, since a stale index (paragraphs re-split by a purify-rule
+    /// change between when the menu was opened and tapped) is possible in principle.
+    func start(paragraphs: [String], bookTitle: String, chapterTitle: String, startIndex: Int = 0) {
         activateAudioSession()
         self.paragraphs = paragraphs
         self.bookTitle = bookTitle
         self.chapterTitle = chapterTitle
-        currentParagraphIndex = 0
+        currentParagraphIndex = paragraphs.indices.contains(startIndex) ? startIndex : 0
         synthesizer.stopSpeaking(at: .immediate)
         speakCurrentParagraph()
     }

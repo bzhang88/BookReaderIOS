@@ -2,18 +2,15 @@ import SwiftUI
 import BookSourceModel
 import WebBookOrchestrator
 
-/// Word lookup, reachable from the reader toolbar. Real Legado triggers this from long-pressing a
-/// word directly in the flowing text -- not done that way here: this app's reader renders
-/// paragraphs as plain SwiftUI `Text`, which has no public hook (as of this app's iOS 17 deployment
-/// target) to inject a custom "查词" action into `.textSelection(.enabled)`'s native selection
-/// popup without rewriting paragraph rendering onto a `UITextView` bridge -- a much bigger, riskier
-/// change than this increment's worth. This instead offers the same underlying value (look up a
-/// word against a user-configured dictionary rule) through an explicit type-or-paste panel, which
-/// works with the text-selection Copy action already available on selectable paragraphs.
+/// Word lookup, reachable from the reader toolbar and from `ReaderView`'s long-press paragraph menu
+/// (`pageBlock`'s `.contextMenu`, via `initialWord`). Real Legado triggers this from an arbitrary
+/// drag-selected substring; this reader's long-press menu is scoped to whichever whole paragraph was
+/// pressed instead (see `pageBlock`'s doc comment for why a `UITextView`-based substring selection
+/// wasn't worth the risk), so a lookup opened that way starts pre-filled with the full paragraph
+/// rather than just the one word Legado's version would have. Opened from the toolbar with no
+/// paragraph in mind, `initialWord` is empty and this behaves as a plain type-or-paste panel.
 struct DictLookupView: View {
-    /// Pre-fills the query field when opened with a specific word already in mind (not currently
-    /// wired to an in-place text selection anywhere -- see the type-level doc comment -- but keeps
-    /// this view ready for that hookup later without changing its interface).
+    /// Pre-fills the query field -- see the type-level doc comment for the two ways this gets set.
     var initialWord: String = ""
 
     @EnvironmentObject private var env: AppEnvironment

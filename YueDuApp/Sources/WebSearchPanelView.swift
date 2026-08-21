@@ -4,10 +4,9 @@ import BookSourceModel
 
 /// A selected-word (or manually typed) web search panel, embedded in a WebView with back/forward
 /// navigation and a switchable search engine -- confirmed against Legado_Max's real
-/// `ReadWebSearchPanel.kt`. Reached the same way `DictLookupView` is (an explicit reader toolbar
-/// entry, not an in-place long-press on the displayed text): see `DictLookupView`'s doc comment for
-/// why -- this app's paragraphs are plain SwiftUI `Text`, which has no public hook to inject a
-/// custom action into `.textSelection(.enabled)`'s native menu on this app's iOS 17 target.
+/// `ReadWebSearchPanel.kt`. Reached the same way `DictLookupView` is -- see its doc comment for both
+/// entry points (reader toolbar with no prefill, or `ReaderView`'s long-press paragraph menu with
+/// `initialQuery` set to the pressed paragraph's text).
 struct WebSearchPanelView: View {
     var initialQuery: String = ""
 

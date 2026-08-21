@@ -66,6 +66,16 @@ public struct ChapterPageLayout {
         return max(pages.count - 1, 0)
     }
 
+    /// The character offset the given paragraph starts at, in the chapter's full joined text -- the
+    /// inverse of `paragraphIndex(forCharacterOffset:)`. Used to give a long-pressed paragraph's
+    /// custom-menu "添加书签" action the same exact-position semantics `Bookmark.characterOffset`
+    /// already has for the current page (see `ReaderView.toggleBookmark`), instead of falling back
+    /// to chapter-level-only for a bookmark created this way.
+    public func characterOffset(forParagraphIndex index: Int) -> Int? {
+        guard paragraphStartOffsets.indices.contains(index) else { return nil }
+        return paragraphStartOffsets[index]
+    }
+
     /// The paragraph whose text starts at or most recently before `offset` -- i.e. "which paragraph
     /// is this character inside of".
     private func paragraphIndex(forCharacterOffset offset: Int) -> Int {

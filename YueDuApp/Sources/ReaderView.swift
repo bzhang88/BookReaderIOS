@@ -53,6 +53,13 @@ struct ReaderView: View {
     @State private var isShowingContentEdit = false
     @State private var isShowingWebSearch = false
     @State private var isShowingReplaceRules = false
+    // Drive the reader's custom long-press-paragraph menu (`pageBlock`'s `.contextMenu`, `.scroll`
+    // mode only -- see that modifier's doc comment for why paginated mode isn't included). One
+    // shared holder for "which paragraph's text is this action about" rather than a separate copy
+    // per action, since only one of dict/web-search/content-search/purify-seed is ever open at once.
+    @State private var paragraphMenuText = ""
+    @State private var isShowingReplaceRuleSeed = false
+    @State private var isShowingParagraphShareSheet = false
     @State private var isChromeVisible = true
     // Brightness is a toggleable quick-access row (tap the "亮度" icon to reveal/hide it), not a
     // permanently-visible slider -- matches the reference reading app the user pointed at directly
@@ -332,6 +339,52 @@ struct ReaderView: View {
         )
     }
 
+    // `showsChapterSeekbar`/`showsPageSeekbar` and `chapterSeekbar`/`pageSeekbar` below are split out
+    // of what used to be one `if progressBarBehavior == .chapter, chapters.count > 1 { ... } else if
+    // progressBarBehavior == .page, pageTurnStyle.isPaginated, let pagedPageProgress, ... { ... }
+    // else { ... }` directly inside the seekbar `HStack` -- that compiled locally but CI's real
+    // `xcodebuild` (Release, whole-module optimization, a much stricter type-checker budget than
+    // Windows `swift build` ever exercises on this cross-platform-only package) failed with "the
+    // compiler is unable to type-check this expression in reasonable time": a multi-condition
+    // `if`/`else if` mixing booleans and `let` bindings, each branch holding a `Slider` with its own
+    // multi-line trailing closure, is a well-known trigger for that -- splitting the condition and
+    // each branch's view into their own separately-typed properties is the standard fix, since it
+    // gives the type-checker much smaller expressions to solve one at a time instead of one giant one.
+    private var showsChapterSeekbar: Bool {
+        progressBarBehavior == .chapter && chapters.count > 1
+    }
+
+    private var showsPageSeekbar: Bool {
+        guard progressBarBehavior == .page, pageTurnStyle.isPaginated, let pagedPageProgress else { return false }
+        return pagedPageProgress.total > 1
+    }
+
+    /// Matches Legado's real "chapter" mode: jumps only commit on release (`requestChapterJump`),
+    /// gated behind a one-time-per-session confirmation -- see that function's doc comment.
+    private var chapterSeekbar: some View {
+        Slider(
+            value: chapterSeekBinding, in: 0...Double(chapters.count - 1), step: 1,
+            onEditingChanged: { isEditing in
+                if !isEditing {
+                    if let chapterSeekDragValue { requestChapterJump(to: Int(chapterSeekDragValue)) }
+                    chapterSeekDragValue = nil
+                }
+            }
+        )
+    }
+
+    private var pageSeekbar: some View {
+        Slider(
+            value: pageSeekBinding, in: 0...Double((pagedPageProgress?.total ?? 1) - 1), step: 1,
+            onEditingChanged: { isEditing in
+                if !isEditing {
+                    if let pageSeekDragValue { pageJumpRequest = Int(pageSeekDragValue) }
+                    pageSeekDragValue = nil
+                }
+            }
+        )
+    }
+
     /// Matches Legado's real "chapter" progress-bar mode (`ReadMenu.kt`'s `onStopTrackingTouch`):
     /// a chapter jump is a much bigger, harder-to-undo action than a within-chapter page jump, so
     /// the *first* one in a reading session asks for confirmation; once confirmed,
@@ -482,29 +535,10 @@ struct ReaderView: View {
                             .contentShape(Rectangle())
                             .disabled(currentIndex <= 0)
 
-                        if progressBarBehavior == .chapter, chapters.count > 1 {
-                            // Matches Legado's real "chapter" mode: jumps only commit on release
-                            // (`requestChapterJump`), gated behind a one-time-per-session
-                            // confirmation -- see that function's doc comment.
-                            Slider(
-                                value: chapterSeekBinding, in: 0...Double(chapters.count - 1), step: 1,
-                                onEditingChanged: { isEditing in
-                                    if !isEditing {
-                                        if let chapterSeekDragValue { requestChapterJump(to: Int(chapterSeekDragValue)) }
-                                        chapterSeekDragValue = nil
-                                    }
-                                }
-                            )
-                        } else if progressBarBehavior == .page, pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
-                            Slider(
-                                value: pageSeekBinding, in: 0...Double(pagedPageProgress.total - 1), step: 1,
-                                onEditingChanged: { isEditing in
-                                    if !isEditing {
-                                        if let pageSeekDragValue { pageJumpRequest = Int(pageSeekDragValue) }
-                                        pageSeekDragValue = nil
-                                    }
-                                }
-                            )
+                        if showsChapterSeekbar {
+                            chapterSeekbar
+                        } else if showsPageSeekbar {
+                            pageSeekbar
                         } else {
                             Text(chapterProgressText)
                                 .font(.caption)
@@ -646,6 +680,7 @@ struct ReaderView: View {
                             Label("编辑正文", systemImage: "pencil")
                         }
                         Button {
+                            paragraphMenuText = ""
                             isShowingContentSearch = true
                         } label: {
                             Label("搜索本书内", systemImage: "magnifyingglass")
@@ -674,11 +709,13 @@ struct ReaderView: View {
                             Label("AI 摘要", systemImage: "sparkles")
                         }
                         Button {
+                            paragraphMenuText = ""
                             isShowingDictLookup = true
                         } label: {
                             Label("查词", systemImage: "character.book.closed")
                         }
                         Button {
+                            paragraphMenuText = ""
                             isShowingWebSearch = true
                         } label: {
                             Label("网页搜索", systemImage: "globe")
@@ -778,14 +815,15 @@ struct ReaderView: View {
             ChapterContentSearchView(
                 loadChapters: { await loadCachedChaptersForSearch() },
                 onSelect: { index in goTo(index) },
-                scopeNotice: "仅搜索已下载缓存的章节，未下载的章节不在搜索范围内"
+                scopeNotice: "仅搜索已下载缓存的章节，未下载的章节不在搜索范围内",
+                initialKeyword: paragraphMenuText
             )
         }
         .sheet(isPresented: $isShowingAISummary) {
             AIChapterSummaryView(chapterTitle: chapter.title, chapterText: text)
         }
         .sheet(isPresented: $isShowingDictLookup) {
-            DictLookupView()
+            DictLookupView(initialWord: paragraphMenuText)
         }
         .sheet(isPresented: $isShowingContentEdit) {
             ChapterEditView(source: source, chapter: chapter, bookUrl: bookUrl, currentText: text) { edited in
@@ -793,7 +831,21 @@ struct ReaderView: View {
             }
         }
         .sheet(isPresented: $isShowingWebSearch) {
-            WebSearchPanelView()
+            WebSearchPanelView(initialQuery: paragraphMenuText)
+        }
+        .sheet(isPresented: $isShowingReplaceRuleSeed) {
+            // `rule:` non-nil pre-fills the form with the pressed paragraph's text as the match
+            // pattern (as plain text, not regex -- an arbitrary paragraph excerpt is almost never
+            // meant literally as a regex) -- this rule was never actually persisted, so `onSave`
+            // still goes through `.add`, exactly like `ReplaceRuleListView`'s own "新建" flow.
+            // Accepted, minor cosmetic mismatch: `ReplaceRuleEditView` shows "编辑规则" as its title
+            // for any non-nil `rule`, including this seeded-but-unsaved one.
+            ReplaceRuleEditView(rule: ReplaceRule(name: "", pattern: paragraphMenuText, isRegex: false)) { newRule in
+                Task { try? await env.replaceRuleStore.add(newRule) }
+            }
+        }
+        .sheet(isPresented: $isShowingParagraphShareSheet) {
+            ShareSheet(items: [paragraphMenuText])
         }
         .alert(
             "章节跳转确认", isPresented: Binding(get: { pendingChapterJumpIndex != nil }, set: { if !$0 { pendingChapterJumpIndex = nil } })
@@ -1012,14 +1064,24 @@ struct ReaderView: View {
     private func startOrStopReadAloud() {
         if isReadAloudSpeaking {
             stopReadAloud()
-        } else if isUsingHttpTTS, let engine = httpTTSEngines.first(where: { $0.id == selectedHttpTTSEngineID }) {
+        } else {
+            beginReadAloud(startIndex: 0)
+        }
+    }
+
+    /// Shared by `startOrStopReadAloud` (always paragraph 0) and the long-press paragraph menu's
+    /// "朗读，从这里开始" action (`chunk.paragraphIndex`) -- extracted so the engine-selection
+    /// branching (system `AVSpeechSynthesizer` vs a configured `HttpTTSEngine`) only lives in one
+    /// place.
+    private func beginReadAloud(startIndex: Int) {
+        if isUsingHttpTTS, let engine = httpTTSEngines.first(where: { $0.id == selectedHttpTTSEngineID }) {
             httpReadAloud.start(
                 paragraphs: paragraphs, engine: engine, cache: env.httpTTSCache,
-                bookTitle: bookTitle, chapterTitle: chapter.title
+                bookTitle: bookTitle, chapterTitle: chapter.title, startIndex: startIndex
             )
         } else {
             readAloud.setRate(Float(readAloudRate))
-            readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title)
+            readAloud.start(paragraphs: paragraphs, bookTitle: bookTitle, chapterTitle: chapter.title, startIndex: startIndex)
         }
     }
 
@@ -1219,6 +1281,7 @@ struct ReaderView: View {
         case .togglePurification:
             isShowingReplaceRules = true
         case .contentSearch:
+            paragraphMenuText = ""
             isShowingContentSearch = true
         }
     }
@@ -1782,17 +1845,102 @@ struct ReaderView: View {
                     isReadAloudSpeaking && chunk.paragraphIndex == readAloudCurrentParagraphIndex
                         ? Color.accentColor.opacity(0.15) : Color.clear
                 )
-                // Real usage feedback pointed at a reference app whose long-press-to-select popup
-                // has custom 净化/全文搜索/百科/网络搜索 buttons instead of the plain system Copy
-                // menu. That specific customization needs UIKit (SwiftUI has no documented hook to
-                // inject items into `.textSelection`'s own menu), and doing that would mean routing
-                // a `UITextView` through this exact rendering path. Adding real selection at all
-                // (there was previously no way to copy text out of this reader) without that riskier
-                // rewrite is the safer increment; the custom menu is deferred.
-                .textSelection(.enabled)
+                // Real usage feedback pointed at a reference app whose long-press popup has custom
+                // 净化/全文搜索/百科/网络搜索 buttons instead of the plain system Copy/Look Up/Share
+                // menu `.textSelection(.enabled)` used to show here. Getting arbitrary drag-selected
+                // *substrings* the way Legado's own selection handles do would need a `UITextView`
+                // bridge (`.textSelection` has no hook to inject custom items, and SwiftUI `Text` has
+                // no selection-change callback at all) -- routing one through this exact rendering
+                // path risks real interference with `scrollModeBody`'s `DragGesture(minimumDistance:
+                // 0, ...)`, which needs to win every touch from pixel zero to tell a tap from a page-
+                // turn drag; a competing UIKit gesture recognizer sitting underneath it is a genuine,
+                // unverifiable-without-a-device risk to the one interaction this reader has had the
+                // most real bugs in. `.contextMenu` sidesteps that entirely -- it's SwiftUI's own
+                // long-press-to-menu primitive (not a raw UIKit recognizer bolted on), designed to
+                // coexist with other gestures on the same view tree, so the worst case is a slightly
+                // less responsive long-press, never a broken page-turn. Scoped to whichever whole
+                // paragraph was pressed rather than an arbitrary substring (a real, honest difference
+                // from Legado's drag-handle selection, not a fake stand-in for it) -- each action
+                // below reuses an already-existing feature (`DictLookupView`/`WebSearchPanelView`/
+                // `ChapterContentSearchView`'s `initial*` params were literally built for and left
+                // unwired for exactly this hookup, see their own doc comments) rather than
+                // introducing new ones.
+                .contextMenu {
+                    paragraphContextMenuItems(chunk)
+                }
             }
         }
         .padding(.vertical, 8)
+    }
+
+    /// The custom long-press menu's actual items -- see `pageBlock`'s `.contextMenu` doc comment for
+    /// why this exists instead of `.textSelection`'s system menu. Every action operates on
+    /// `chunk.text` (the whole pressed paragraph, this reader's unit of selection).
+    @ViewBuilder
+    private func paragraphContextMenuItems(_ chunk: ChapterPageLayout.Chunk) -> some View {
+        Button {
+            UIPasteboard.general.string = chunk.text
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+        Button {
+            paragraphMenuText = chunk.text
+            isShowingParagraphShareSheet = true
+        } label: {
+            Label("分享", systemImage: "square.and.arrow.up")
+        }
+        Button {
+            beginReadAloud(startIndex: chunk.paragraphIndex)
+        } label: {
+            Label("朗读，从这里开始", systemImage: "waveform")
+        }
+        Button {
+            addBookmark(forParagraph: chunk)
+        } label: {
+            Label("添加书签", systemImage: "bookmark")
+        }
+        Button {
+            paragraphMenuText = chunk.text
+            isShowingDictLookup = true
+        } label: {
+            Label("查词典", systemImage: "character.book.closed")
+        }
+        Button {
+            paragraphMenuText = chunk.text
+            isShowingContentSearch = true
+        } label: {
+            Label("搜索本书", systemImage: "magnifyingglass")
+        }
+        Button {
+            paragraphMenuText = chunk.text
+            isShowingWebSearch = true
+        } label: {
+            Label("网络搜索", systemImage: "globe")
+        }
+        Button {
+            paragraphMenuText = chunk.text
+            isShowingReplaceRuleSeed = true
+        } label: {
+            Label("新建净化规则", systemImage: "wand.and.stars")
+        }
+    }
+
+    /// Always adds a fresh bookmark (matching Legado's `menu_bookmark` -- "书签" on the long-press
+    /// menu creates one, it isn't a toggle the way the toolbar's 书签 button is) at the pressed
+    /// paragraph's exact character offset, independent of whichever page/paragraph is actually
+    /// current -- `pageLayout` is captured here (not `currentPageIndexInChapter`) precisely because
+    /// the long-pressed paragraph might not be the page's first one.
+    private func addBookmark(forParagraph chunk: ChapterPageLayout.Chunk) {
+        let offset = pageLayout?.characterOffset(forParagraphIndex: chunk.paragraphIndex)
+        let bookmark = Bookmark(
+            isLocal: false, bookSourceUrl: source.bookSourceUrl, bookIdentifier: bookUrl,
+            tocUrl: tocUrl, bookTitle: bookTitle, chapterIndex: chapter.index, chapterTitle: chapter.title,
+            characterOffset: offset
+        )
+        Task {
+            try? await env.bookmarkStore.add(bookmark)
+            isCurrentChapterBookmarked = true
+        }
     }
 
     private func load() async {
