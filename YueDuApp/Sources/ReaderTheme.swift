@@ -271,6 +271,72 @@ enum ReaderSettingsKey {
     /// `UIInterfaceOrientationMask`, and `OrientationLock`/`AppDelegate.swift` for how it's actually
     /// enforced (Info.plist alone can't do per-screen locking, only a global allowed set).
     static let screenOrientationLock = "reader.screenOrientationLock"
+    /// Stores a `LocalImportCharset` raw value -- see that enum's doc comment for why this is a
+    /// global default rather than Legado's own per-book `Book.charset` (re-editable any time).
+    static let localImportCharset = "reader.localImportCharset"
+    /// Stores a `ProgressBarBehavior` raw value -- see that enum's doc comment. Matches Legado's own
+    /// `AppConfig.progressBarBehavior` ("page"/"chapter") default of "page".
+    static let progressBarBehavior = "reader.progressBarBehavior"
+}
+
+/// What dragging the reader's bottom progress seekbar does -- confirmed against Legado_Max's own
+/// `AppConfig.progressBarBehavior`: `.page` (the existing, default behavior) jumps within the
+/// current chapter's pages, released immediately with no confirmation. `.chapter` repurposes the
+/// same seekbar to jump across the *whole book's* chapters instead -- a much bigger, harder-to-undo
+/// jump, which is why `ReadMenu.kt`'s "chapter" branch shows a one-time-per-session confirmation
+/// alert before actually committing (see `ReaderView.requestChapterJump`).
+enum ProgressBarBehavior: String, CaseIterable, Identifiable, Codable {
+    case page, chapter
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .page: return "页内跳转"
+        case .chapter: return "章节跳转"
+        }
+    }
+}
+
+/// Confirmed against Legado_Max's own `BaseReadBookActivity.showCharsetConfig()`/`ReadBook.
+/// setCharset` -- real .txt files from Chinese novel sites are frequently GBK/GB18030, not UTF-8,
+/// and `CharsetDetector.decodeAutodetectingBytes`'s heuristic (try strict UTF-8, then GB18030) can
+/// still guess wrong for a genuinely ambiguous file. Deliberately a *global default* applied at
+/// import time, not Legado's per-book `charset` field re-editable after the fact: `LocalBook` only
+/// ever stores the already-decoded, already-chapter-split text (see `LocalBookListView.handleImport`)
+/// -- unlike Legado, which keeps the original file path and can freely re-decode raw bytes on
+/// demand, this app deliberately does *not* hold onto a security-scoped file reference past import
+/// (those are fragile across app relaunches/file moves/offline iCloud files), so there are no raw
+/// bytes left to re-decode once a book exists. A wrongly-imported book's real fix is re-importing
+/// with the right charset picked here -- less convenient than Legado's "edit and it just re-decodes,"
+/// but honest about what this app's storage model can actually support.
+enum LocalImportCharset: String, CaseIterable, Identifiable, Codable {
+    case auto, utf8, gbk, gb18030, big5
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto: return "自动检测"
+        case .utf8: return "UTF-8"
+        case .gbk: return "GBK"
+        case .gb18030: return "GB18030"
+        case .big5: return "Big5"
+        }
+    }
+
+    /// `nil` for `.auto` -- callers branch to `CharsetDetector.decodeAutodetectingBytes` instead of
+    /// calling `decode(_:charset:)` at all in that case. Everything else is handed straight to
+    /// `CharsetDetector.decode(_:charset:)`, which already normalizes case/hyphens/underscores.
+    var charsetIdentifier: String? {
+        switch self {
+        case .auto: return nil
+        case .utf8: return "utf8"
+        case .gbk: return "gbk"
+        case .gb18030: return "gb18030"
+        case .big5: return "big5"
+        }
+    }
 }
 
 /// Confirmed against Legado_Max's own `AppConfig.screenOrientation`

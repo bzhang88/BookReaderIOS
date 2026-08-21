@@ -17,6 +17,7 @@ struct LocalBookListView: View {
     @State private var exportURL: URL?
     @State private var isShowingExportSheet = false
     @State private var exportTarget: LocalBook?
+    @AppStorage(ReaderSettingsKey.localImportCharset) private var localImportCharset: LocalImportCharset = .auto
 
     var body: some View {
         List {
@@ -72,6 +73,21 @@ struct LocalBookListView: View {
                     WebDAVBookImportView()
                 } label: {
                     Label("WebDAV 导入", systemImage: "externaldrive")
+                }
+            }
+            // Confirmed against Legado_Max's own per-book 编码 setting -- this app's storage model
+            // can only apply a charset choice *at* import time (see `LocalImportCharset`'s doc
+            // comment for why), so the control lives right next to the import buttons rather than
+            // in a separate settings screen, to stay discoverable exactly where it matters.
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("导入编码", selection: $localImportCharset) {
+                        ForEach(LocalImportCharset.allCases) { charset in
+                            Text(charset.displayName).tag(charset)
+                        }
+                    }
+                } label: {
+                    Label("导入编码: \(localImportCharset.displayName)", systemImage: "textformat")
                 }
             }
         }
@@ -139,7 +155,9 @@ struct LocalBookListView: View {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: url)
-            let text = CharsetDetector.decodeAutodetectingBytes(data)
+            let text = localImportCharset == .auto
+                ? CharsetDetector.decodeAutodetectingBytes(data)
+                : CharsetDetector.decode(data, charset: localImportCharset.charsetIdentifier)
             let title = url.deletingPathExtension().lastPathComponent
             let patterns = ((try? await env.txtSplitRuleStore.enabled()) ?? []).map(\.pattern)
             let split = TxtChapterSplitter.splitTryingRules(text, rules: patterns, fallbackTitle: title)

@@ -95,6 +95,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
     @AppStorage(ReaderSettingsKey.backwardPrefetchChapterCount) private var backwardPrefetchChapterCount: Int = 1
     @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
+    @AppStorage(ReaderSettingsKey.progressBarBehavior) private var progressBarBehavior: ProgressBarBehavior = .page
     // Shared between `prefetchUpcomingChapters`/`prefetchPreviousChapters` so together they never
     // have more than 2 chapter fetches in flight -- see `PrefetchLimiter`'s doc comment. `@State`
     // (not a plain `let`) because a SwiftUI View struct's stored properties are recreated on every
@@ -112,6 +113,12 @@ struct ReaderView: View {
     // movement; cleared (reverting to tracking `pagedPageProgress` again) once the drag ends and
     // `pageJumpRequest` has been sent.
     @State private var pageSeekDragValue: Double?
+    // Same idea as `pageSeekDragValue`, for `.chapter` progress-bar mode's seekbar.
+    @State private var chapterSeekDragValue: Double?
+    // `ReadMenu.kt`'s `confirmSkipToChapter` -- Legado only asks "确定要跳转章节吗？" once per reading
+    // session (this reader instance's lifetime), not on every single chapter-jump drag.
+    @State private var hasConfirmedChapterJumpThisSession = false
+    @State private var pendingChapterJumpIndex: Int?
     @State private var isAutoPaging = false
     @State private var autoPageTask: Task<Void, Never>?
     // Re-evaluated every minute so a schedule-only filter actually turns on/off while the reader
@@ -315,6 +322,30 @@ struct ReaderView: View {
         )
     }
 
+    /// Drives the `.chapter` progress-bar mode's seekbar -- same live-drag-position pattern as
+    /// `pageSeekBinding`, just tracking `currentIndex` (whole book) instead of `pagedPageProgress`
+    /// (one chapter).
+    private var chapterSeekBinding: Binding<Double> {
+        Binding(
+            get: { chapterSeekDragValue ?? Double(currentIndex) },
+            set: { chapterSeekDragValue = $0 }
+        )
+    }
+
+    /// Matches Legado's real "chapter" progress-bar mode (`ReadMenu.kt`'s `onStopTrackingTouch`):
+    /// a chapter jump is a much bigger, harder-to-undo action than a within-chapter page jump, so
+    /// the *first* one in a reading session asks for confirmation; once confirmed,
+    /// `hasConfirmedChapterJumpThisSession` skips the prompt for the rest of this reader instance's
+    /// lifetime, exactly like Legado's own `confirmSkipToChapter` flag.
+    private func requestChapterJump(to index: Int) {
+        guard chapters.indices.contains(index), index != currentIndex else { return }
+        if hasConfirmedChapterJumpThisSession {
+            goTo(index)
+        } else {
+            pendingChapterJumpIndex = index
+        }
+    }
+
     var body: some View {
         Group {
             if pageTurnStyle.isPaginated {
@@ -432,12 +463,14 @@ struct ReaderView: View {
                     }
 
                     // Chapter-progress row -- prev/next chapter text flanking a real draggable
-                    // seekbar in paginated mode, matching the reference app's own prominent
-                    // progress bar in this exact position (jumps immediately on release, no
-                    // confirmation). `.scroll` mode tracks a real page position too now
-                    // (`currentPageIndexInChapter`), but wiring a seekbar to it (jump-to-page without
-                    // a smooth scroll through what's skipped) is a separate feature, not something
-                    // this fix touches -- it stays as text-only progress for that mode for now.
+                    // seekbar, matching the reference app's own prominent progress bar in this exact
+                    // position. Which of the two `ProgressBarBehavior` modes actually gets a working
+                    // slider here depends on `pageTurnStyle`: `.page` mode's slider needs
+                    // `pagedPageProgress` (only paginated styles produce that -- `.scroll` mode
+                    // tracks a real page position too via `currentPageIndexInChapter`, but wiring a
+                    // seekbar to it, jump-to-page without a smooth scroll through what's skipped, is
+                    // a separate feature this doesn't attempt); `.chapter` mode only needs
+                    // `chapters.count`, so it works in both page-turn styles.
                     HStack(spacing: 4) {
                         // `.padding` + `.contentShape(Rectangle())` so the tappable area is a real
                         // ~44pt-tall button, not just the tiny `.caption`-sized text glyphs -- same
@@ -449,7 +482,20 @@ struct ReaderView: View {
                             .contentShape(Rectangle())
                             .disabled(currentIndex <= 0)
 
-                        if pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
+                        if progressBarBehavior == .chapter, chapters.count > 1 {
+                            // Matches Legado's real "chapter" mode: jumps only commit on release
+                            // (`requestChapterJump`), gated behind a one-time-per-session
+                            // confirmation -- see that function's doc comment.
+                            Slider(
+                                value: chapterSeekBinding, in: 0...Double(chapters.count - 1), step: 1,
+                                onEditingChanged: { isEditing in
+                                    if !isEditing {
+                                        if let chapterSeekDragValue { requestChapterJump(to: Int(chapterSeekDragValue)) }
+                                        chapterSeekDragValue = nil
+                                    }
+                                }
+                            )
+                        } else if progressBarBehavior == .page, pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
                             Slider(
                                 value: pageSeekBinding, in: 0...Double(pagedPageProgress.total - 1), step: 1,
                                 onEditingChanged: { isEditing in
@@ -748,6 +794,20 @@ struct ReaderView: View {
         }
         .sheet(isPresented: $isShowingWebSearch) {
             WebSearchPanelView()
+        }
+        .alert(
+            "章节跳转确认", isPresented: Binding(get: { pendingChapterJumpIndex != nil }, set: { if !$0 { pendingChapterJumpIndex = nil } })
+        ) {
+            Button("取消", role: .cancel) { pendingChapterJumpIndex = nil }
+            Button("确定") {
+                if let index = pendingChapterJumpIndex {
+                    hasConfirmedChapterJumpThisSession = true
+                    goTo(index)
+                }
+                pendingChapterJumpIndex = nil
+            }
+        } message: {
+            Text("确定要跳转章节吗？")
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn

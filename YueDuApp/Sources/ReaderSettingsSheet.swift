@@ -111,6 +111,7 @@ struct ReaderMoreSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
     @AppStorage(ReaderSettingsKey.backwardPrefetchChapterCount) private var backwardPrefetchChapterCount: Int = 1
     @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
+    @AppStorage(ReaderSettingsKey.progressBarBehavior) private var progressBarBehavior: ProgressBarBehavior = .page
 
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
@@ -220,6 +221,16 @@ struct ReaderMoreSettingsSheet: View {
                     }
                 } footer: {
                     Text("仅在阅读界面生效，退出阅读后恢复跟随系统。")
+                }
+
+                Section {
+                    Picker("进度条拖动", selection: $progressBarBehavior) {
+                        ForEach(ProgressBarBehavior.allCases) { behavior in
+                            Text(behavior.displayName).tag(behavior)
+                        }
+                    }
+                } footer: {
+                    Text("章节跳转：拖动进度条直接跳到本书的任意一章，松手前会先确认一次（每次进入阅读界面只确认一次）。")
                 }
             }
             .navigationTitle("设置")

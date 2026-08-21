@@ -62,11 +62,16 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
     @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
+    @AppStorage(ReaderSettingsKey.progressBarBehavior) private var progressBarBehavior: ProgressBarBehavior = .page
     @State private var pageAnchor: PageAnchor = .first
     @State private var pageTurnRequest: PageTurnRequest?
     @State private var pageJumpRequest: Int?
     @State private var pagedPageProgress: (current: Int, total: Int)?
     @State private var pageSeekDragValue: Double?
+    // See `ReaderView`'s matching properties for the full reasoning (`.chapter` progress-bar mode).
+    @State private var chapterSeekDragValue: Double?
+    @State private var hasConfirmedChapterJumpThisSession = false
+    @State private var pendingChapterJumpIndex: Int?
     @State private var scheduleTick = Date()
     private let scheduleTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     /// See `ReaderView`'s matching properties for the full reasoning -- same real-usage-feedback fix
@@ -180,6 +185,23 @@ struct LocalReaderView: View {
         )
     }
 
+    private var chapterSeekBinding: Binding<Double> {
+        Binding(
+            get: { chapterSeekDragValue ?? Double(currentIndex) },
+            set: { chapterSeekDragValue = $0 }
+        )
+    }
+
+    /// See `ReaderView.requestChapterJump`'s doc comment.
+    private func requestChapterJump(to index: Int) {
+        guard book.chapters.indices.contains(index), index != currentIndex else { return }
+        if hasConfirmedChapterJumpThisSession {
+            goTo(index)
+        } else {
+            pendingChapterJumpIndex = index
+        }
+    }
+
     var body: some View {
         ScrollViewReader { scrollProxy in
         Group {
@@ -278,7 +300,17 @@ struct LocalReaderView: View {
                         .contentShape(Rectangle())
                         .disabled(currentIndex <= 0)
 
-                    if pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
+                    if progressBarBehavior == .chapter, book.chapters.count > 1 {
+                        Slider(
+                            value: chapterSeekBinding, in: 0...Double(book.chapters.count - 1), step: 1,
+                            onEditingChanged: { isEditing in
+                                if !isEditing {
+                                    if let chapterSeekDragValue { requestChapterJump(to: Int(chapterSeekDragValue)) }
+                                    chapterSeekDragValue = nil
+                                }
+                            }
+                        )
+                    } else if progressBarBehavior == .page, pageTurnStyle.isPaginated, let pagedPageProgress, pagedPageProgress.total > 1 {
                         Slider(
                             value: pageSeekBinding, in: 0...Double(pagedPageProgress.total - 1), step: 1,
                             onEditingChanged: { isEditing in
@@ -418,6 +450,20 @@ struct LocalReaderView: View {
         }
         .sheet(isPresented: $isShowingWebSearch) {
             WebSearchPanelView()
+        }
+        .alert(
+            "章节跳转确认", isPresented: Binding(get: { pendingChapterJumpIndex != nil }, set: { if !$0 { pendingChapterJumpIndex = nil } })
+        ) {
+            Button("取消", role: .cancel) { pendingChapterJumpIndex = nil }
+            Button("确定") {
+                if let index = pendingChapterJumpIndex {
+                    hasConfirmedChapterJumpThisSession = true
+                    goTo(index)
+                }
+                pendingChapterJumpIndex = nil
+            }
+        } message: {
+            Text("确定要跳转章节吗？")
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
@@ -737,6 +783,7 @@ struct LocalReaderMoreSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
     @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
+    @AppStorage(ReaderSettingsKey.progressBarBehavior) private var progressBarBehavior: ProgressBarBehavior = .page
 
     @Environment(\.dismiss) private var dismiss
 
@@ -786,6 +833,16 @@ struct LocalReaderMoreSettingsSheet: View {
                     }
                 } footer: {
                     Text("仅在阅读界面生效，退出阅读后恢复跟随系统。")
+                }
+
+                Section {
+                    Picker("进度条拖动", selection: $progressBarBehavior) {
+                        ForEach(ProgressBarBehavior.allCases) { behavior in
+                            Text(behavior.displayName).tag(behavior)
+                        }
+                    }
+                } footer: {
+                    Text("章节跳转：拖动进度条直接跳到本书的任意一章，松手前会先确认一次（每次进入阅读界面只确认一次）。")
                 }
             }
             .navigationTitle("设置")
