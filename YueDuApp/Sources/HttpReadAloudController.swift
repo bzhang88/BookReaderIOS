@@ -19,6 +19,9 @@ final class HttpReadAloudController: NSObject, ObservableObject {
     @Published private(set) var currentParagraphIndex = 0
     @Published private(set) var errorMessage: String?
 
+    /// Same contract as `ReadAloudController.onReachedEnd` -- see its doc comment.
+    var onReachedEnd: (() -> Void)?
+
     // Set fresh on every `start()` rather than injected at construction -- this controller is a
     // plain `@StateObject` in `ReaderView`, constructed in a context (a property initializer) that
     // has no access to `@EnvironmentObject`-provided dependencies like `AppEnvironment.httpTTSCache`.
@@ -142,6 +145,8 @@ final class HttpReadAloudController: NSObject, ObservableObject {
         if currentParagraphIndex < paragraphs.count - 1 {
             currentParagraphIndex += 1
             speakCurrentParagraph()
+        } else if let onReachedEnd {
+            onReachedEnd()
         } else {
             stop()
         }

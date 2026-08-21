@@ -206,6 +206,15 @@ struct ReaderView: View {
     /// run at all. This flag is consumed synchronously, in `.onChange(of: currentIndex)` itself, so
     /// it can never be stale by the time the *next* `currentIndex` change reads it.
     @State private var isSeamlessChapterTransition = false
+    /// Set right before `advanceReadAloudToNextChapter` commits a chapter change on read-aloud's own
+    /// behalf -- `.onChange(of: currentIndex)` normally stops read-aloud on *any* chapter change
+    /// (manual navigation while listening would desync speech from what's on screen, since a
+    /// controller's `paragraphs` array is a snapshot taken at `start()`, not dynamically linked to
+    /// `text`), but that exact same chapter change is what read-aloud crossing into the next chapter
+    /// *is* here -- stopping it would undo the continuation `advanceReadAloudToNextChapter` just
+    /// started. Consumed synchronously in `.onChange(of: currentIndex)`, same pattern as
+    /// `isSeamlessChapterTransition`.
+    @State private var isReadAloudAdvancing = false
 
     @AppStorage(ReaderSettingsKey.pageMarginTop) private var pageMarginTop: Double = 16
     @AppStorage(ReaderSettingsKey.pageMarginBottom) private var pageMarginBottom: Double = 16
@@ -703,6 +712,13 @@ struct ReaderView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             startVolumeButtonPagingIfEnabled()
+            // Confirmed against Legado_Max's own `BaseReadAloudService.nextChapter()` that real
+            // read-aloud crosses chapter boundaries automatically -- see `advanceReadAloudToNextChapter`
+            // and `ReadAloudController.onReachedEnd`'s own doc comments for the full picture.
+            // Reassigning on every `.onAppear` is harmless (idempotent); simplest place to wire this
+            // up given these are `@StateObject`s constructed before `self` exists to close over.
+            readAloud.onReachedEnd = { advanceReadAloudToNextChapter() }
+            httpReadAloud.onReachedEnd = { advanceReadAloudToNextChapter() }
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -742,12 +758,34 @@ struct ReaderView: View {
             // starting with the next paragraph, not a jarring restart of the current one.
             readAloud.setRate(Float(newValue))
         }
+        // `.scroll` mode's own equivalent of `PagedChapterReaderView`'s `.onChange(of:
+        // readAloudParagraphIndex)` (which already does exactly this for its own 4 paginated styles)
+        // -- confirmed against Legado_Max's `ReadBookActivity.applyReadAloudProgress` that real
+        // read-aloud drives the visible page/scroll position to follow along as it speaks, not just
+        // highlight whatever already happens to be on screen. Without this, `pageBlock`'s highlight
+        // (`readAloudCurrentParagraphIndex`) would silently scroll off-screen the moment speech moved
+        // past whatever page was showing when playback started, with nothing bringing it back.
+        .onChange(of: readAloudCurrentParagraphIndex) { _, newValue in
+            guard isReadAloudSpeaking, !pageTurnStyle.isPaginated, let pageLayout else { return }
+            let targetPage = pageLayout.pageIndex(forParagraphIndex: newValue)
+            guard pageLayout.pages.indices.contains(targetPage), targetPage != currentPageIndexInChapter else { return }
+            currentPageIndexInChapter = targetPage
+            dragOffset = 0
+            saveReadingProgress()
+        }
         .onChange(of: currentIndex) { _, _ in
-            // Chapter navigation (prev/next buttons, or a lock-screen "next track" tap while at the
-            // chapter's last paragraph in a future increment) invalidates whatever was being read
-            // from the old chapter's text -- stopping is simpler and safer than trying to carry
-            // read-aloud state across a chapter reload for this first version.
-            stopReadAloud()
+            // Chapter navigation invalidates whatever was being read from the old chapter's text --
+            // a controller's `paragraphs` array is a snapshot taken at `start()`, not dynamically
+            // linked to `text`, so continuing to speak it after `text` moved on to a different
+            // chapter would desync speech from what's on screen. `isReadAloudAdvancing` is the one
+            // exception: that flag means read-aloud itself is *why* `currentIndex` just changed
+            // (`advanceReadAloudToNextChapter` already started the next chapter's speech), so
+            // stopping here would immediately undo the continuation it just began.
+            if isReadAloudAdvancing {
+                isReadAloudAdvancing = false
+            } else {
+                stopReadAloud()
+            }
             // Same reasoning as read-aloud: an auto-scroll loop mid-flight is walking pages that
             // belonged to the chapter that just got replaced, so it has to stop too rather than
             // silently continuing to scroll a chapter that no longer matches its state.
@@ -877,6 +915,43 @@ struct ReaderView: View {
     private func stopReadAloud() {
         readAloud.stop()
         httpReadAloud.stop()
+    }
+
+    /// Wired to `readAloud.onReachedEnd`/`httpReadAloud.onReachedEnd` in `.onAppear` -- fires when
+    /// speech naturally runs out of the current chapter's paragraphs. Confirmed against Legado_Max's
+    /// own `BaseReadAloudService.nextChapter()` that real read-aloud crosses chapter boundaries
+    /// automatically instead of stopping at every one; without this, hands-free listening across a
+    /// multi-chapter session meant manually restarting playback after every single chapter.
+    ///
+    /// Reuses `nextChapterPreview` exactly like `goToNextChapter`'s seamless path, but -- unlike that
+    /// one -- doesn't require `pageLayout` to already be populated: starting the next chapter's
+    /// speech only needs its raw purified `text` (which `loadNextChapterPreview` always fetches
+    /// regardless of `pageTurnStyle`), not scroll-mode pagination, so this works the same way in
+    /// paginated styles too. `isReadAloudAdvancing` (see its own doc comment) stops
+    /// `.onChange(of: currentIndex)` from immediately undoing this by stopping the speech it just
+    /// started.
+    private func advanceReadAloudToNextChapter() {
+        guard let preview = nextChapterPreview else {
+            // Nothing prefetched yet -- either this is genuinely the last chapter, or prefetch
+            // hasn't landed. Either way, the controller deliberately doesn't call `stop()` itself
+            // once `onReachedEnd` is set (see its own doc comment), so this has to.
+            stopReadAloud()
+            return
+        }
+        isReadAloudAdvancing = true
+        let wasUsingHttpTTS = isUsingHttpTTS
+        let httpEngine = httpTTSEngines.first(where: { $0.id == selectedHttpTTSEngineID })
+        commitToNextChapterPreview(preview, arrivingAtPageIndex: 0)
+        let newParagraphs = preview.text.components(separatedBy: "\n")
+        if wasUsingHttpTTS, let httpEngine {
+            httpReadAloud.start(
+                paragraphs: newParagraphs, engine: httpEngine, cache: env.httpTTSCache,
+                bookTitle: bookTitle, chapterTitle: preview.title
+            )
+        } else {
+            readAloud.setRate(Float(readAloudRate))
+            readAloud.start(paragraphs: newParagraphs, bookTitle: bookTitle, chapterTitle: preview.title)
+        }
     }
 
     private func toggleReadAloudPause() {

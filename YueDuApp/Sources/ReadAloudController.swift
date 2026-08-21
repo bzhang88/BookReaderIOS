@@ -2,15 +2,25 @@ import Foundation
 import AVFoundation
 import MediaPlayer
 
-/// Wraps `AVSpeechSynthesizer` for paragraph-by-paragraph read-aloud within the *current* chapter
-/// -- cross-chapter auto-continue is a later increment, not this one, to keep the first version
-/// well-scoped: this only has to get single-chapter playback, pause/resume, and lock-screen
-/// transport controls right.
+/// Wraps `AVSpeechSynthesizer` for paragraph-by-paragraph read-aloud, one chapter's worth of
+/// `paragraphs` at a time -- crossing into the next chapter is the *owner's* job (see
+/// `onReachedEnd`), not something this controller knows how to do itself, since it has no concept
+/// of "the book" beyond whatever flat paragraph array it was last given.
 @MainActor
 final class ReadAloudController: NSObject, ObservableObject {
     @Published private(set) var isSpeaking = false
     @Published private(set) var isPaused = false
     @Published private(set) var currentParagraphIndex = 0
+
+    /// Called when speech naturally runs out of `paragraphs` (not when explicitly stopped via
+    /// `stop()`/pausing) -- confirmed against Legado_Max's own `BaseReadAloudService.nextP()`/
+    /// `nextChapter()` that real read-aloud continues across chapter boundaries automatically
+    /// rather than stopping at every one. The *owner* decides what "continuing" means (usually:
+    /// call `start(paragraphs:...)` again with the next chapter's text) and is responsible for
+    /// calling `stop()` itself if it can't continue (e.g. this was the last chapter) -- this
+    /// controller doesn't call `stop()` on its own once a handler is set, so a continuing owner
+    /// never pays for a stop-then-immediately-restart audio session blip.
+    var onReachedEnd: (() -> Void)?
 
     private let synthesizer = AVSpeechSynthesizer()
     private var paragraphs: [String] = []
@@ -97,6 +107,8 @@ final class ReadAloudController: NSObject, ObservableObject {
         if currentParagraphIndex < paragraphs.count - 1 {
             currentParagraphIndex += 1
             speakCurrentParagraph()
+        } else if let onReachedEnd {
+            onReachedEnd()
         } else {
             stop()
         }
