@@ -2,6 +2,10 @@ import SwiftUI
 
 @main
 struct YueDuApp: App {
+    // See `AppDelegate`'s doc comment -- exists solely so `OrientationLock`-driven per-reader
+    // orientation locking (`ReaderOrientationLock`) has somewhere to hook into UIKit's orientation
+    // query.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var environment = AppEnvironment()
     @AppStorage(ReaderSettingsKey.appFontScale) private var appFontScale: AppFontScale = .standard
     @AppStorage(ReaderSettingsKey.appAppearanceMode) private var appAppearanceMode: AppAppearanceMode = .system

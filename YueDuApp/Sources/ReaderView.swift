@@ -94,6 +94,7 @@ struct ReaderView: View {
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
     @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
     @AppStorage(ReaderSettingsKey.backwardPrefetchChapterCount) private var backwardPrefetchChapterCount: Int = 1
+    @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
     // Shared between `prefetchUpcomingChapters`/`prefetchPreviousChapters` so together they never
     // have more than 2 chapter fetches in flight -- see `PrefetchLimiter`'s doc comment. `@State`
     // (not a plain `let`) because a SwiftUI View struct's stored properties are recreated on every
@@ -758,6 +759,8 @@ struct ReaderView: View {
             // up given these are `@StateObject`s constructed before `self` exists to close over.
             readAloud.onReachedEnd = { advanceReadAloudToNextChapter() }
             httpReadAloud.onReachedEnd = { advanceReadAloudToNextChapter() }
+            OrientationLock.mask = screenOrientationLock.mask
+            OrientationLock.applyToActiveScene()
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -768,6 +771,15 @@ struct ReaderView: View {
             pendingPageStepTask?.cancel()
             pendingPageStepTask = nil
             saveReadingProgress()
+            // Matches Legado_Max's `BaseReadBookActivity` only ever calling `setOrientation()` on
+            // itself -- leaving the reader hands orientation control back to whatever the rest of the
+            // app (书架/发现/我的) uses, rather than the lock leaking into every other screen.
+            OrientationLock.mask = .allButUpsideDown
+            OrientationLock.applyToActiveScene()
+        }
+        .onChange(of: screenOrientationLock) { _, newValue in
+            OrientationLock.mask = newValue.mask
+            OrientationLock.applyToActiveScene()
         }
         // `.onDisappear` alone only covers leaving the reader *within* the app (back button, TOC nav,
         // etc.) -- it never fires for backgrounding the app itself (home button/app switch/incoming

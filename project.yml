@@ -64,6 +64,18 @@ targets:
           - CFBundleURLSchemes:
               - legado
             CFBundleURLName: com.bzhang88.yuedu
+        # Declares the outer envelope of orientations the app is allowed to use at all -- without
+        # this key present, iOS's actual default behavior for a plain SwiftUI app is portrait-only,
+        # which would silently cap `ReaderOrientationLock`'s 横屏/自动旋转/反向横屏 options at
+        # "can never actually rotate no matter what AppDelegate returns." The reader's own per-screen
+        # lock (`OrientationLock`, enforced via `AppDelegate.application(_:
+        # supportedInterfaceOrientationsFor:)`) narrows *within* this set at runtime; this list is
+        # just the ceiling.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bzhang88.yuedu

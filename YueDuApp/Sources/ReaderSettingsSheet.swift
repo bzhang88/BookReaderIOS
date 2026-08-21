@@ -110,6 +110,7 @@ struct ReaderMoreSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
     @AppStorage(ReaderSettingsKey.prefetchChapterCount) private var prefetchChapterCount: Int = 1
     @AppStorage(ReaderSettingsKey.backwardPrefetchChapterCount) private var backwardPrefetchChapterCount: Int = 1
+    @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
 
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
@@ -209,6 +210,16 @@ struct ReaderMoreSettingsSheet: View {
                     Text("其他")
                 } footer: {
                     Text("提前在后台下载前后几章的正文，翻章时可以直接秒开，不用等网络。设为 0 关闭对应方向。")
+                }
+
+                Section {
+                    Picker("屏幕方向", selection: $screenOrientationLock) {
+                        ForEach(ReaderOrientationLock.allCases) { lock in
+                            Text(lock.displayName).tag(lock)
+                        }
+                    }
+                } footer: {
+                    Text("仅在阅读界面生效，退出阅读后恢复跟随系统。")
                 }
             }
             .navigationTitle("设置")

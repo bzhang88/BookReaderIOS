@@ -267,6 +267,69 @@ enum ReaderSettingsKey {
     /// book source's own optional `replaceRegex` rule happened to add it (see `ContentService
     /// .applyReplaceRegex`'s doc comment), so most books had no indent at all.
     static let paragraphIndent = "reader.paragraphIndent"
+    /// Stores a `ReaderOrientationLock` raw value -- see that enum's doc comment for the mapping to
+    /// `UIInterfaceOrientationMask`, and `OrientationLock`/`AppDelegate.swift` for how it's actually
+    /// enforced (Info.plist alone can't do per-screen locking, only a global allowed set).
+    static let screenOrientationLock = "reader.screenOrientationLock"
+}
+
+/// Confirmed against Legado_Max's own `AppConfig.screenOrientation`
+/// (`BaseReadBookActivity.setOrientation`, `ReadConstants`-adjacent) -- a per-reader-session
+/// orientation lock, independent of whatever orientation the rest of the app (书架/发现/我的) uses.
+/// Only takes effect while a reader screen is on-screen: `ReaderView`/`LocalReaderView` write
+/// `OrientationLock.mask` on `.onAppear` and reset it back to `.allButUpsideDown` on `.onDisappear`,
+/// exactly like `BaseReadBookActivity` only calls `setOrientation()` for itself, not app-wide.
+enum ReaderOrientationLock: String, CaseIterable, Identifiable, Codable {
+    case followSystem, portrait, landscape, autoRotate, portraitUpsideDown, landscapeReverse
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .followSystem: return "跟随系统"
+        case .portrait: return "竖屏"
+        case .landscape: return "横屏"
+        case .autoRotate: return "自动旋转"
+        case .portraitUpsideDown: return "反向竖屏"
+        case .landscapeReverse: return "反向横屏"
+        }
+    }
+
+    /// iOS has no literal "unspecified" orientation the way Android's `SCREEN_ORIENTATION_UNSPECIFIED`
+    /// does -- `.allButUpsideDown` (portrait + both landscapes, no upside-down) is the standard iPhone
+    /// default every stock app effectively behaves as, so `.followSystem` maps to that rather than
+    /// `.all`.
+    var mask: UIInterfaceOrientationMask {
+        switch self {
+        case .followSystem: return .allButUpsideDown
+        case .portrait: return .portrait
+        case .landscape: return .landscape
+        case .autoRotate: return .all
+        case .portraitUpsideDown: return .portraitUpsideDown
+        case .landscapeReverse: return .landscapeRight
+        }
+    }
+}
+
+/// The actual enforcement mechanism behind `ReaderOrientationLock`: SwiftUI's `App`/`Scene` has no
+/// API of its own for restricting orientation, so this app needs a minimal `UIApplicationDelegate`
+/// (see `AppDelegate.swift`) whose `application(_:supportedInterfaceOrientationsFor:)` is the one
+/// hook UIKit actually consults. That delegate method can't read `@AppStorage`/SwiftUI state
+/// directly (it's called by UIKit outside any SwiftUI view context), so this plain static var is the
+/// hand-off point: `ReaderView`/`LocalReaderView` write it, the delegate reads it. UIKit only
+/// re-queries `supportedInterfaceOrientationsFor:` on specific triggers (a view controller
+/// presentation, or an explicit `setNeedsUpdateOfSupportedInterfaceOrientations()`/
+/// `requestGeometryUpdate` call) -- it does NOT observe this var changing on its own, so every write
+/// here is paired with `OrientationLock.applyToActiveScene()` to force that re-query immediately.
+enum OrientationLock {
+    static var mask: UIInterfaceOrientationMask = .allButUpsideDown
+
+    @MainActor
+    static func applyToActiveScene() {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        scene.windows.first?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+    }
 }
 
 /// Whether (and which direction) to run chapter text through `ChineseTextConverter` before

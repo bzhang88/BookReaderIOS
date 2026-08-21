@@ -61,6 +61,7 @@ struct LocalReaderView: View {
     @AppStorage(ReaderSettingsKey.customThemeTextHex) private var customThemeTextHex: String = "#0D0D0D"
     @AppStorage(ReaderSettingsKey.pageTurnStyle) private var pageTurnStyle: PageTurnStyle = .scroll
     @AppStorage(ReaderSettingsKey.touchSlop) private var touchSlop: Double = 50
+    @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
     @State private var pageAnchor: PageAnchor = .first
     @State private var pageTurnRequest: PageTurnRequest?
     @State private var pageJumpRequest: Int?
@@ -421,14 +422,22 @@ struct LocalReaderView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             startVolumeButtonPagingIfEnabled(proxy: scrollProxy)
+            OrientationLock.mask = screenOrientationLock.mask
+            OrientationLock.applyToActiveScene()
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             volumeButtonController.stop()
             saveReadingProgress()
+            OrientationLock.mask = .allButUpsideDown
+            OrientationLock.applyToActiveScene()
         }
         .onChange(of: keepScreenOn) { _, newValue in
             UIApplication.shared.isIdleTimerDisabled = newValue
+        }
+        .onChange(of: screenOrientationLock) { _, newValue in
+            OrientationLock.mask = newValue.mask
+            OrientationLock.applyToActiveScene()
         }
         .onChange(of: volumeKeyPageEnabled) { _, isEnabled in
             if isEnabled {
@@ -727,6 +736,7 @@ struct LocalReaderMoreSettingsSheet: View {
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEnabled) private var eyeCareScheduleEnabled: Bool = false
     @AppStorage(ReaderSettingsKey.eyeCareScheduleStartHour) private var eyeCareScheduleStartHour: Int = 20
     @AppStorage(ReaderSettingsKey.eyeCareScheduleEndHour) private var eyeCareScheduleEndHour: Int = 6
+    @AppStorage(ReaderSettingsKey.screenOrientationLock) private var screenOrientationLock: ReaderOrientationLock = .followSystem
 
     @Environment(\.dismiss) private var dismiss
 
@@ -766,6 +776,16 @@ struct LocalReaderMoreSettingsSheet: View {
                 Section("其他") {
                     Toggle("阅读时屏幕常亮", isOn: $keepScreenOn)
                     Toggle("音量键翻页", isOn: $volumeKeyPageEnabled)
+                }
+
+                Section {
+                    Picker("屏幕方向", selection: $screenOrientationLock) {
+                        ForEach(ReaderOrientationLock.allCases) { lock in
+                            Text(lock.displayName).tag(lock)
+                        }
+                    }
+                } footer: {
+                    Text("仅在阅读界面生效，退出阅读后恢复跟随系统。")
                 }
             }
             .navigationTitle("设置")
