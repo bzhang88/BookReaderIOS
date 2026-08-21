@@ -1110,10 +1110,15 @@ struct ReaderView: View {
     /// slide `animatedPageStep` gives a volume-key/tap-zone turn -- this used to be a paragraph-step
     /// approximation scrolling to a raw (and, after the page-based rewrite, nonexistent) `Int`
     /// content id, silently a no-op; real page tracking now makes a real per-page auto-advance
-    /// possible instead. Stops on its own at the chapter's last page rather than rolling into the
-    /// next chapter automatically -- chapter auto-advance is the drag/animated-step machinery's own
-    /// job when the user is actually driving it, and conflating the two here risked skipping the
-    /// user past a chapter boundary while they weren't looking at the screen.
+    /// possible instead. Crosses chapter boundaries automatically (via `animatedPageStep` →
+    /// `commitPageOffset` → `stepToNextPage`'s own existing chapter-crossing) and only stops at the
+    /// genuine end of the book -- confirmed against Legado_Max's own `AutoPager`/`TextPageFactory.
+    /// moveToNext` that real hands-free auto-reading runs unattended straight through chapter
+    /// boundaries, not just within one chapter. This reader used to deliberately stop at each
+    /// chapter's own last page instead, over-cautiously conflating "don't skip the user past a
+    /// boundary mid-drag" (a real concern for the *live-drag* crossing machinery, which is driven by
+    /// the user's own finger) with auto-reading, which has no such risk -- there's no finger to skip
+    /// out from under.
     private func startAutoScroll() {
         autoScrollTask?.cancel()
         isAutoScrolling = true
@@ -1121,13 +1126,25 @@ struct ReaderView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(max(autoScrollInterval, 0.5) * 1_000_000_000))
                 guard !Task.isCancelled else { break }
-                guard let pageLayout, currentPageIndexInChapter < pageLayout.pages.count - 1 else { break }
+                guard canAutoAdvanceFurther() else { break }
                 animatedPageStep(direction: 1)
             }
             if !Task.isCancelled {
                 isAutoScrolling = false
             }
         }
+    }
+
+    /// Whether there's anywhere further for `startAutoScroll` to advance to -- another page left in
+    /// the current chapter, or a next chapter already prefetched and paginated and ready to cross
+    /// into (mirrors `stepToNextPage`'s own two-branch check, without actually committing the step).
+    /// `false` genuinely means "the end of the book" *or* "the next chapter hasn't finished
+    /// prefetching yet" -- the latter is rare in practice (auto-scroll's multi-second interval gives
+    /// `prefetchUpcomingChapters`/`loadNextChapterPreview` ample time to land between steps) and just
+    /// means auto-scroll pauses at that chapter's last page rather than getting stuck retrying.
+    private func canAutoAdvanceFurther() -> Bool {
+        if let pageLayout, currentPageIndexInChapter < pageLayout.pages.count - 1 { return true }
+        return nextChapterPreview?.pageLayout != nil
     }
 
     private func stopAutoScroll() {
