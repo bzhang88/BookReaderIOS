@@ -1502,9 +1502,21 @@ struct ReaderView: View {
     /// comment). Prepending before highlighting is safe: the indent is plain, unstyled leading
     /// whitespace, so it can't shift where a highlight rule's own match offsets land in the rest of
     /// the (unindented) source text used to compute `segments`.
+    ///
+    /// Strips the paragraph's own leading whitespace first -- real usage feedback (a second round,
+    /// after this Stepper already existed): dragging it down still left an oddly-large indent for
+    /// books from a source whose `ruleContent.replaceRegex` *also* adds its own leading full-width
+    /// spaces (`ContentService.applyReplaceRegex` -- a real, common, still-supported convention, not
+    /// a bug there), stacking with this setting's own instead of replacing it. Stripping first makes
+    /// this Stepper the *one* true source of the visible indent amount regardless of what a source
+    /// already baked in, rather than only ever being able to add on top of an unknown amount. Purely
+    /// a rendering-time normalization -- the underlying `text`/`paragraphs`/`ChapterPageLayout`
+    /// character offsets that bookmarks/read-aloud/highlighting all key off of are untouched, so nothing
+    /// downstream of pagination needs to change to stay consistent with this.
     private func indentedText(_ paragraph: String) -> Text {
-        guard paragraphIndent > 0 else { return highlightedText(paragraph) }
-        return Text(String(repeating: "　", count: paragraphIndent)) + highlightedText(paragraph)
+        let normalized = String(paragraph.drop(while: \.isWhitespace))
+        guard paragraphIndent > 0 else { return highlightedText(normalized) }
+        return Text(String(repeating: "　", count: paragraphIndent)) + highlightedText(normalized)
     }
 
     /// Bold, centered chapter title shown inline in the reading area itself -- real usage feedback,

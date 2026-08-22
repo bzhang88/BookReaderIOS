@@ -130,10 +130,15 @@ struct LocalReaderView: View {
     private var paragraphs: [String] { purifiedText.components(separatedBy: "\n") }
     @State private var purifiedText: String = ""
 
-    /// See `ReaderView.indentedText`'s matching doc comment.
+    /// See `ReaderView.indentedText`'s matching doc comment -- including why leading whitespace is
+    /// stripped before reapplying `paragraphIndent`. Same risk applies here via a different route:
+    /// local `.txt` novels commonly already have "　　" manually typed at the start of every
+    /// paragraph in the raw file itself (the traditional plain-text convention), which would
+    /// otherwise stack with this setting's own indent instead of being controlled by it.
     private func indentedText(_ paragraph: String) -> Text {
-        guard paragraphIndent > 0 else { return Text(paragraph) }
-        return Text(String(repeating: "　", count: paragraphIndent) + paragraph)
+        let normalized = String(paragraph.drop(while: \.isWhitespace))
+        guard paragraphIndent > 0 else { return Text(normalized) }
+        return Text(String(repeating: "　", count: paragraphIndent) + normalized)
     }
 
     /// See `ReaderView.chapterHeading`'s matching doc comment -- same real usage feedback applies
@@ -844,7 +849,7 @@ struct LocalReaderStyleSheet: View {
                         Text("段间距: \(Int(paragraphSpacing))")
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
                     }
-                    Stepper("首行缩进: \(paragraphIndent) 字符", value: $paragraphIndent, in: 0...4)
+                    Stepper("首行缩进（段落缩进）: \(paragraphIndent) 字符", value: $paragraphIndent, in: 0...4)
                 }
 
                 Section("页边距") {

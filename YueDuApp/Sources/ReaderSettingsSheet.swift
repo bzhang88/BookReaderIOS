@@ -54,7 +54,12 @@ struct ReaderStyleSheet: View {
                         Text("段间距: \(Int(paragraphSpacing))")
                         Slider(value: $paragraphSpacing, in: 0...32, step: 1)
                     }
-                    Stepper("首行缩进: \(paragraphIndent) 字符", value: $paragraphIndent, in: 0...4)
+                    // Real usage feedback: this Stepper already existed but nobody could find it --
+                    // "首行缩进" (the print-typesetting term) didn't read as an obvious match for
+                    // "段落缩进"/"paragraph indent," which is the term people actually look for.
+                    // Labeling it with both isn't pretty, but it's exactly the kind of thing worth
+                    // being a little redundant about so the setting is actually discoverable.
+                    Stepper("首行缩进（段落缩进）: \(paragraphIndent) 字符", value: $paragraphIndent, in: 0...4)
                 }
 
                 // Real usage feedback wanted all 4 margins adjustable independently, not one shared
