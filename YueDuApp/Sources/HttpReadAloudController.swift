@@ -124,7 +124,9 @@ final class HttpReadAloudController: NSObject, ObservableObject {
             return cached
         }
         guard let remoteURL = engine.url(forText: text) else { return nil }
-        guard let (data, response) = try? await URLSession.shared.data(from: remoteURL),
+        var request = URLRequest(url: remoteURL)
+        request.allHTTPHeaderFields = engine.parsedHeaders()
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
               let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             return remoteURL
         }

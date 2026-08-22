@@ -94,11 +94,13 @@ struct HttpTTSEngineEditView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var urlTemplate: String
+    @State private var header: String
 
     init(engine: HttpTTSEngine?) {
         self.engine = engine
         _name = State(initialValue: engine?.name ?? "")
         _urlTemplate = State(initialValue: engine?.urlTemplate ?? "")
+        _header = State(initialValue: engine?.header ?? "")
     }
 
     var body: some View {
@@ -114,6 +116,17 @@ struct HttpTTSEngineEditView: View {
                 } footer: {
                     Text("请求这个地址应该直接返回音频数据")
                 }
+                Section {
+                    TextField("{\"Referer\": \"https://example.com\"}", text: $header, axis: .vertical)
+                        .lineLimit(3...6)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .font(.system(.body, design: .monospaced))
+                } header: {
+                    Text("自定义请求头（可选）")
+                } footer: {
+                    Text("JSON 对象格式，留空则只发送默认 User-Agent。部分朗读接口需要 Referer 等请求头才不会拒绝请求。")
+                }
             }
             .navigationTitle(engine == nil ? "新建朗读引擎" : "编辑朗读引擎")
             .navigationBarTitleDisplayMode(.inline)
@@ -123,7 +136,11 @@ struct HttpTTSEngineEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        let saved = HttpTTSEngine(id: engine?.id ?? UUID().uuidString, name: name.isEmpty ? urlTemplate : name, urlTemplate: urlTemplate)
+                        let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let saved = HttpTTSEngine(
+                            id: engine?.id ?? UUID().uuidString, name: name.isEmpty ? urlTemplate : name,
+                            urlTemplate: urlTemplate, header: trimmedHeader.isEmpty ? nil : trimmedHeader
+                        )
                         Task {
                             try? await env.httpTTSEngineStore.add(saved)
                             dismiss()
