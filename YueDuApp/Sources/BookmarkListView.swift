@@ -35,8 +35,11 @@ struct BookmarkListView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(bookmark.bookTitle).font(.headline)
                         Text(bookmark.chapterTitle).font(.subheadline).foregroundStyle(.secondary)
+                        if let excerpt = bookmark.excerpt, !excerpt.isEmpty {
+                            Text(excerpt).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
                         if let note = bookmark.note, !note.isEmpty {
-                            Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(note).font(.caption).foregroundStyle(.blue).lineLimit(2)
                         }
                     }
                 }
@@ -112,7 +115,10 @@ struct BookmarkListView: View {
         for (bookTitle, group) in Dictionary(grouping: bookmarks, by: \.bookTitle).sorted(by: { $0.key < $1.key }) {
             lines.append("## \(bookTitle)\n")
             for bookmark in group.sorted(by: { $0.chapterIndex < $1.chapterIndex }) {
-                lines.append("- \(bookmark.chapterTitle)" + (bookmark.note.map { " —— \($0)" } ?? ""))
+                var line = "- \(bookmark.chapterTitle)"
+                if let excerpt = bookmark.excerpt, !excerpt.isEmpty { line += "：\(excerpt)" }
+                if let note = bookmark.note, !note.isEmpty { line += " —— \(note)" }
+                lines.append(line)
             }
             lines.append("")
         }

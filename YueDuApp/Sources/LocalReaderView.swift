@@ -731,9 +731,11 @@ struct LocalReaderView: View {
             isCurrentChapterBookmarked = false
         } else {
             let offset: Int? = pageTurnStyle.isPaginated ? nil : characterOffset(forParagraphIndex: currentTopParagraphIndex)
+            let excerpt = paragraphs.indices.contains(currentTopParagraphIndex)
+                ? Bookmark.makeExcerpt(from: paragraphs[currentTopParagraphIndex]) : nil
             let bookmark = Bookmark(
                 isLocal: true, bookIdentifier: book.id, bookTitle: book.title,
-                chapterIndex: currentIndex, chapterTitle: chapter.title, characterOffset: offset
+                chapterIndex: currentIndex, chapterTitle: chapter.title, characterOffset: offset, excerpt: excerpt
             )
             try? await env.bookmarkStore.add(bookmark)
             isCurrentChapterBookmarked = true
@@ -791,10 +793,11 @@ struct LocalReaderView: View {
     /// addBookmark(forParagraph:)`'s matching doc comment), independent of `toggleBookmark`'s
     /// current-top-of-screen-paragraph toggle.
     private func addBookmark(forParagraphIndex index: Int) {
+        let excerpt = paragraphs.indices.contains(index) ? Bookmark.makeExcerpt(from: paragraphs[index]) : nil
         let bookmark = Bookmark(
             isLocal: true, bookIdentifier: book.id, bookTitle: book.title,
             chapterIndex: currentIndex, chapterTitle: chapter.title,
-            characterOffset: characterOffset(forParagraphIndex: index)
+            characterOffset: characterOffset(forParagraphIndex: index), excerpt: excerpt
         )
         Task {
             try? await env.bookmarkStore.add(bookmark)

@@ -27,13 +27,20 @@ public struct Bookmark: Codable, Equatable, Hashable, Identifiable, Sendable {
     public var chapterIndex: Int
     public var chapterTitle: String
     public var characterOffset: Int?
+    /// A short, single-line preview of the actual passage this bookmark points at -- confirmed
+    /// against Legado_Max's own `Bookmark.bookText`, which exists for exactly this: so the bookmark
+    /// list reads as *which* passage was bookmarked without re-opening the book. `Optional`, not
+    /// defaulted to an empty string, so this decodes safely from any `bookmarks.json` written before
+    /// this field existed (see `characterOffset`'s own doc comment for why this project treats new
+    /// fields this way).
+    public var excerpt: String?
     public var note: String?
     public var createdAt: Date
 
     public init(
         id: String = UUID().uuidString, isLocal: Bool, bookSourceUrl: String? = nil, bookIdentifier: String,
         tocUrl: String? = nil, bookTitle: String, chapterIndex: Int, chapterTitle: String,
-        characterOffset: Int? = nil, note: String? = nil, createdAt: Date = Date()
+        characterOffset: Int? = nil, excerpt: String? = nil, note: String? = nil, createdAt: Date = Date()
     ) {
         self.id = id
         self.isLocal = isLocal
@@ -44,7 +51,19 @@ public struct Bookmark: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.chapterIndex = chapterIndex
         self.chapterTitle = chapterTitle
         self.characterOffset = characterOffset
+        self.excerpt = excerpt
         self.note = note
         self.createdAt = createdAt
+    }
+
+    /// Collapses a passage of prose into a single-line, length-capped preview for the bookmark list.
+    /// `nil` for an all-whitespace passage -- an empty preview line is worse than no preview at all.
+    public static func makeExcerpt(from text: String, maxLength: Int = 60) -> String? {
+        let collapsed = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !collapsed.isEmpty else { return nil }
+        guard collapsed.count > maxLength else { return collapsed }
+        return String(collapsed.prefix(maxLength)) + "…"
     }
 }

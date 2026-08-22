@@ -1983,7 +1983,7 @@ struct ReaderView: View {
         let bookmark = Bookmark(
             isLocal: false, bookSourceUrl: source.bookSourceUrl, bookIdentifier: bookUrl,
             tocUrl: tocUrl, bookTitle: bookTitle, chapterIndex: chapter.index, chapterTitle: chapter.title,
-            characterOffset: offset
+            characterOffset: offset, excerpt: Bookmark.makeExcerpt(from: chunk.text)
         )
         Task {
             try? await env.bookmarkStore.add(bookmark)
@@ -2378,10 +2378,18 @@ struct ReaderView: View {
                       pageLayout.pages.indices.contains(currentPageIndexInChapter) else { return nil }
                 return pageLayout.pages[currentPageIndexInChapter].location
             }()
+            let excerpt: String? = {
+                guard !pageTurnStyle.isPaginated, let pageLayout else { return nil }
+                let chunks = pageLayout.chunks(forPage: currentPageIndexInChapter)
+                guard let firstNonBlank = chunks.first(where: {
+                    !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }) else { return nil }
+                return Bookmark.makeExcerpt(from: firstNonBlank.text)
+            }()
             let bookmark = Bookmark(
                 isLocal: false, bookSourceUrl: source.bookSourceUrl, bookIdentifier: bookUrl,
                 tocUrl: tocUrl, bookTitle: bookTitle, chapterIndex: chapter.index, chapterTitle: chapter.title,
-                characterOffset: offset
+                characterOffset: offset, excerpt: excerpt
             )
             try? await env.bookmarkStore.add(bookmark)
             isCurrentChapterBookmarked = true

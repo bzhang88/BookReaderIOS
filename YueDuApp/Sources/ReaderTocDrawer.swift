@@ -195,6 +195,9 @@ struct ReaderTocDrawerView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(bookmark.chapterTitle).lineLimit(1)
+                            if let excerpt = bookmark.excerpt, !excerpt.isEmpty {
+                                Text(excerpt).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                             Text(bookmark.createdAt, style: .date)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
