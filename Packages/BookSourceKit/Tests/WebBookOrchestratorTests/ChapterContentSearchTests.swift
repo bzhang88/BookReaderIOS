@@ -56,4 +56,29 @@ final class ChapterContentSearchTests: XCTestCase {
         let results = ChapterContentSearch.search(chapters: chapters, keyword: "match")
         XCTAssertEqual(results.map(\.chapterIndex), [5, 2])
     }
+
+    func testRegexModeMatchesPattern() {
+        let chapters: [(index: Int, title: String, text: String)] = [
+            (index: 0, title: "Ch1", text: "他捡到了一把剑"),
+            (index: 1, title: "Ch2", text: "他捡到了一柄刀")
+        ]
+        let results = ChapterContentSearch.search(chapters: chapters, keyword: "剑|刀", isRegex: true)
+        XCTAssertEqual(results.map(\.chapterIndex), [0, 1])
+    }
+
+    func testRegexModeIsCaseInsensitive() {
+        let chapters: [(index: Int, title: String, text: String)] = [(index: 0, title: "Ch1", text: "The Dragon awakens")]
+        let results = ChapterContentSearch.search(chapters: chapters, keyword: "d[a-z]+n", isRegex: true)
+        XCTAssertEqual(results.count, 1)
+    }
+
+    func testRegexModeWithInvalidPatternReturnsNoResultsRatherThanCrashing() {
+        let chapters: [(index: Int, title: String, text: String)] = [(index: 0, title: "Ch1", text: "some text")]
+        XCTAssertTrue(ChapterContentSearch.search(chapters: chapters, keyword: "(unterminated", isRegex: true).isEmpty)
+    }
+
+    func testIsValidPatternDistinguishesMalformedFromNonMatching() {
+        XCTAssertTrue(ChapterContentSearch.isValidPattern("剑|刀"))
+        XCTAssertFalse(ChapterContentSearch.isValidPattern("(unterminated"))
+    }
 }

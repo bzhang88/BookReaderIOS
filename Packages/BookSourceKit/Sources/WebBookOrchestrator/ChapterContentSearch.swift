@@ -17,16 +17,45 @@ public struct ChapterSearchMatch: Equatable, Sendable, Identifiable {
 }
 
 public enum ChapterContentSearch {
-    /// Searches each chapter's text for `keyword` (case-insensitive), returning at most one match
-    /// per chapter in the order the chapters were given. Callers decide which chapters are eligible
-    /// to search (e.g. only ones already downloaded for a network book) -- this function just does
-    /// the string matching over whatever it's handed.
-    public static func search(chapters: [(index: Int, title: String, text: String)], keyword: String) -> [ChapterSearchMatch] {
+    /// Searches each chapter's text for `keyword` (case-insensitive, or as a regex pattern when
+    /// `isRegex` is set), returning at most one match per chapter in the order the chapters were
+    /// given. Callers decide which chapters are eligible to search (e.g. only ones already
+    /// downloaded for a network book) -- this function just does the matching over whatever it's
+    /// handed. An invalid regex pattern returns no results rather than throwing -- callers should
+    /// check `isValidPattern` separately to tell "malformed pattern" apart from "no matches" in the UI.
+    public static func search(
+        chapters: [(index: Int, title: String, text: String)], keyword: String, isRegex: Bool = false
+    ) -> [ChapterSearchMatch] {
         let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
+        if isRegex {
+            return searchRegex(chapters: chapters, pattern: trimmed)
+        }
         var results: [ChapterSearchMatch] = []
         for chapter in chapters {
             guard let range = chapter.text.range(of: trimmed, options: .caseInsensitive) else { continue }
+            results.append(ChapterSearchMatch(
+                chapterIndex: chapter.index, chapterTitle: chapter.title,
+                snippet: snippet(in: chapter.text, around: range)
+            ))
+        }
+        return results
+    }
+
+    /// Whether `pattern` compiles as a regular expression -- lets the UI distinguish "this pattern
+    /// is malformed" from "this pattern matched nothing" instead of both silently showing zero
+    /// results.
+    public static func isValidPattern(_ pattern: String) -> Bool {
+        (try? NSRegularExpression(pattern: pattern)) != nil
+    }
+
+    private static func searchRegex(chapters: [(index: Int, title: String, text: String)], pattern: String) -> [ChapterSearchMatch] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
+        var results: [ChapterSearchMatch] = []
+        for chapter in chapters {
+            let nsText = chapter.text as NSString
+            guard let match = regex.firstMatch(in: chapter.text, range: NSRange(location: 0, length: nsText.length)),
+                  let range = Range(match.range, in: chapter.text) else { continue }
             results.append(ChapterSearchMatch(
                 chapterIndex: chapter.index, chapterTitle: chapter.title,
                 snippet: snippet(in: chapter.text, around: range)

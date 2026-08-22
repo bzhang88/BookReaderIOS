@@ -19,7 +19,13 @@ struct ChapterContentSearchView: View {
     @State private var allChapters: [(index: Int, title: String, text: String)] = []
     @State private var results: [ChapterSearchMatch] = []
     @State private var isLoadingChapters = true
+    @State private var isRegex = false
     @Environment(\.dismiss) private var dismiss
+
+    private var trimmedKeyword: String { keyword.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isPatternInvalid: Bool {
+        isRegex && !trimmedKeyword.isEmpty && !ChapterContentSearch.isValidPattern(trimmedKeyword)
+    }
 
     init(
         loadChapters: @escaping () async -> [(index: Int, title: String, text: String)],
@@ -40,7 +46,9 @@ struct ChapterContentSearchView: View {
                 }
                 if isLoadingChapters {
                     ProgressView("正在准备搜索…")
-                } else if results.isEmpty && !keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                } else if isPatternInvalid {
+                    ContentUnavailableView("正则表达式无效", systemImage: "exclamationmark.triangle")
+                } else if results.isEmpty && !trimmedKeyword.isEmpty {
                     ContentUnavailableView("没有找到", systemImage: "magnifyingglass")
                 }
                 ForEach(results) { match in
@@ -57,23 +65,32 @@ struct ChapterContentSearchView: View {
                 }
             }
             .searchable(text: $keyword, prompt: "搜索本书内容")
-            .onChange(of: keyword) { _, newValue in
-                results = ChapterContentSearch.search(chapters: allChapters, keyword: newValue)
-            }
+            .onChange(of: keyword) { _, _ in refreshResults() }
+            .onChange(of: isRegex) { _, _ in refreshResults() }
             .navigationTitle("书内搜索")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Toggle("正则表达式", isOn: $isRegex)
+                        .toggleStyle(.button)
+                }
             }
             .task {
                 allChapters = await loadChapters()
                 isLoadingChapters = false
-                if !keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    results = ChapterContentSearch.search(chapters: allChapters, keyword: keyword)
-                }
+                refreshResults()
             }
         }
+    }
+
+    private func refreshResults() {
+        guard !isPatternInvalid else {
+            results = []
+            return
+        }
+        results = ChapterContentSearch.search(chapters: allChapters, keyword: keyword, isRegex: isRegex)
     }
 }
