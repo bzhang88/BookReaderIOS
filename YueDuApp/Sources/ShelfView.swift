@@ -19,6 +19,8 @@ struct ShelfView: View {
     @State private var isBatchChangingSource = false
     @State private var batchChangeSourceSummary: String?
     @State private var registeredGroupNames: [String] = []
+    @State private var isCheckingUpdates = false
+    @State private var updateCheckSummary: String?
 
     /// Sections books by `group` -- a mix of names assigned by the "自动分组" tag-rule sweep and
     /// ones set manually via the row's "设置分组" menu; both write the same field (see `ShelfBook
@@ -114,6 +116,13 @@ struct ShelfView: View {
             } message: {
                 Text(batchChangeSourceSummary ?? "")
             }
+            .alert("检查更新", isPresented: Binding(
+                get: { updateCheckSummary != nil }, set: { if !$0 { updateCheckSummary = nil } }
+            )) {
+                Button("好") { updateCheckSummary = nil }
+            } message: {
+                Text(updateCheckSummary ?? "")
+            }
         }
     }
 
@@ -164,6 +173,18 @@ struct ShelfView: View {
             } label: {
                 Label("分组管理", systemImage: "folder.badge.gearshape")
             }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                Task { await checkForUpdates() }
+            } label: {
+                if isCheckingUpdates {
+                    ProgressView()
+                } else {
+                    Label("检查更新", systemImage: "arrow.clockwise")
+                }
+            }
+            .disabled(isCheckingUpdates || books.isEmpty)
         }
         if isSelecting {
             batchActionsToolbarContent
@@ -241,6 +262,13 @@ struct ShelfView: View {
                         groupPickerTarget = book
                     } label: {
                         Label("设置分组", systemImage: "folder")
+                    }
+                    Button {
+                        Task { await toggleCanUpdate(book) }
+                    } label: {
+                        (book.canUpdate ?? true)
+                            ? Label("停止自动更新", systemImage: "pause.circle")
+                            : Label("恢复自动更新", systemImage: "play.circle")
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -378,6 +406,53 @@ struct ShelfView: View {
         }
         try? await env.shelfStore.setGroups(groups)
         await reload()
+    }
+
+    /// Flips `ShelfBook.canUpdate` for one book -- see that field's own doc comment for the
+    /// `nil`-means-`true` convention this reads through.
+    private func toggleCanUpdate(_ book: ShelfBook) async {
+        try? await env.shelfStore.setCanUpdate(bookUrl: book.bookUrl, canUpdate: !(book.canUpdate ?? true))
+        await reload()
+    }
+
+    /// Re-fetches every shelf book's TOC (skipping any marked `canUpdate == false`) and writes back
+    /// whichever grew a longer chapter count than what's already stored -- mirrors
+    /// `ChangeSourceView.loadChapterCounts`'s verified-safe concurrency pattern: `env.httpClient`
+    /// and the source list are read to locals *before* the task group, since `AppEnvironment` is
+    /// `@MainActor`-isolated and can't be touched from inside a child task's closure.
+    private func checkForUpdates() async {
+        isCheckingUpdates = true
+        defer { isCheckingUpdates = false }
+        let targets = books.filter { $0.canUpdate ?? true }
+        guard !targets.isEmpty else {
+            updateCheckSummary = "书架是空的，或者所有书都已停止自动更新"
+            return
+        }
+        let httpClient = env.httpClient
+        let sources = (try? await env.bookSourceStore.all()) ?? []
+        var checkedCount = 0
+        var updatedCount = 0
+        await withTaskGroup(of: (String, Int?).self) { taskGroup in
+            for book in targets {
+                guard let source = sources.first(where: { $0.bookSourceUrl == book.bookSourceUrl }) else { continue }
+                taskGroup.addTask {
+                    let chapters = try? await TocService.fetchChapterList(
+                        source: source, tocURL: book.tocUrl, httpClient: httpClient
+                    )
+                    return (book.bookUrl, chapters?.count)
+                }
+            }
+            for await (bookUrl, count) in taskGroup {
+                checkedCount += 1
+                guard let count else { continue }
+                if let book = targets.first(where: { $0.bookUrl == bookUrl }), count > (book.totalChapterCount ?? 0) {
+                    updatedCount += 1
+                }
+                try? await env.shelfStore.updateTotalChapterCount(bookUrl: bookUrl, count: count)
+            }
+        }
+        await reload()
+        updateCheckSummary = "检查了 \(checkedCount) 本书，\(updatedCount) 本有更新"
     }
 
     private func delete(_ toDelete: [ShelfBook]) {

@@ -32,6 +32,18 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
     /// (lastReadChapterIndex + 1)`, matching Legado's own badge. `nil` for books never opened since
     /// this field was added, or before the TOC has ever been fetched once.
     public var totalChapterCount: Int?
+    /// Whether the shelf-wide "检查更新" sweep (`ShelfView`'s own action, not an automatic
+    /// background one) should re-check this book's TOC at all -- matching Legado's real `Book.
+    /// canUpdate`. `nil`/`true` both mean "yes, check it" -- only an explicit `false` excludes a
+    /// book (typically a finished/dropped one a user doesn't expect new chapters on, where checking
+    /// is just wasted network traffic every sweep). `Optional`, not a plain `Bool` defaulting to
+    /// `true`, so this decodes safely from every `shelf.json` written before this field existed:
+    /// `JSONFileStore.load()` uses `try decoder.decode()` (throws, not nil-on-failure), and a
+    /// non-optional field with only an `init` default would throw on any pre-existing shelf file
+    /// missing this key -- since most callers wrap that load in `try?`, that throw would silently
+    /// present as an *empty shelf*, not an error. This project already hit exactly this shape of bug
+    /// once before (`Bookmark.characterOffset`) and settled on Optional as the safe fix.
+    public var canUpdate: Bool?
 
     public var id: String { bookUrl }
 
@@ -40,7 +52,7 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         coverUrl: String? = nil, intro: String? = nil, tocUrl: String, lastChapterTitle: String? = nil,
         addedAt: Date = Date(), group: String? = nil, lastReadChapterIndex: Int? = nil,
         lastReadChapterTitle: String? = nil, lastReadCharacterOffset: Int = 0, lastReadAt: Date? = nil,
-        totalChapterCount: Int? = nil
+        totalChapterCount: Int? = nil, canUpdate: Bool? = nil
     ) {
         self.bookSourceUrl = bookSourceUrl
         self.bookUrl = bookUrl
@@ -57,5 +69,6 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         self.lastReadCharacterOffset = lastReadCharacterOffset
         self.lastReadAt = lastReadAt
         self.totalChapterCount = totalChapterCount
+        self.canUpdate = canUpdate
     }
 }

@@ -131,4 +131,41 @@ final class ShelfStoreTests: XCTestCase {
         XCTAssertEqual(resumed?.lastReadCharacterOffset, 1234)
         XCTAssertNotNil(resumed?.lastReadAt)
     }
+
+    func testSetCanUpdateTogglesPersistedFlag() async throws {
+        let fileURL = tempFileURL()
+        let store = ShelfStore(fileURL: fileURL)
+        try await store.addOrUpdate(sampleBook())
+        try await store.setCanUpdate(bookUrl: "https://example.com/book/1", canUpdate: false)
+
+        let reloaded = ShelfStore(fileURL: fileURL)
+        let all = try await reloaded.all()
+        XCTAssertEqual(all.first?.canUpdate, false)
+    }
+
+    /// The real migration-safety case: `canUpdate` didn't exist before this field was added.
+    /// `JSONFileStore.load()` uses `try decoder.decode()` (throws, not nil-on-failure), and most
+    /// callers wrap that in `try?` -- a non-optional `canUpdate` with only an `init` default would
+    /// throw on this exact shape of pre-existing file and silently present as an *empty* shelf, not
+    /// an error. This project already hit exactly this bug shape once before (`Bookmark.
+    /// characterOffset`) and settled on `Optional` as the fix -- this test guards `ShelfBook` really
+    /// applies it, not just claims to in a doc comment.
+    func testDecodesPreExistingShelfJSONMissingCanUpdateField() throws {
+        // `.iso8601` for `addedAt` matches `JSONFileStore`'s real configured strategy -- this test
+        // uses its own plain `JSONDecoder` (not going through `JSONFileStore`) so it can decode a
+        // literal fixture string directly, but still needs to match production's date format to be
+        // a faithful "pre-existing real file" simulation.
+        let json = """
+        [{
+            "bookSourceUrl": "https://example.com", "bookUrl": "https://example.com/book/1",
+            "name": "My Novel", "tocUrl": "https://example.com/book/1/toc",
+            "addedAt": "2023-11-14T22:13:20Z", "lastReadCharacterOffset": 0
+        }]
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let books = try decoder.decode([ShelfBook].self, from: Data(json.utf8))
+        XCTAssertEqual(books.count, 1)
+        XCTAssertNil(books.first?.canUpdate)
+    }
 }

@@ -81,4 +81,14 @@ public actor ShelfStore {
         books[idx].totalChapterCount = count
         try await store.save(books)
     }
+
+    /// Toggles `ShelfBook.canUpdate` -- see that field's own doc comment for the `nil`-means-`true`
+    /// convention this preserves (passing `true` here writes an explicit `true`, not back to `nil`,
+    /// which is fine: both read as "check this book" via `canUpdate ?? true`).
+    public func setCanUpdate(bookUrl: String, canUpdate: Bool) async throws {
+        var books = try await all()
+        guard let idx = books.firstIndex(where: { $0.bookUrl == bookUrl }) else { return }
+        books[idx].canUpdate = canUpdate
+        try await store.save(books)
+    }
 }
