@@ -10,13 +10,14 @@ import NetworkClient
 /// collection found ~30% of enabled text sources use `@js:`/`@put:`/`{{}}` syntax in their search
 /// rule alone), not a transient network problem retrying would fix.
 ///
-/// Only wired into `BookDetailView`/`TocView` for now (the exact flow real usage feedback reported
-/// this against: search a book with multiple sources, pick one, hit a raw error). The same raw
-/// `"\(error)"` pattern exists in several other screens across the app (`ExploreView`, `ShelfView`,
-/// `ReaderView`'s 换源, `SourceLibraryView`, ...) -- rolling this out there too is a reasonable
-/// follow-up, deliberately not done in this pass to keep it scoped to the reported bug.
-enum FriendlyError {
-    static func message(for error: Error) -> String {
+/// Lives in the package (not the app target) so both `MultiSourceSearchService`'s per-source
+/// `SourceOutcome.errorDescription` and the app target's `BookDetailView`/`TocView` share the same
+/// mapping instead of two copies drifting apart -- `public` so the app target can call it too.
+/// The same raw `"\(error)"` pattern still exists in a few other app-target screens (`ExploreView`,
+/// `ShelfView`, `ReaderView`'s 换源, `SourceLibraryView`, ...); rolling this out there too is a
+/// reasonable follow-up, deliberately not done in this pass to keep it scoped to reported bugs.
+public enum FriendlyError {
+    public static func message(for error: Error) -> String {
         if let ruleError = error as? RuleEngineError {
             switch ruleError {
             case .unsupportedFeature:

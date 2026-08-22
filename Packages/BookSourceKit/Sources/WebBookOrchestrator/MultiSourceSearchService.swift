@@ -33,7 +33,7 @@ public enum MultiSourceSearchService {
                                 let results = try await SearchService.search(source: source, keyword: keyword, httpClient: httpClient)
                                 return SourceOutcome(source: source, results: results)
                             } catch {
-                                return SourceOutcome(source: source, results: [], errorDescription: "\(error)")
+                                return SourceOutcome(source: source, results: [], errorDescription: FriendlyError.message(for: error))
                             }
                         }
                     }

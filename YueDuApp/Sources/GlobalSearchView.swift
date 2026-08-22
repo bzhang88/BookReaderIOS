@@ -17,6 +17,13 @@ struct GlobalSearchView: View {
     @State private var groups: [GroupedSearchResult] = []
     @State private var completedCount = 0
     @State private var failedCount = 0
+    // Real usage feedback: "3 个书源搜索失败" told you *a* number failed but nothing about which
+    // ones or why, so a source that's actually broken (unsupported rule syntax, dead domain, ...)
+    // was indistinguishable from one that just hit a transient network hiccup. Kept alongside
+    // `failedCount` rather than derived from it since this needs the actual outcomes, not just a
+    // tally.
+    @State private var failedOutcomes: [MultiSourceSearchService.SourceOutcome] = []
+    @State private var isShowingFailedSources = false
     @State private var isSearching = false
     @State private var hasSearchedOnce = false
     @State private var searchTask: Task<Void, Never>?
@@ -178,11 +185,23 @@ struct GlobalSearchView: View {
                 Spacer()
                 Button("停止搜索", role: .destructive) { stopSearching() }
                     .font(.caption)
+            } else if failedCount > 0 {
+                Button {
+                    isShowingFailedSources = true
+                } label: {
+                    Text("\(summaryText) · 查看详情")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             } else {
                 Text(summaryText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .sheet(isPresented: $isShowingFailedSources) {
+            FailedSourcesListView(outcomes: failedOutcomes)
         }
     }
 
@@ -283,6 +302,7 @@ struct GlobalSearchView: View {
         relevanceBuckets = [:]
         completedCount = 0
         failedCount = 0
+        failedOutcomes = []
         isSearching = true
         hasSearchedOnce = true
 
@@ -297,7 +317,10 @@ struct GlobalSearchView: View {
                 if Task.isCancelled { break }
                 groups = SearchResultGrouper.merge(outcome.results, into: groups)
                 completedCount += 1
-                if outcome.errorDescription != nil { failedCount += 1 }
+                if outcome.errorDescription != nil {
+                    failedCount += 1
+                    failedOutcomes.append(outcome)
+                }
             }
             // Ranking only happens once results settle -- re-sorting on every incremental arrival
             // would make rows jump around mid-search, which reads as broken rather than "ranked."
@@ -562,5 +585,37 @@ struct BookSourcePickerView: View {
         }
         .navigationTitle(group.name)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Which sources a search failed against, and why -- reachable by tapping "查看详情" on the results
+/// screen's failure summary. `MultiSourceSearchService`'s `SourceOutcome.errorDescription` is
+/// already run through `FriendlyError.message(for:)` at the point the failure is caught, so this
+/// just displays it -- no error-formatting logic duplicated here.
+private struct FailedSourcesListView: View {
+    let outcomes: [MultiSourceSearchService.SourceOutcome]
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(outcomes, id: \.source.bookSourceUrl) { outcome in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(outcome.source.bookSourceName).font(.headline)
+                    Text(outcome.errorDescription ?? "未知错误")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+            }
+            .navigationTitle("搜索失败的书源")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
