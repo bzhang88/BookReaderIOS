@@ -1637,7 +1637,7 @@ struct ReaderView: View {
                 if resolved.isFirstPageOfChapter {
                     chapterHeading(resolved.chapterTitle)
                 }
-                pageBlock(resolved.pageIndex, layout: resolved.layout)
+                pageBlock(resolved.pageIndex, layout: resolved.layout, isCurrentChapter: resolved.isCurrentChapter)
                 Spacer(minLength: 0)
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
@@ -1651,6 +1651,17 @@ struct ReaderView: View {
         let pageIndex: Int
         let chapterTitle: String
         let isFirstPageOfChapter: Bool
+        /// Whether this slot's `layout` is `self.pageLayout` (the chapter `text`/`chapter`/
+        /// `pageLayout` state already describes) rather than a neighboring `prevChapterPreview`'s/
+        /// `nextChapterPreview`'s own pagination. `pageBlock`'s long-press menu needs this: its
+        /// "朗读，从这里开始"/"添加书签" actions read `paragraphs`/`chapter`/`pageLayout` directly
+        /// (the *current* chapter's state), which would be silently wrong -- attributing a bookmark
+        /// to the wrong chapter, or starting read-aloud from an unrelated paragraph index -- if shown
+        /// for a chunk that actually belongs to a neighboring chapter's preview slot instead. That
+        /// preview sliver is only ever reachable mid-drag near a chapter boundary (see
+        /// `scrollModeBody`'s `.clipped()` -- at rest only the current page is visible at all), but
+        /// it *is* reachable, not hypothetical.
+        let isCurrentChapter: Bool
     }
 
     /// Looks up which page belongs `relativeIndex` steps from `currentPageIndexInChapter` (-1 =
@@ -1662,18 +1673,25 @@ struct ReaderView: View {
         let target = currentPageIndexInChapter + relativeIndex
         if let pageLayout, pageLayout.pages.indices.contains(target) {
             return ResolvedPage(
-                layout: pageLayout, pageIndex: target, chapterTitle: chapter.title, isFirstPageOfChapter: target == 0
+                layout: pageLayout, pageIndex: target, chapterTitle: chapter.title, isFirstPageOfChapter: target == 0,
+                isCurrentChapter: true
             )
         }
         if target < 0, let preview = prevChapterPreview, let layout = preview.pageLayout {
             let idx = layout.pages.count + target
             guard layout.pages.indices.contains(idx) else { return nil }
-            return ResolvedPage(layout: layout, pageIndex: idx, chapterTitle: preview.title, isFirstPageOfChapter: idx == 0)
+            return ResolvedPage(
+                layout: layout, pageIndex: idx, chapterTitle: preview.title, isFirstPageOfChapter: idx == 0,
+                isCurrentChapter: false
+            )
         }
         if let pageLayout, target >= pageLayout.pages.count, let preview = nextChapterPreview, let layout = preview.pageLayout {
             let idx = target - pageLayout.pages.count
             guard layout.pages.indices.contains(idx) else { return nil }
-            return ResolvedPage(layout: layout, pageIndex: idx, chapterTitle: preview.title, isFirstPageOfChapter: idx == 0)
+            return ResolvedPage(
+                layout: layout, pageIndex: idx, chapterTitle: preview.title, isFirstPageOfChapter: idx == 0,
+                isCurrentChapter: false
+            )
         }
         return nil
     }
@@ -1834,7 +1852,7 @@ struct ReaderView: View {
     /// page's first chunk's `paragraphIndex` against the *previous* page's last chunk catches exactly
     /// that case (verified by `ChapterPageLayoutTests`'s own mid-paragraph-split fixture).
     @ViewBuilder
-    private func pageBlock(_ index: Int, layout: ChapterPageLayout) -> some View {
+    private func pageBlock(_ index: Int, layout: ChapterPageLayout, isCurrentChapter: Bool) -> some View {
         let chunks = layout.chunks(forPage: index)
         let previousPageLastParagraphIndex = index > 0 ? layout.chunks(forPage: index - 1).last?.paragraphIndex : nil
         VStack(alignment: .leading, spacing: paragraphSpacing) {
@@ -1873,9 +1891,12 @@ struct ReaderView: View {
                 // below reuses an already-existing feature (`DictLookupView`/`WebSearchPanelView`/
                 // `ChapterContentSearchView`'s `initial*` params were literally built for and left
                 // unwired for exactly this hookup, see their own doc comments) rather than
-                // introducing new ones.
+                // introducing new ones. `isCurrentChapter` (see `ResolvedPage`'s doc comment) hides
+                // the two actions that read *current-chapter* state (朗读/书签) when this chunk
+                // actually belongs to a neighboring chapter's preview slot, so those two can't ever
+                // silently act against the wrong chapter.
                 .contextMenu {
-                    paragraphContextMenuItems(chunk)
+                    paragraphContextMenuItems(chunk, isCurrentChapter: isCurrentChapter)
                 }
             }
         }
@@ -1884,9 +1905,13 @@ struct ReaderView: View {
 
     /// The custom long-press menu's actual items -- see `pageBlock`'s `.contextMenu` doc comment for
     /// why this exists instead of `.textSelection`'s system menu. Every action operates on
-    /// `chunk.text` (the whole pressed paragraph, this reader's unit of selection).
+    /// `chunk.text` (the whole pressed paragraph, this reader's unit of selection) except 朗读/书签,
+    /// which additionally need `chunk.paragraphIndex` to mean an index into the *current* chapter's
+    /// `paragraphs`/`pageLayout` -- see `ResolvedPage.isCurrentChapter`'s doc comment for why those
+    /// two are hidden entirely (rather than shown and risking acting on the wrong chapter) when
+    /// `isCurrentChapter` is false.
     @ViewBuilder
-    private func paragraphContextMenuItems(_ chunk: ChapterPageLayout.Chunk) -> some View {
+    private func paragraphContextMenuItems(_ chunk: ChapterPageLayout.Chunk, isCurrentChapter: Bool) -> some View {
         Button {
             UIPasteboard.general.string = chunk.text
         } label: {
@@ -1898,15 +1923,17 @@ struct ReaderView: View {
         } label: {
             Label("分享", systemImage: "square.and.arrow.up")
         }
-        Button {
-            beginReadAloud(startIndex: chunk.paragraphIndex)
-        } label: {
-            Label("朗读，从这里开始", systemImage: "waveform")
-        }
-        Button {
-            addBookmark(forParagraph: chunk)
-        } label: {
-            Label("添加书签", systemImage: "bookmark")
+        if isCurrentChapter {
+            Button {
+                beginReadAloud(startIndex: chunk.paragraphIndex)
+            } label: {
+                Label("朗读，从这里开始", systemImage: "waveform")
+            }
+            Button {
+                addBookmark(forParagraph: chunk)
+            } label: {
+                Label("添加书签", systemImage: "bookmark")
+            }
         }
         Button {
             paragraphMenuText = chunk.text

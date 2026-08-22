@@ -38,6 +38,15 @@ struct LocalReaderView: View {
     @State private var isShowingAISummary = false
     @State private var isShowingDictLookup = false
     @State private var isShowingWebSearch = false
+    // See `ReaderView`'s matching properties -- same custom long-press paragraph menu, mirrored here
+    // (`localParagraphContextMenuItems`) since nothing about the reasoning that made `.contextMenu`
+    // safe for `ReaderView` (a SwiftUI-native primitive, not a UIKit gesture bolted on) is specific
+    // to that reader -- if anything this one's simpler: local scroll mode renders straight from
+    // `paragraphs`, with no `ChapterPageLayout`/neighboring-chapter-preview slot to ever confuse a
+    // long-pressed paragraph's chapter with, so there's no `isCurrentChapter`-style gating needed.
+    @State private var paragraphMenuText = ""
+    @State private var isShowingReplaceRuleSeed = false
+    @State private var isShowingParagraphShareSheet = false
     @State private var isShowingToc = false
     @State private var isBrightnessVisible = false
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
@@ -272,12 +281,12 @@ struct LocalReaderView: View {
                         .lineSpacing(lineSpacing)
                         .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
                         .padding(.horizontal, 4)
-                        // See `ReaderView`'s matching change for why this stops at real selection
-                        // (there was previously no way to copy text out of either reader) rather
-                        // than also injecting a custom 净化/全文搜索/百科/网络搜索 menu -- that needs
-                        // UIKit-level work this app can't risk shipping blind into a `ScrollView`'s
-                        // gesture handling without a way to test it interactively.
-                        .textSelection(.enabled)
+                        // See `ReaderView.pageBlock`'s matching `.contextMenu` doc comment -- same
+                        // custom long-press menu, replacing the plain system Copy/Look Up/Share menu
+                        // `.textSelection(.enabled)` used to show here.
+                        .contextMenu {
+                            localParagraphContextMenuItems(index: index, text: paragraph)
+                        }
                         .id(index)
                         .background(
                             GeometryReader { geo in
@@ -405,6 +414,7 @@ struct LocalReaderView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
+                        paragraphMenuText = ""
                         isShowingContentSearch = true
                     } label: {
                         Label("搜索本书内", systemImage: "magnifyingglass")
@@ -415,11 +425,13 @@ struct LocalReaderView: View {
                         Label("AI 摘要", systemImage: "sparkles")
                     }
                     Button {
+                        paragraphMenuText = ""
                         isShowingDictLookup = true
                     } label: {
                         Label("查词", systemImage: "character.book.closed")
                     }
                     Button {
+                        paragraphMenuText = ""
                         isShowingWebSearch = true
                     } label: {
                         Label("网页搜索", systemImage: "globe")
@@ -458,17 +470,28 @@ struct LocalReaderView: View {
                 loadChapters: {
                     book.chapters.enumerated().map { index, chapter in (index: index, title: chapter.title, text: chapter.text) }
                 },
-                onSelect: { index in goTo(index) }
+                onSelect: { index in goTo(index) },
+                initialKeyword: paragraphMenuText
             )
         }
         .sheet(isPresented: $isShowingAISummary) {
             AIChapterSummaryView(chapterTitle: chapter.title, chapterText: purifiedText)
         }
         .sheet(isPresented: $isShowingDictLookup) {
-            DictLookupView()
+            DictLookupView(initialWord: paragraphMenuText)
         }
         .sheet(isPresented: $isShowingWebSearch) {
-            WebSearchPanelView()
+            WebSearchPanelView(initialQuery: paragraphMenuText)
+        }
+        .sheet(isPresented: $isShowingReplaceRuleSeed) {
+            // See `ReaderView`'s matching sheet's doc comment for why `rule:` is non-nil (seeds the
+            // form) yet `onSave` still goes through `.add`, not `.update`.
+            ReplaceRuleEditView(rule: ReplaceRule(name: "", pattern: paragraphMenuText, isRegex: false)) { newRule in
+                Task { try? await env.replaceRuleStore.add(newRule) }
+            }
+        }
+        .sheet(isPresented: $isShowingParagraphShareSheet) {
+            ShareSheet(items: [paragraphMenuText])
         }
         .alert(
             "章节跳转确认", isPresented: Binding(get: { pendingChapterJumpIndex != nil }, set: { if !$0 { pendingChapterJumpIndex = nil } })
@@ -707,6 +730,68 @@ struct LocalReaderView: View {
                 isLocal: true, bookIdentifier: book.id, bookTitle: book.title,
                 chapterIndex: currentIndex, chapterTitle: chapter.title, characterOffset: offset
             )
+            try? await env.bookmarkStore.add(bookmark)
+            isCurrentChapterBookmarked = true
+        }
+    }
+
+    /// The custom long-press menu's items -- see `ReaderView.paragraphContextMenuItems`'s doc
+    /// comment for the overall reasoning. No "朗读，从这里开始" here: this reader has no read-aloud
+    /// feature at all (see `LocalReaderMoreSettingsSheet`'s doc comment).
+    @ViewBuilder
+    private func localParagraphContextMenuItems(index: Int, text: String) -> some View {
+        Button {
+            UIPasteboard.general.string = text
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+        Button {
+            paragraphMenuText = text
+            isShowingParagraphShareSheet = true
+        } label: {
+            Label("分享", systemImage: "square.and.arrow.up")
+        }
+        Button {
+            addBookmark(forParagraphIndex: index)
+        } label: {
+            Label("添加书签", systemImage: "bookmark")
+        }
+        Button {
+            paragraphMenuText = text
+            isShowingDictLookup = true
+        } label: {
+            Label("查词典", systemImage: "character.book.closed")
+        }
+        Button {
+            paragraphMenuText = text
+            isShowingContentSearch = true
+        } label: {
+            Label("搜索本书", systemImage: "magnifyingglass")
+        }
+        Button {
+            paragraphMenuText = text
+            isShowingWebSearch = true
+        } label: {
+            Label("网络搜索", systemImage: "globe")
+        }
+        Button {
+            paragraphMenuText = text
+            isShowingReplaceRuleSeed = true
+        } label: {
+            Label("新建净化规则", systemImage: "wand.and.stars")
+        }
+    }
+
+    /// Always adds a fresh bookmark (matching Legado's `menu_bookmark` -- see `ReaderView.
+    /// addBookmark(forParagraph:)`'s matching doc comment), independent of `toggleBookmark`'s
+    /// current-top-of-screen-paragraph toggle.
+    private func addBookmark(forParagraphIndex index: Int) {
+        let bookmark = Bookmark(
+            isLocal: true, bookIdentifier: book.id, bookTitle: book.title,
+            chapterIndex: currentIndex, chapterTitle: chapter.title,
+            characterOffset: characterOffset(forParagraphIndex: index)
+        )
+        Task {
             try? await env.bookmarkStore.add(bookmark)
             isCurrentChapterBookmarked = true
         }
