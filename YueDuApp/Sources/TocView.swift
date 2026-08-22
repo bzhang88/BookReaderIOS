@@ -8,9 +8,9 @@ struct TocView: View {
     let tocURL: String
     let bookUrl: String
     let bookTitle: String
-    /// When set (from the shelf's "resume reading" entry point) and valid once chapters load,
-    /// auto-navigates straight into the reader at this chapter instead of leaving the user to
-    /// re-browse the whole table of contents.
+    /// When set (from the shelf's "resume reading" entry point, or `BookDetailView`'s "阅读" button)
+    /// and valid once chapters load, auto-navigates straight into the reader at this chapter instead
+    /// of leaving the user to re-browse the whole table of contents.
     var resumeChapterIndex: Int? = nil
 
     @EnvironmentObject private var env: AppEnvironment
@@ -18,6 +18,15 @@ struct TocView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var shouldPresentResume = false
+    // Real-usage bug: `.task` can re-run when this view becomes the top of the `NavigationStack`
+    // again after popping back from the pushed reader (a documented SwiftUI quirk with
+    // `NavigationLink`-provided destinations containing a `List`). Without this guard, `load()`
+    // re-running would set `shouldPresentResume = true` again every time -- the user taps back from
+    // the reader, sees this TOC list for a flash, and gets auto-navigated straight back into the
+    // *same* chapter, effectively unable to ever land on the TOC to pick a different one. `@State`
+    // (not a local variable in `load()`) is what makes this survive across those re-runs: it's tied
+    // to this view's identity, not to any one call of `load()`.
+    @State private var hasAutoNavigatedOnce = false
 
     var body: some View {
         List(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
@@ -55,11 +64,12 @@ struct TocView: View {
         errorMessage = nil
         do {
             chapters = try await TocService.fetchChapterList(source: source, tocURL: tocURL, httpClient: env.httpClient)
-            if let resumeChapterIndex, chapters.indices.contains(resumeChapterIndex) {
+            if !hasAutoNavigatedOnce, let resumeChapterIndex, chapters.indices.contains(resumeChapterIndex) {
+                hasAutoNavigatedOnce = true
                 shouldPresentResume = true
             }
         } catch {
-            errorMessage = "\(error)"
+            errorMessage = FriendlyError.message(for: error)
         }
         isLoading = false
     }

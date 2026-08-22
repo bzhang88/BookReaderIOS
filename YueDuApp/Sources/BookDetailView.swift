@@ -361,9 +361,18 @@ struct BookDetailView: View {
 
             if let bookInfo {
                 NavigationLink {
+                    // Real usage bug, now fixed: this used to hardcode `resumeChapterIndex: 0`
+                    // unconditionally, so re-opening a book you'd already made progress in always
+                    // restarted at chapter 1 instead of resuming -- and combined with `TocView`'s own
+                    // auto-navigate re-firing on `.task` re-runs (see its doc comment), tapping back
+                    // out of the reader would bounce straight back into that same wrong chapter,
+                    // making it feel like "back" didn't work at all. `shelfLastReadChapterIndex ?? 0`
+                    // resumes real progress when there is any, and still starts a genuinely new book
+                    // at chapter 1 (not `nil`, which would leave `TocView` on a bare list with no
+                    // auto-navigate at all -- "阅读" should always actually start reading).
                     TocView(
                         source: source, tocURL: bookInfo.tocUrl, bookUrl: bookUrl, bookTitle: name,
-                        resumeChapterIndex: 0
+                        resumeChapterIndex: shelfLastReadChapterIndex ?? 0
                     )
                 } label: {
                     Text("阅读").frame(maxWidth: .infinity)
@@ -379,6 +388,9 @@ struct BookDetailView: View {
 
     /// Populated by `load()` (and refreshed by `switchSource`) from the live shelf entry.
     @State private var shelfLastReadTitle: String?
+    /// Drives the "阅读" button's `resumeChapterIndex` -- see that button's own doc comment for the
+    /// real bug this fixes (it used to always hardcode `0`, ignoring any actual saved progress).
+    @State private var shelfLastReadChapterIndex: Int?
 
     private func load() async {
         isLoading = true
@@ -392,6 +404,7 @@ struct BookDetailView: View {
             shelfCoverUrl = existingShelfBook?.coverUrl
             shelfGroup = existingShelfBook?.group
             shelfLastReadTitle = existingShelfBook?.lastReadChapterTitle
+            shelfLastReadChapterIndex = existingShelfBook?.lastReadChapterIndex
             existingGroupNames = Array(Set(allShelfBooks.compactMap {
                 let trimmed = $0.group?.trimmingCharacters(in: .whitespacesAndNewlines)
                 return (trimmed?.isEmpty ?? true) ? nil : trimmed
@@ -404,7 +417,7 @@ struct BookDetailView: View {
             }
             await refreshDownloadedCount()
         } catch {
-            errorMessage = "\(error)"
+            errorMessage = FriendlyError.message(for: error)
         }
         isLoading = false
     }
@@ -566,6 +579,7 @@ struct BookDetailView: View {
             shelfCoverUrl = updated.coverUrl
             shelfGroup = updated.group
             shelfLastReadTitle = nil
+            shelfLastReadChapterIndex = nil
         }
     }
 }

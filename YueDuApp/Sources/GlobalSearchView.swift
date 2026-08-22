@@ -459,6 +459,10 @@ struct BookResultCard: View {
     let intro: String?
     let trailingLabel: String
     var isInShelf: Bool = false
+    /// Non-zero when `CapabilityScanner` found this row's source using rule syntax this app can't
+    /// run (most commonly JS) -- shown as the same orange "N 项不支持" badge `SourceLibraryView`
+    /// already uses, so a source likely to fail is visible *before* tapping in, not just after.
+    var compatibilityIssueCount: Int = 0
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -484,6 +488,14 @@ struct BookResultCard: View {
                             .padding(.vertical, 2)
                             .background(Color.green.opacity(0.15), in: Capsule())
                             .foregroundStyle(.green)
+                    }
+                    if compatibilityIssueCount > 0 {
+                        Text("\(compatibilityIssueCount) 项不支持")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.orange.opacity(0.2), in: Capsule())
+                            .foregroundStyle(.orange)
                     }
                 }
 
@@ -534,9 +546,17 @@ struct BookSourcePickerView: View {
             NavigationLink {
                 BookDetailView(source: resolveSource(entry), searchResult: entry)
             } label: {
+                // Real usage feedback: picking a source here only to hit a raw error after tapping
+                // in (see `BookDetailView.load`'s `FriendlyError` fix) left no way to tell *before*
+                // tapping which source was likely to fail. `CapabilityScanner.scan` is a pure,
+                // network-free static parse of the source's own rule strings (already used the same
+                // way for `SourceLibraryView`'s own badge) -- cheap enough to run inline per row here
+                // rather than needing `SourceLibraryView`'s precomputed dictionary, since this list is
+                // just "however many sources found this one book," never hundreds.
                 BookResultCard(
                     name: entry.name, author: entry.author, coverUrl: entry.coverUrl, wordCount: entry.wordCount,
-                    lastChapter: entry.lastChapter, intro: entry.intro, trailingLabel: entry.bookSourceName
+                    lastChapter: entry.lastChapter, intro: entry.intro, trailingLabel: entry.bookSourceName,
+                    compatibilityIssueCount: CapabilityScanner.scan(resolveSource(entry)).issues.count
                 )
             }
         }
