@@ -22,6 +22,11 @@ final class AppEnvironment: ObservableObject {
     let txtSplitRuleStore: TxtSplitRuleStore
     let loginCookieStore: LoginCookieStore
     let shelfGroupStore: ShelfGroupStore
+    /// Registered 书源 group names -- same generic "can exist with zero members" store
+    /// `shelfGroupStore` uses (see `ShelfGroupStore`'s own doc comment), just pointed at its own
+    /// file. `SourceGroupManagementView` merges this with whatever group names are still in live use
+    /// across `bookSourceStore`, same pattern as `ShelfGroupManagementView` already does for books.
+    let bookSourceGroupStore: ShelfGroupStore
     let dictRuleStore: DictRuleStore
     let webSearchEngineStore: WebSearchEngineStore
     let httpTTSEngineStore: HttpTTSEngineStore
@@ -51,6 +56,7 @@ final class AppEnvironment: ObservableObject {
         txtSplitRuleStore = TxtSplitRuleStore(fileURL: appSupport.appendingPathComponent("txt_split_rules.json"))
         loginCookieStore = LoginCookieStore(fileURL: appSupport.appendingPathComponent("login_cookies.json"))
         shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
+        bookSourceGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("book_source_groups.json"))
         dictRuleStore = DictRuleStore(fileURL: appSupport.appendingPathComponent("dict_rules.json"))
         webSearchEngineStore = WebSearchEngineStore(fileURL: appSupport.appendingPathComponent("web_search_engines.json"))
         httpTTSEngineStore = HttpTTSEngineStore(fileURL: appSupport.appendingPathComponent("http_tts_engines.json"))

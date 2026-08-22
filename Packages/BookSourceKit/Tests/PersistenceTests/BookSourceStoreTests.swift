@@ -85,4 +85,28 @@ final class BookSourceStoreTests: XCTestCase {
         let all = try await store.all()
         XCTAssertTrue(all.isEmpty)
     }
+
+    func testSetGroupsAppliesBatchAndSkipsSourcesNotInTheMap() async throws {
+        let store = BookSourceStore(fileURL: tempFileURL())
+        try await store.importSources([
+            source(url: "https://a.com", name: "A"),
+            source(url: "https://b.com", name: "B")
+        ])
+
+        try await store.setGroups(["https://a.com": "玄幻"])
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first { $0.bookSourceUrl == "https://a.com" }?.bookSourceGroup, "玄幻")
+        XCTAssertNil(all.first { $0.bookSourceUrl == "https://b.com" }?.bookSourceGroup)
+    }
+
+    func testSetGroupsCanClearAGroupWithExplicitNil() async throws {
+        let store = BookSourceStore(fileURL: tempFileURL())
+        try await store.importSources([BookSource(bookSourceUrl: "https://a.com", bookSourceName: "A", bookSourceGroup: "玄幻")])
+
+        try await store.setGroups(["https://a.com": nil])
+
+        let all = try await store.all()
+        XCTAssertNil(all.first?.bookSourceGroup)
+    }
 }

@@ -21,6 +21,31 @@ struct SourceLibraryView: View {
     @State private var loggingInSource: BookSource?
     @State private var verifyingSource: BookSource?
     @State private var loggedInSourceUrls: Set<String> = []
+    @State private var groupPickerTarget: BookSource?
+    @State private var registeredGroupNames: [String] = []
+    /// `nil` means "全部" (no filter). Real usage feedback (from a Legado-comparison pass): with
+    /// `bookSourceGroup` modeled but nothing in the UI to assign/filter by it, a user with a large
+    /// source collection (real-world Legado collections routinely run 50-200+ sources) had no way
+    /// to organize the list at all.
+    @State private var groupFilter: String?
+
+    /// Merges group names still in live use across `sources` with ones registered in
+    /// `bookSourceGroupStore` but not currently assigned to any source -- same reasoning as
+    /// `ShelfView.existingGroupNames`: otherwise a group created ahead of time via
+    /// `SourceGroupManagementView` would never show up here as a pickable/filterable option.
+    private var existingGroupNames: [String] {
+        var names = Set(sources.compactMap {
+            let trimmed = $0.bookSourceGroup?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmed?.isEmpty ?? true) ? nil : trimmed
+        })
+        names.formUnion(registeredGroupNames)
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private var displayedSources: [BookSource] {
+        guard let groupFilter else { return sources }
+        return sources.filter { $0.bookSourceGroup == groupFilter }
+    }
 
     var body: some View {
         NavigationStack {
@@ -30,12 +55,19 @@ struct SourceLibraryView: View {
                         "还没有书源", systemImage: "tray",
                         description: Text("点右上角 + 导入一个书源 JSON 文件")
                     )
+                } else if displayedSources.isEmpty {
+                    // A group filter is active and matched nothing -- distinct from "没有书源"
+                    // above, and from the plain empty list a silent zero-match would otherwise be.
+                    ContentUnavailableView(
+                        "这个分组下没有书源", systemImage: "folder",
+                        description: Text("在“…”菜单里的“筛选分组”选“全部”可以清除筛选")
+                    )
                 } else {
                     Text("点一个书源可以启用/停用它——只有启用的书源才会参与搜索")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(sources) { source in
+                ForEach(displayedSources) { source in
                     Button {
                         toggleEnabled(source)
                     } label: {
@@ -92,12 +124,23 @@ struct SourceLibraryView: View {
                             Label("编辑", systemImage: "pencil")
                         }
                         .tint(.blue)
+                        Button {
+                            groupPickerTarget = source
+                        } label: {
+                            Label("分组", systemImage: "folder")
+                        }
+                        .tint(.orange)
                     }
                     .contextMenu {
                         Button {
                             editingSource = source
                         } label: {
                             Label("编辑", systemImage: "pencil")
+                        }
+                        Button {
+                            groupPickerTarget = source
+                        } label: {
+                            Label("设置分组", systemImage: "folder")
                         }
                         Button {
                             debuggingSource = source
@@ -153,6 +196,35 @@ struct SourceLibraryView: View {
                         Button("回收站") { isShowingTrash = true }
                         Button("全部启用") { setAllEnabled(true) }.disabled(sources.isEmpty)
                         Button("全部停用") { setAllEnabled(false) }.disabled(sources.isEmpty)
+                        NavigationLink {
+                            SourceGroupManagementView()
+                        } label: {
+                            Text("分组管理")
+                        }
+                        if !existingGroupNames.isEmpty {
+                            Menu("筛选分组\(groupFilter.map { "（\($0)）" } ?? "")") {
+                                Button {
+                                    groupFilter = nil
+                                } label: {
+                                    if groupFilter == nil {
+                                        Label("全部", systemImage: "checkmark")
+                                    } else {
+                                        Text("全部")
+                                    }
+                                }
+                                ForEach(existingGroupNames, id: \.self) { name in
+                                    Button {
+                                        groupFilter = name
+                                    } label: {
+                                        if groupFilter == name {
+                                            Label(name, systemImage: "checkmark")
+                                        } else {
+                                            Text(name)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
@@ -163,6 +235,11 @@ struct SourceLibraryView: View {
             }
             .sheet(item: $editingSource, onDismiss: { Task { await reload() } }) { source in
                 BookSourceEditView(source: source)
+            }
+            .sheet(item: $groupPickerTarget) { source in
+                ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
+                    await setGroup(of: source, to: newGroup)
+                }
             }
             .sheet(isPresented: $isCreatingSource, onDismiss: { Task { await reload() } }) {
                 BookSourceEditView(source: nil)
@@ -219,6 +296,12 @@ struct SourceLibraryView: View {
         )
         let savedCookies = (try? await env.loginCookieStore.allCookies()) ?? [:]
         loggedInSourceUrls = Set(savedCookies.keys)
+        registeredGroupNames = (try? await env.bookSourceGroupStore.all()) ?? []
+    }
+
+    private func setGroup(of source: BookSource, to newGroup: String?) async {
+        try? await env.bookSourceStore.setGroups([source.bookSourceUrl: newGroup])
+        await reload()
     }
 
     private func toggleEnabled(_ source: BookSource) {
@@ -238,7 +321,10 @@ struct SourceLibraryView: View {
     /// Moves deleted sources to `bookSourceTrashStore` rather than removing them outright -- see
     /// `SourceTrashView`'s doc comment for why (fat-finger recovery in a long, similar-looking list).
     private func delete(at offsets: IndexSet) {
-        let toDelete = offsets.map { sources[$0] }
+        // `offsets` are indices into whatever `ForEach` is actually iterating -- `displayedSources`
+        // (possibly filtered by `groupFilter`), not the full unfiltered `sources` array. Indexing
+        // into `sources` here instead would delete the wrong row whenever a group filter is active.
+        let toDelete = offsets.map { displayedSources[$0] }
         Task {
             for source in toDelete {
                 try? await env.bookSourceTrashStore.add(source)

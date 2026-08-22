@@ -60,6 +60,21 @@ public actor BookSourceStore {
         try await store.save(sources)
     }
 
+    /// Batch group reassignment, keyed by `bookSourceUrl` -- see `ShelfStore.setGroups`'s matching
+    /// doc comment for why the value is `String??` (present-but-nil vs. absent-from-the-dictionary
+    /// aren't the same thing: only URLs that are actual keys get touched at all, and a present `nil`
+    /// value clears that source's group rather than leaving it alone). Used by
+    /// `SourceGroupManagementView` to rename/delete a group across every source in it in one write.
+    public func setGroups(_ groups: [String: String?]) async throws {
+        var sources = try await all()
+        for idx in sources.indices {
+            if let newGroup = groups[sources[idx].bookSourceUrl] {
+                sources[idx].bookSourceGroup = newGroup
+            }
+        }
+        try await store.save(sources)
+    }
+
     public func remove(bookSourceUrl: String) async throws {
         var sources = try await all()
         sources.removeAll { $0.bookSourceUrl == bookSourceUrl }
