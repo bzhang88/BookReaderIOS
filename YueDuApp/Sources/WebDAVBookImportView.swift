@@ -91,7 +91,7 @@ struct WebDAVBookImportView: View {
                 return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
         } catch {
-            errorMessage = "\(error)"
+            errorMessage = FriendlyError.message(for: error)
         }
         isLoading = false
     }
@@ -117,7 +117,7 @@ struct WebDAVBookImportView: View {
             let chapters = split.map { LocalChapter(title: $0.title, text: $0.text) }
             try await env.localBookStore.add(LocalBook(title: title, chapters: chapters))
         } catch {
-            errorMessage = "导入失败: \(error)"
+            errorMessage = "导入失败: " + FriendlyError.message(for: error)
         }
     }
 }

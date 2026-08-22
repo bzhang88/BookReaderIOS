@@ -2,8 +2,8 @@ import Foundation
 import RuleEngine
 import NetworkClient
 
-/// Maps a book-source fetch failure to a short, non-technical Chinese message -- real usage
-/// feedback: raw `"\(error)"` interpolation (e.g. `unsupportedFeature(putGetSyntax)`,
+/// Maps a fetch failure (book-source or WebDAV) to a short, non-technical Chinese message -- real
+/// usage feedback: raw `"\(error)"` interpolation (e.g. `unsupportedFeature(putGetSyntax)`,
 /// `nonTextResponse`) reads as "something broke" with no actionable information, especially for
 /// `RuleEngineError` cases that specifically mean "this book source's rules use syntax this app
 /// can't run yet" -- a real, common failure mode (a survey of one real user's 463-source
@@ -11,13 +11,28 @@ import NetworkClient
 /// rule alone), not a transient network problem retrying would fix.
 ///
 /// Lives in the package (not the app target) so both `MultiSourceSearchService`'s per-source
-/// `SourceOutcome.errorDescription` and the app target's `BookDetailView`/`TocView` share the same
-/// mapping instead of two copies drifting apart -- `public` so the app target can call it too.
-/// The same raw `"\(error)"` pattern still exists in a few other app-target screens (`ExploreView`,
-/// `ShelfView`, `ReaderView`'s 换源, `SourceLibraryView`, ...); rolling this out there too is a
-/// reasonable follow-up, deliberately not done in this pass to keep it scoped to reported bugs.
+/// `SourceOutcome.errorDescription` and the app target's `BookDetailView`/`TocView`/
+/// `BackupSettingsView` share the same mapping instead of copies drifting apart -- `public` so the
+/// app target can call it too. `RuleEngineError`'s cases are inherently book-source-specific (that
+/// error type can only originate from the rule engine), but every other branch is deliberately
+/// worded to read correctly regardless of which of those callers hit it, since `WebDAVClientError`
+/// and the underlying `HTTPClientError`/network cases are shared infrastructure, not unique to
+/// fetching book sources.
 public enum FriendlyError {
     public static func message(for error: Error) -> String {
+        if let webdavError = error as? WebDAVClientError {
+            switch webdavError {
+            case .invalidBaseURL:
+                return "WebDAV 地址格式不对，请检查服务器地址"
+            case .unexpectedStatus(let code):
+                switch code {
+                case 401, 403: return "WebDAV 账号或密码不正确"
+                case 404: return "WebDAV 路径不存在，请检查备份目录设置"
+                case 507: return "WebDAV 空间不足"
+                default: return "WebDAV 请求失败（状态码 \(code)）"
+                }
+            }
+        }
         if let ruleError = error as? RuleEngineError {
             switch ruleError {
             case .unsupportedFeature:
@@ -31,9 +46,9 @@ public enum FriendlyError {
         if let httpError = error as? HTTPClientError {
             switch httpError {
             case .invalidURL:
-                return "书源里的网址格式不对，可能是书源配置有误"
+                return "网址格式不对，请检查配置"
             case .nonTextResponse:
-                return "书源返回的内容不是文本，可能被拦截了（比如需要登录或验证码）"
+                return "返回的内容不是文本，可能被拦截了（比如需要登录或验证码）"
             }
         }
         let nsError = error as NSError
@@ -42,13 +57,13 @@ public enum FriendlyError {
             case NSURLErrorNotConnectedToInternet:
                 return "没有网络连接"
             case NSURLErrorTimedOut:
-                return "请求超时，这个书源可能已经失效"
+                return "请求超时，请稍后重试"
             case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost:
-                return "连不上这个书源的服务器，可能已经失效"
+                return "连接失败，请检查网络或服务器地址"
             default:
-                return "网络请求失败，这个书源可能暂时无法访问"
+                return "网络请求失败，请稍后重试"
             }
         }
-        return "获取失败，这个书源可能暂时有问题，可以换一个试试"
+        return "操作失败，请稍后重试"
     }
 }

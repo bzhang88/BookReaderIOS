@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import BookSourceModel
 import Persistence
 import NetworkClient
+import WebBookOrchestrator
 
 /// Full backup/restore of selected data categories to/from a WebDAV server. Deliberately not a
 /// continuous background sync -- explicit "备份"/"恢复" buttons the user triggers, which is easier
@@ -203,7 +204,7 @@ struct BackupSettingsView: View {
 
             statusMessage = "备份完成：" + summary.joined(separator: "，")
         } catch {
-            statusMessage = "备份失败: \(error)"
+            statusMessage = "备份失败: " + FriendlyError.message(for: error)
         }
         isWorking = false
     }
@@ -335,7 +336,7 @@ struct BackupSettingsView: View {
             plan.previews = previews
             pendingRestore = plan
         } catch {
-            statusMessage = "预览失败: \(error)"
+            statusMessage = "预览失败: " + FriendlyError.message(for: error)
         }
         isWorking = false
     }
@@ -376,7 +377,7 @@ struct BackupSettingsView: View {
             isShowingLocalExportSheet = true
             statusMessage = "已生成备份文件"
         } catch {
-            statusMessage = "导出失败: \(error)"
+            statusMessage = "导出失败: " + FriendlyError.message(for: error)
         }
         isWorking = false
     }
@@ -485,7 +486,7 @@ struct BackupSettingsView: View {
             plan.previews = previews
             pendingRestore = plan
         } catch {
-            statusMessage = "导入失败: \(error)"
+            statusMessage = "导入失败: " + FriendlyError.message(for: error)
         }
         isWorking = false
     }
@@ -552,7 +553,7 @@ struct BackupSettingsView: View {
 
             statusMessage = "恢复完成：" + summary.joined(separator: "，")
         } catch {
-            statusMessage = "恢复失败: \(error)"
+            statusMessage = "恢复失败: " + FriendlyError.message(for: error)
         }
         isWorking = false
     }
