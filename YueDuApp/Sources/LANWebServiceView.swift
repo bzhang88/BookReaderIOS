@@ -21,6 +21,14 @@ struct LANWebServiceView: View {
 private struct LANWebServiceForm: View {
     @ObservedObject var server: LANWebServer
     @State private var portText = "8080"
+    // Real usage feedback (from the same Legado-comparison pass that found this gap): anyone on the
+    // same Wi-Fi/LAN could browse the full shelf and read complete book text with zero
+    // authentication -- Legado's own real Web服务 has an optional token gate
+    // (`AppConfig.webServiceAuthEnabled`/`webServiceToken`) for exactly this. Off by default (`""`),
+    // matching this feature's pre-existing no-auth behavior -- enabling it is opt-in, not a
+    // breaking change for anyone already using it on a network they trust.
+    @AppStorage("lanWeb.requireAuth") private var requireAuth = false
+    @AppStorage("lanWeb.accessToken") private var accessToken = ""
 
     var body: some View {
         Form {
@@ -50,6 +58,27 @@ private struct LANWebServiceForm: View {
                     .keyboardType(.numberPad)
                     .disabled(server.isRunning)
             }
+
+            Section {
+                Toggle("需要访问密码", isOn: $requireAuth)
+                    .disabled(server.isRunning)
+                if requireAuth {
+                    HStack {
+                        TextField("访问密码", text: $accessToken)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .disabled(server.isRunning)
+                        Button("随机生成") { accessToken = Self.randomToken() }
+                            .disabled(server.isRunning)
+                    }
+                }
+            } footer: {
+                Text(
+                    requireAuth
+                        ? "开启后，浏览器第一次打开访问地址时需要先输入这个密码，同一个 Wi-Fi 下没有密码的人打不开。"
+                        : "同一个 Wi-Fi 下的任何人都能直接打开访问地址浏览你的书架和正文，公共/合租网络建议开启密码。"
+                )
+            }
         }
         .navigationTitle("Web 服务")
         .navigationBarTitleDisplayMode(.inline)
@@ -57,7 +86,12 @@ private struct LANWebServiceForm: View {
 
     private func start() {
         let port = UInt16(portText) ?? 8080
-        server.start(port: port)
+        let token = requireAuth ? accessToken : nil
+        server.start(port: port, requiredToken: token)
+    }
+
+    private static func randomToken() -> String {
+        String((0..<8).map { _ in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".randomElement()! })
     }
 }
 #endif

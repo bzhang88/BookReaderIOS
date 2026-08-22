@@ -22,6 +22,10 @@ import Network
 /// page is one fully self-contained HTML response (inline styles, no separate asset requests), so
 /// one connection only ever needs to carry exactly one request/response before closing -- no
 /// keep-alive or concurrent-requests-per-connection handling to get right.
+///
+/// Optional shared-token auth (`LANWebAuth`) gates every request when `LANWebServiceView` configures
+/// one -- see that type's doc comment for why this exists (anyone on the same Wi-Fi/LAN could
+/// otherwise browse the full shelf and read complete book text with no authentication at all).
 #if canImport(Network)
 @MainActor
 final class LANWebServer: ObservableObject {
@@ -30,6 +34,7 @@ final class LANWebServer: ObservableObject {
     @Published private(set) var lastError: String?
 
     private var listener: NWListener?
+    private var requiredToken: String?
     private let shelfStore: ShelfStore
     private let bookSourceStore: BookSourceStore
     private let chapterCacheStore: ChapterCacheStore
@@ -45,8 +50,12 @@ final class LANWebServer: ObservableObject {
         self.httpClient = httpClient
     }
 
-    func start(port: UInt16 = 8080) {
+    /// `requiredToken` matches Legado's own `AppConfig.webServiceToken` -- `nil`/empty keeps this
+    /// feature's pre-existing no-auth behavior (opt-in, not a breaking default change); set means
+    /// every request needs a matching `?token=` query value (see `LANWebAuth`/`authPromptHTML`).
+    func start(port: UInt16 = 8080, requiredToken: String? = nil) {
         stop()
+        self.requiredToken = (requiredToken?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
         guard let endpointPort = NWEndpoint.Port(rawValue: port) else {
             lastError = "无效的端口号"
             return
@@ -149,8 +158,43 @@ final class LANWebServer: ObservableObject {
             send(SimpleHTTPResponseBuilder.buildHTML(statusCode: 400, html: page("请求格式有误")), on: connection)
             return
         }
+        guard LANWebAuth.isAuthorized(request: request, requiredToken: requiredToken) else {
+            send(SimpleHTTPResponseBuilder.buildHTML(statusCode: 401, html: authPromptHTML()), on: connection)
+            return
+        }
         let html = await renderPage(for: request)
         send(SimpleHTTPResponseBuilder.buildHTML(html: html), on: connection)
+    }
+
+    /// Every internal link this server generates goes through this -- with `requiredToken` set, a
+    /// request that already proved it (see `respond(to:on:)`) needs that same token appended to
+    /// every link it follows next, since there's no session/cookie to carry it forward otherwise
+    /// (see `LANWebAuth`'s doc comment on why that's a deliberate, not missing, design choice here).
+    private func withToken(_ path: String) -> String {
+        guard let requiredToken, !requiredToken.isEmpty else { return path }
+        let separator = path.contains("?") ? "&" : "?"
+        return "\(path)\(separator)token=\(percentEncoded(requiredToken))"
+    }
+
+    private func authPromptHTML() -> String {
+        """
+        <!DOCTYPE html>
+        <html lang="zh-CN"><head><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>需要访问密码</title>
+        <style>
+        body { font-family: -apple-system, sans-serif; max-width: 360px; margin: 96px auto; padding: 16px; text-align: center; }
+        input { width: 100%; padding: 10px; font-size: 16px; box-sizing: border-box; margin: 12px 0; }
+        button { width: 100%; padding: 10px; font-size: 16px; }
+        </style>
+        </head><body>
+        <h2>需要访问密码</h2>
+        <form method="GET" action="/">
+        <input type="password" name="token" placeholder="输入访问密码" autofocus>
+        <button type="submit">进入</button>
+        </form>
+        </body></html>
+        """
     }
 
     private func send(_ data: Data, on connection: NWConnection) {
@@ -184,7 +228,7 @@ final class LANWebServer: ObservableObject {
             return page("书架是空的")
         }
         let rows = books.map { book in
-            "<li><a href=\"/book?u=\(percentEncoded(book.bookUrl))\">\(escaped(book.name))</a>"
+            "<li><a href=\"\(withToken("/book?u=\(percentEncoded(book.bookUrl))"))\">\(escaped(book.name))</a>"
                 + "<span class=\"muted\"> \(escaped(book.author ?? ""))</span></li>"
         }.joined()
         return page("书架", body: "<ul>\(rows)</ul>")
@@ -203,7 +247,7 @@ final class LANWebServer: ObservableObject {
             return page("没有找到章节")
         }
         let rows = chapters.map { chapter in
-            "<li><a href=\"/chapter?u=\(percentEncoded(bookUrl))&i=\(chapter.index)\">\(escaped(chapter.title))</a></li>"
+            "<li><a href=\"\(withToken("/chapter?u=\(percentEncoded(bookUrl))&i=\(chapter.index)"))\">\(escaped(chapter.title))</a></li>"
         }.joined()
         return page(shelfBook.name, body: "<ul>\(rows)</ul>")
     }
@@ -257,7 +301,7 @@ final class LANWebServer: ObservableObject {
         p { margin: 0.8em 0; }
         </style>
         </head><body>
-        <p><a href="/">← 返回书架</a></p>
+        <p><a href="\(withToken("/"))">← 返回书架</a></p>
         <h2>\(escaped(title))</h2>
         \(body)
         </body></html>
