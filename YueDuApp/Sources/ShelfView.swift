@@ -186,6 +186,13 @@ struct ShelfView: View {
             }
             .disabled(isCheckingUpdates || books.isEmpty)
         }
+        ToolbarItem(placement: .primaryAction) {
+            NavigationLink {
+                ShelfListImportExportView()
+            } label: {
+                Label("书单导入/导出", systemImage: "square.and.arrow.up.on.square")
+            }
+        }
         if isSelecting {
             batchActionsToolbarContent
         }
