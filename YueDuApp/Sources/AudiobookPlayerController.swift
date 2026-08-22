@@ -11,6 +11,11 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
+    @Published private(set) var playbackRate: Float = 1.0
+    /// Live countdown for the sleep timer, in seconds; `nil` when no timer is running. Survives a
+    /// chapter auto-advance (`stop()` followed by `play()` for the next chapter) on purpose -- a
+    /// listener falling asleep across a chapter boundary is the whole point of this feature.
+    @Published private(set) var sleepTimerRemainingSeconds: Int?
 
     /// Called when the current stream finishes playing on its own -- the view uses this to advance
     /// to the next chapter automatically, matching how listening to an audiobook naturally continues
@@ -22,6 +27,7 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
     private var timeObserverToken: Any?
     private var bookTitle = ""
     private var chapterTitle = ""
+    private var sleepTimerTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -42,7 +48,10 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
             self, selector: #selector(handleDidPlayToEnd), name: .AVPlayerItemDidPlayToEndTime, object: item
         )
         addTimeObserver()
-        newPlayer.play()
+        // `.rate = playbackRate` rather than `.play()` (which always resumes at 1.0x) -- AVPlayer
+        // begins playing once the item is ready even if `rate` is set before loading finishes, so
+        // this doesn't need to wait on item-ready status separately.
+        newPlayer.rate = playbackRate
         isPlaying = true
         updateNowPlayingInfo()
     }
@@ -52,10 +61,45 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
         if isPlaying {
             player.pause()
         } else {
-            player.play()
+            player.rate = playbackRate
         }
         isPlaying.toggle()
         updateNowPlayingInfo()
+    }
+
+    func setPlaybackRate(_ rate: Float) {
+        playbackRate = rate
+        if isPlaying {
+            player?.rate = rate
+        }
+        updateNowPlayingInfo()
+    }
+
+    /// Pauses playback once `minutes` has elapsed; `sleepTimerRemainingSeconds` powers a live
+    /// countdown in the UI. Starting a new timer while one is already running replaces it outright
+    /// rather than stacking, matching every sleep-timer picker UI (including Legado's own).
+    func startSleepTimer(minutes: Int) {
+        sleepTimerTask?.cancel()
+        sleepTimerRemainingSeconds = minutes * 60
+        sleepTimerTask = Task { @MainActor [weak self] in
+            while let self, let remaining = self.sleepTimerRemainingSeconds, remaining > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self.sleepTimerRemainingSeconds = remaining - 1
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.player?.pause()
+            self.isPlaying = false
+            self.sleepTimerRemainingSeconds = nil
+            self.sleepTimerTask = nil
+            self.updateNowPlayingInfo()
+        }
+    }
+
+    func cancelSleepTimer() {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        sleepTimerRemainingSeconds = nil
     }
 
     func seek(to seconds: Double) {
@@ -110,9 +154,11 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
     private func configureRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.addTarget { [weak self] _ in
-            self?.player?.play()
-            self?.isPlaying = true
-            self?.updateNowPlayingInfo()
+            if let self {
+                self.player?.rate = self.playbackRate
+                self.isPlaying = true
+                self.updateNowPlayingInfo()
+            }
             return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
@@ -136,7 +182,7 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
             info[MPMediaItemPropertyPlaybackDuration] = duration
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         }
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? Double(playbackRate) : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 

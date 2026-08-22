@@ -106,9 +106,62 @@ struct AudiobookPlayerView: View {
         // Matches `ReaderView`'s same fix -- without this, the main app's 书架/发现/订阅/我的 tab
         // bar stayed visible underneath this player's own controls.
         .toolbar(.hidden, for: .tabBar)
+        .toolbar { toolbarContent }
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
         .onAppear { player.onFinished = { advanceOnFinish() } }
         .onDisappear { player.stop() }
+    }
+
+    // Broken out into its own `@ToolbarContentBuilder` property rather than an inline `.toolbar {
+    // }` closure -- same "compiler unable to type-check this expression in reasonable time" CI
+    // failure class `ShelfView`/`SourceCheckView` already document: Windows-local `swift build`
+    // can't catch it, only the real macOS `xcodebuild` runner can, so this stays proactively split.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                ForEach(Self.playbackRates, id: \.self) { rate in
+                    Button {
+                        player.setPlaybackRate(rate)
+                    } label: {
+                        if player.playbackRate == rate {
+                            Label(Self.rateLabel(rate), systemImage: "checkmark")
+                        } else {
+                            Text(Self.rateLabel(rate))
+                        }
+                    }
+                }
+            } label: {
+                Text(Self.rateLabel(player.playbackRate))
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                if player.sleepTimerRemainingSeconds != nil {
+                    Button("关闭定时", role: .destructive) { player.cancelSleepTimer() }
+                }
+                ForEach(Self.sleepTimerMinutesOptions, id: \.self) { minutes in
+                    Button("\(minutes) 分钟后暂停") { player.startSleepTimer(minutes: minutes) }
+                }
+            } label: {
+                if let remaining = player.sleepTimerRemainingSeconds {
+                    Label(formatted(Double(remaining)), systemImage: "moon.zzz.fill")
+                } else {
+                    Image(systemName: "moon.zzz")
+                }
+            }
+        }
+    }
+
+    private static let playbackRates: [Float] = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    private static let sleepTimerMinutesOptions = [15, 30, 45, 60]
+
+    private static func rateLabel(_ rate: Float) -> String {
+        if rate == rate.rounded() { return "\(Int(rate))x" }
+        var text = String(format: "%.2f", rate)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text + "x"
     }
 
     private func goTo(_ index: Int) {
