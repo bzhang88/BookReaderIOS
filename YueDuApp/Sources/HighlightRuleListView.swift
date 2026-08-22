@@ -21,6 +21,9 @@ struct HighlightRuleListView: View {
                     editingRule = rule
                 } label: {
                     HStack {
+                        Circle()
+                            .fill(Color(hex: rule.colorHex ?? "") ?? .orange)
+                            .frame(width: 12, height: 12)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(rule.name)
                                 .font(.headline)
@@ -92,12 +95,18 @@ struct HighlightRuleEditView: View {
     @State private var name: String
     @State private var pattern: String
     @State private var enabled: Bool
+    @State private var color: Color
+    @State private var isBold: Bool
+    @State private var isUnderlined: Bool
 
     init(rule: HighlightRule?) {
         self.rule = rule
         _name = State(initialValue: rule?.name ?? "")
         _pattern = State(initialValue: rule?.pattern ?? "")
         _enabled = State(initialValue: rule?.enabled ?? true)
+        _color = State(initialValue: rule?.colorHex.flatMap { Color(hex: $0) } ?? .orange)
+        _isBold = State(initialValue: rule?.resolvedIsBold ?? true)
+        _isUnderlined = State(initialValue: rule?.resolvedIsUnderlined ?? false)
     }
 
     var body: some View {
@@ -112,6 +121,16 @@ struct HighlightRuleEditView: View {
                 Section {
                     Toggle("启用", isOn: $enabled)
                 }
+                Section("样式") {
+                    ColorPicker("颜色", selection: $color, supportsOpacity: false)
+                    Toggle("加粗", isOn: $isBold)
+                    Toggle("下划线", isOn: $isUnderlined)
+                    Text("预览：").font(.caption).foregroundStyle(.secondary)
+                        + Text(name.isEmpty ? "示例文字" : name)
+                            .foregroundStyle(color)
+                            .fontWeight(isBold ? .bold : .regular)
+                            .underline(isUnderlined)
+                }
             }
             .navigationTitle(rule == nil ? "新建高亮规则" : "编辑高亮规则")
             .navigationBarTitleDisplayMode(.inline)
@@ -123,7 +142,8 @@ struct HighlightRuleEditView: View {
                     Button("保存") {
                         let saved = HighlightRule(
                             id: rule?.id ?? UUID().uuidString, name: name.isEmpty ? pattern : name,
-                            pattern: pattern, enabled: enabled
+                            pattern: pattern, enabled: enabled, colorHex: color.toHex(),
+                            isBold: isBold, isUnderlined: isUnderlined
                         )
                         Task {
                             try? await env.highlightRuleStore.add(saved)

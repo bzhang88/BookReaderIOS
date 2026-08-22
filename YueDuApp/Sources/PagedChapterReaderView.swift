@@ -186,8 +186,8 @@ struct PagedChapterReaderView: View {
         let isSpeaking = readAloudParagraphIndex == chunk.paragraphIndex
         let segments = HighlightRuleApplier.segments(highlightRules, in: chunk.text)
         segments.reduce(Text("")) { partial, segment in
-            if segment.isHighlighted {
-                return partial + Text(segment.text).foregroundStyle(.orange).bold()
+            if let rule = segment.rule {
+                return partial + Text.highlighted(segment.text, rule: rule)
             } else {
                 return partial + Text(segment.text).foregroundStyle(textColor)
             }

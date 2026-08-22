@@ -1487,8 +1487,8 @@ struct ReaderView: View {
     private func highlightedText(_ paragraph: String) -> Text {
         let segments = HighlightRuleApplier.segments(highlightRules, in: paragraph)
         return segments.reduce(Text("")) { partial, segment in
-            if segment.isHighlighted {
-                return partial + Text(segment.text).foregroundStyle(.orange).bold()
+            if let rule = segment.rule {
+                return partial + Text.highlighted(segment.text, rule: rule)
             } else {
                 return partial + Text(segment.text).foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
             }

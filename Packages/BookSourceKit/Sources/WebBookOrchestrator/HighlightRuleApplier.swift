@@ -4,12 +4,17 @@ import BookSourceModel
 public enum HighlightRuleApplier {
     public struct Segment: Equatable {
         public var text: String
-        public var isHighlighted: Bool
+        /// The rule that owns this span's styling, or `nil` for an unhighlighted span. Carrying the
+        /// whole rule (not just a `Bool`) is what lets the renderer apply each rule's own
+        /// color/bold/underline instead of one hardcoded style for every match.
+        public var rule: HighlightRule?
 
-        public init(text: String, isHighlighted: Bool) {
+        public init(text: String, rule: HighlightRule? = nil) {
             self.text = text
-            self.isHighlighted = isHighlighted
+            self.rule = rule
         }
+
+        public var isHighlighted: Bool { rule != nil }
     }
 
     /// Splits `text` into alternating highlighted/plain segments based on every enabled rule's
@@ -18,45 +23,48 @@ public enum HighlightRuleApplier {
     /// and can't be verified without a real device; plain `NSRegularExpression`/`String` range
     /// handling is the same well-tested approach `ReplaceRuleApplier` already uses successfully.
     public static func segments(_ rules: [HighlightRule], in text: String) -> [Segment] {
-        var ranges: [Range<String.Index>] = []
+        var matches: [(range: Range<String.Index>, rule: HighlightRule)] = []
         for rule in rules where rule.enabled {
             guard !rule.pattern.isEmpty, let regex = try? NSRegularExpression(pattern: rule.pattern) else { continue }
             let nsText = text as NSString
-            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
-            for match in matches {
+            let found = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+            for match in found {
                 if let range = Range(match.range, in: text) {
-                    ranges.append(range)
+                    matches.append((range, rule))
                 }
             }
         }
 
-        guard !ranges.isEmpty else {
-            return [Segment(text: text, isHighlighted: false)]
+        guard !matches.isEmpty else {
+            return [Segment(text: text)]
         }
 
-        // Merge overlapping/adjacent ranges so matches from multiple rules covering the same text
-        // don't produce duplicate or zero-length segments.
-        let sorted = ranges.sorted { $0.lowerBound < $1.lowerBound }
-        var merged: [Range<String.Index>] = []
-        for range in sorted {
-            if let last = merged.last, range.lowerBound <= last.upperBound {
-                merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+        // Stable sort by start position -- ties (and any later merge) keep whichever rule's match
+        // was found first, so an overlap between two rules' matches consistently styles as
+        // whichever rule comes first in the user's list, not whichever happened to be discovered
+        // last while merging.
+        let sortedMatches = matches.sorted { $0.range.lowerBound < $1.range.lowerBound }
+        var merged: [(range: Range<String.Index>, rule: HighlightRule)] = []
+        for match in sortedMatches {
+            if let last = merged.last, match.range.lowerBound <= last.range.upperBound {
+                let newRange = last.range.lowerBound..<max(last.range.upperBound, match.range.upperBound)
+                merged[merged.count - 1] = (newRange, last.rule)
             } else {
-                merged.append(range)
+                merged.append(match)
             }
         }
 
         var segments: [Segment] = []
         var cursor = text.startIndex
-        for range in merged {
-            if cursor < range.lowerBound {
-                segments.append(Segment(text: String(text[cursor..<range.lowerBound]), isHighlighted: false))
+        for match in merged {
+            if cursor < match.range.lowerBound {
+                segments.append(Segment(text: String(text[cursor..<match.range.lowerBound])))
             }
-            segments.append(Segment(text: String(text[range]), isHighlighted: true))
-            cursor = range.upperBound
+            segments.append(Segment(text: String(text[match.range]), rule: match.rule))
+            cursor = match.range.upperBound
         }
         if cursor < text.endIndex {
-            segments.append(Segment(text: String(text[cursor...]), isHighlighted: false))
+            segments.append(Segment(text: String(text[cursor...])))
         }
         return segments
     }

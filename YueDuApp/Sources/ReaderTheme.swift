@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import BookSourceModel
 
 enum ReaderTheme: String, CaseIterable, Identifiable {
     case system, day, night, sepia, green, gray, custom
@@ -68,6 +69,20 @@ extension Color {
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
         UIColor(self).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         return String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255))
+    }
+}
+
+extension Text {
+    /// Styles one `HighlightRuleApplier.Segment`'s highlighted text using its owning rule's own
+    /// color/bold/underline -- shared by `ReaderView.highlightedText` and `PagedChapterReaderView
+    /// .styledChunk` so both readers stay visually consistent as highlight styling options grow.
+    /// `rule.colorHex` falling through `Color(hex:)`'s own nil-on-invalid-input handling covers
+    /// both "no color chosen" and "rule predates this styling feature" the same way.
+    static func highlighted(_ text: String, rule: HighlightRule) -> Text {
+        var result = Text(text).foregroundStyle(Color(hex: rule.colorHex ?? "") ?? .orange)
+        if rule.resolvedIsBold { result = result.bold() }
+        if rule.resolvedIsUnderlined { result = result.underline() }
+        return result
     }
 }
 
