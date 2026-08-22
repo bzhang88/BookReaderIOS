@@ -486,6 +486,10 @@ struct BookResultCard: View {
     /// run (most commonly JS) -- shown as the same orange "N 项不支持" badge `SourceLibraryView`
     /// already uses, so a source likely to fail is visible *before* tapping in, not just after.
     var compatibilityIssueCount: Int = 0
+    /// The real, freshly-fetched chapter count -- only ever set by `ChangeSourceView`'s picker
+    /// sheet (see its own doc comment for why: a real network fetch per candidate isn't something
+    /// every card everywhere should pay for). `nil` elsewhere, matching this parameter's default.
+    var chapterCount: Int? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -528,6 +532,9 @@ struct BookResultCard: View {
                     }
                     if let wordCount, !wordCount.isEmpty {
                         Text(wordCount)
+                    }
+                    if let chapterCount {
+                        Text("共 \(chapterCount) 章")
                     }
                 }
                 .font(.caption)

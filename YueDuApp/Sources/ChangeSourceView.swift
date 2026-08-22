@@ -25,6 +25,18 @@ struct ChangeSourceView: View {
     @State private var hasSearchedOnce = false
     @State private var isSwitching = false
     @State private var pickerGroup: GroupedSearchResult?
+    // Real usage feedback (a Legado-comparison pass): with several exact-match sources to pick
+    // from, there was no way to tell which one actually has the most chapters -- Legado's own
+    // change-source screen fetches each candidate's TOC to compare completeness (word/chapter
+    // count), the standard way to pick "which mirror has the fullest translation" instead of
+    // guessing from the source name alone. `SearchResult.wordCount` (already shown on each card)
+    // is the *source's own self-reported* figure -- inconsistent formatting across sources, and
+    // sometimes just stale -- so this fetches the real, current chapter count instead. Keyed by
+    // `bookUrl` (unique per candidate within one picker sheet), not `bookSourceUrl` (`bookUrl`
+    // is what `SearchResult` actually varies by; a source could theoretically be re-used, though
+    // that doesn't happen in practice here).
+    @State private var chapterCounts: [String: Int] = [:]
+    @State private var isLoadingChapterCounts = false
 
     private var exactGroups: [GroupedSearchResult] {
         groups.filter(isExactMatch)
@@ -66,7 +78,7 @@ struct ChangeSourceView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $pickerGroup) { group in
             NavigationStack {
-                List(group.entries) { entry in
+                List(rankedEntries(for: group)) { entry in
                     Button {
                         pickerGroup = nil
                         switchTo(entry)
@@ -74,10 +86,24 @@ struct ChangeSourceView: View {
                         BookResultCard(
                             name: entry.name, author: entry.author, coverUrl: entry.coverUrl,
                             wordCount: entry.wordCount, lastChapter: entry.lastChapter, intro: entry.intro,
-                            trailingLabel: entry.bookSourceName
+                            trailingLabel: entry.bookSourceName, chapterCount: chapterCounts[entry.bookUrl]
                         )
                     }
                     .disabled(isSwitching)
+                }
+                .overlay {
+                    if isLoadingChapterCounts {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                ProgressView("正在比较章节数…").font(.caption)
+                                Spacer()
+                            }
+                            .padding(.bottom, 8)
+                        }
+                        .allowsHitTesting(false)
+                    }
                 }
                 .navigationTitle(group.name)
                 .navigationBarTitleDisplayMode(.inline)
@@ -87,8 +113,59 @@ struct ChangeSourceView: View {
                     }
                 }
             }
+            .task(id: group.id) { await loadChapterCounts(for: group) }
         }
         .task { await search() }
+    }
+
+    /// Highest chapter count first once fetched; entries not fetched yet (still loading, or the
+    /// fetch failed) keep their original relevance-ranked order and sort after anything with a
+    /// known count -- never show as if they had zero chapters.
+    private func rankedEntries(for group: GroupedSearchResult) -> [SearchResult] {
+        group.entries.enumerated().sorted { lhs, rhs in
+            let lhsCount = chapterCounts[lhs.element.bookUrl]
+            let rhsCount = chapterCounts[rhs.element.bookUrl]
+            switch (lhsCount, rhsCount) {
+            case let (l?, r?): return l != r ? l > r : lhs.offset < rhs.offset
+            case (.some, nil): return true
+            case (nil, .some): return false
+            case (nil, nil): return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+    }
+
+    /// Fetches every candidate's TOC concurrently (bounded to this one group's entries, typically a
+    /// handful -- not a whole-library sweep) purely to compare `chapters.count`; the chapters
+    /// themselves are discarded once counted; `switchTo`'s own real TOC fetch (via
+    /// `onSourceSelected`) still happens fresh afterward. Two real requests per candidate, not one:
+    /// `SearchResult.bookUrl` is the book's *detail* page, not its TOC -- same two-step
+    /// info-then-toc fetch (and the same `bookInfo?.tocUrl ?? match.bookUrl` fallback for a source
+    /// whose detail-fetch fails) `ShelfView.switchSource` already uses when actually committing a
+    /// source switch, just discarding the info instead of building a `ShelfBook` from it.
+    private func loadChapterCounts(for group: GroupedSearchResult) async {
+        isLoadingChapterCounts = true
+        // Extracted once, on the MainActor, before entering the task group -- `env` itself is
+        // `@MainActor`-isolated (see `AppEnvironment`), so it can't be touched from inside a child
+        // task the way `httpClient` (a plain `Sendable` value once extracted) can. Matches
+        // `MultiSourceSearchService.search`'s own established idiom of reading `env.httpClient` once
+        // at the call site rather than inside `withTaskGroup`.
+        let httpClient = env.httpClient
+        await withTaskGroup(of: (String, Int?).self) { taskGroup in
+            for entry in group.entries {
+                guard chapterCounts[entry.bookUrl] == nil,
+                      let source = sources.first(where: { $0.bookSourceUrl == entry.bookSourceUrl }) else { continue }
+                taskGroup.addTask {
+                    let bookInfo = try? await BookInfoService.fetchBookInfo(source: source, bookURL: entry.bookUrl, httpClient: httpClient)
+                    let tocUrl = bookInfo?.tocUrl ?? entry.bookUrl
+                    let chapters = try? await TocService.fetchChapterList(source: source, tocURL: tocUrl, httpClient: httpClient)
+                    return (entry.bookUrl, chapters?.count)
+                }
+            }
+            for await (bookUrl, count) in taskGroup {
+                if let count { chapterCounts[bookUrl] = count }
+            }
+        }
+        isLoadingChapterCounts = false
     }
 
     @ViewBuilder
