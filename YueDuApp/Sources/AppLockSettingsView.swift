@@ -1,4 +1,5 @@
 import SwiftUI
+import LocalAuthentication
 
 /// Set/change/remove the local app-access password (`AppLockStore`). Changing or disabling
 /// requires re-entering the current password -- forgetting it means there's no recovery path
@@ -6,17 +7,35 @@ import SwiftUI
 /// trade-off Legado's own app-lock makes.
 struct AppLockSettingsView: View {
     @State private var isEnabled = AppLockStore.isEnabled
+    @State private var isBiometricEnabled = AppLockStore.isBiometricEnabled
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmPassword = ""
     @State private var errorMessage: String?
     @State private var successMessage: String?
 
+    /// `nil` when this device has no enrolled Face ID/Touch ID at all -- the toggle is hidden
+    /// rather than shown-disabled in that case, matching how the OS's own Settings app treats it.
+    private var biometryType: LABiometryType? {
+        let context = LAContext()
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) else { return nil }
+        return context.biometryType
+    }
+
     var body: some View {
         Form {
             if isEnabled {
                 Section {
                     Label("密码锁已开启", systemImage: "lock.fill").foregroundStyle(.green)
+                    if let biometryType {
+                        Toggle(biometryType == .faceID ? "允许面容 ID 解锁" : "允许指纹解锁", isOn: Binding(
+                            get: { isBiometricEnabled },
+                            set: { newValue in
+                                isBiometricEnabled = newValue
+                                AppLockStore.setBiometricEnabled(newValue)
+                            }
+                        ))
+                    }
                 }
                 Section("修改密码") {
                     SecureField("当前密码", text: $currentPassword)
@@ -90,6 +109,7 @@ struct AppLockSettingsView: View {
         }
         AppLockStore.disable()
         isEnabled = false
+        isBiometricEnabled = false
         currentPassword = ""
         successMessage = "密码锁已关闭"
     }

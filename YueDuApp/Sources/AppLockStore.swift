@@ -6,6 +6,7 @@ import Foundation
 /// could fall out of sync with it.
 enum AppLockStore {
     private static let key = "app.lockPassword"
+    private static let biometricKey = "app.lockBiometricEnabled"
 
     static var isEnabled: Bool { KeychainStore.get(key) != nil }
 
@@ -22,5 +23,18 @@ enum AppLockStore {
 
     static func disable() {
         KeychainStore.delete(key)
+        setBiometricEnabled(false)
+    }
+
+    /// Whether Face ID/Touch ID should be offered as a shortcut past `AppLockView`'s password
+    /// field. Meaningless (and always read back `false`) while `isEnabled` is `false` -- there's no
+    /// separate biometric-only lock mode, only "skip retyping the password lock's own password".
+    /// Plain `UserDefaults`, not Keychain: this is a preference flag, not a secret.
+    static var isBiometricEnabled: Bool {
+        isEnabled && UserDefaults.standard.bool(forKey: biometricKey)
+    }
+
+    static func setBiometricEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: biometricKey)
     }
 }
