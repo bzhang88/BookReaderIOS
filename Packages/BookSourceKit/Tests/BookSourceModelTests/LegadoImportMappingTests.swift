@@ -22,8 +22,11 @@ final class LegadoImportMappingTests: XCTestCase {
         let rule = imported.toReplaceRule()
         XCTAssertEqual(rule.id, "1699999999000")
         XCTAssertEqual(rule.name, "去广告")
+        XCTAssertEqual(rule.group, "通用")
         XCTAssertEqual(rule.pattern, "广告内容")
-        XCTAssertEqual(rule.scopeSourceUrl, "https://example.com")
+        XCTAssertEqual(rule.scope, "https://example.com")
+        XCTAssertEqual(rule.scopeTitle, false)
+        XCTAssertEqual(rule.scopeContent, true)
         XCTAssertEqual(rule.isRegex, false)
         XCTAssertTrue(rule.enabled)
     }
@@ -35,7 +38,12 @@ final class LegadoImportMappingTests: XCTestCase {
         XCTAssertEqual(rule.replacement, "")
         XCTAssertTrue(rule.isRegex)
         XCTAssertTrue(rule.enabled)
-        XCTAssertNil(rule.scopeSourceUrl)
+        XCTAssertNil(rule.group)
+        XCTAssertNil(rule.scope)
+        XCTAssertNil(rule.excludeScope)
+        XCTAssertFalse(rule.scopeTitle)
+        XCTAssertTrue(rule.scopeContent)
+        XCTAssertEqual(rule.order, 0)
     }
 
     func testTxtTocRuleImportDecodesRealLegadoShape() throws {

@@ -76,4 +76,29 @@ final class ReplaceRuleStoreTests: XCTestCase {
         let all = try await reloaded.all()
         XCTAssertEqual(all.first?.enabled, false)
     }
+
+    func testSetGroupsAppliesBatchAndSkipsRulesNotInTheMap() async throws {
+        let store = ReplaceRuleStore(fileURL: tempFileURL())
+        let ruleA = ReplaceRule(name: "A", pattern: "a")
+        let ruleB = ReplaceRule(name: "B", pattern: "b")
+        try await store.add(ruleA)
+        try await store.add(ruleB)
+
+        try await store.setGroups([ruleA.id: "通用"])
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first { $0.id == ruleA.id }?.group, "通用")
+        XCTAssertNil(all.first { $0.id == ruleB.id }?.group)
+    }
+
+    func testSetGroupsCanClearAGroupWithExplicitNil() async throws {
+        let store = ReplaceRuleStore(fileURL: tempFileURL())
+        let rule = ReplaceRule(name: "A", group: "通用", pattern: "a")
+        try await store.add(rule)
+
+        try await store.setGroups([rule.id: nil])
+
+        let all = try await store.all()
+        XCTAssertNil(all.first?.group)
+    }
 }

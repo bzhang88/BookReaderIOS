@@ -47,4 +47,18 @@ public actor ReplaceRuleStore {
         rules[idx].enabled = enabled
         try await store.save(rules)
     }
+
+    /// Batch group reassignment, keyed by rule `id` -- see `ShelfStore.setGroups`'s matching doc
+    /// comment for why the value is `String??`. Used by `ReplaceRuleGroupManagementView` to rename/
+    /// delete a group across every rule in it in one write, same pattern as `BookSourceStore.
+    /// setGroups`/`ShelfStore.setGroups`.
+    public func setGroups(_ groups: [String: String?]) async throws {
+        var rules = try await all()
+        for idx in rules.indices {
+            if let newGroup = groups[rules[idx].id] {
+                rules[idx].group = newGroup
+            }
+        }
+        try await store.save(rules)
+    }
 }

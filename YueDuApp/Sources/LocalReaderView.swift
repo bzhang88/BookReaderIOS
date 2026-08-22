@@ -688,7 +688,7 @@ struct LocalReaderView: View {
 
     private func load() async {
         let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
-        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: chapter.text, sourceUrl: "")
+        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: chapter.text, bookName: book.title, sourceUrl: "")
         purifiedText = applyChineseConversion(purified.result)
         matchedReplaceRules = purified.matchedRules
         try? await env.localBookStore.updateProgress(id: book.id, chapterIndex: currentIndex)

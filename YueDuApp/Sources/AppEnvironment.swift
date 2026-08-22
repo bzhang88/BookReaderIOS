@@ -27,6 +27,8 @@ final class AppEnvironment: ObservableObject {
     /// file. `SourceGroupManagementView` merges this with whatever group names are still in live use
     /// across `bookSourceStore`, same pattern as `ShelfGroupManagementView` already does for books.
     let bookSourceGroupStore: ShelfGroupStore
+    /// Registered 净化规则 group names -- same reused-generic-store story as `bookSourceGroupStore`.
+    let replaceRuleGroupStore: ShelfGroupStore
     let dictRuleStore: DictRuleStore
     let webSearchEngineStore: WebSearchEngineStore
     let httpTTSEngineStore: HttpTTSEngineStore
@@ -57,6 +59,7 @@ final class AppEnvironment: ObservableObject {
         loginCookieStore = LoginCookieStore(fileURL: appSupport.appendingPathComponent("login_cookies.json"))
         shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
         bookSourceGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("book_source_groups.json"))
+        replaceRuleGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("replace_rule_groups.json"))
         dictRuleStore = DictRuleStore(fileURL: appSupport.appendingPathComponent("dict_rules.json"))
         webSearchEngineStore = WebSearchEngineStore(fileURL: appSupport.appendingPathComponent("web_search_engines.json"))
         httpTTSEngineStore = HttpTTSEngineStore(fileURL: appSupport.appendingPathComponent("http_tts_engines.json"))

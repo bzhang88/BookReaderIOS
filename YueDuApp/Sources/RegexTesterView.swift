@@ -2,10 +2,22 @@ import SwiftUI
 import RuleEngine
 
 struct RegexTesterView: View {
-    @State private var pattern = ""
+    /// Pre-fills the pattern field -- lets `ReplaceRuleEditView`'s "正则测试" link open straight
+    /// into testing whatever regex is already typed there, instead of a blank tester the user has
+    /// to retype into. Real usage feedback (a Legado-comparison pass): Legado's own replace-rule
+    /// editor has this exact link (`menu_regex_test`); this standalone tester existed already but
+    /// wasn't reachable from the one place it'd actually get used.
+    var initialPattern: String = ""
+
+    @State private var pattern: String
     @State private var text = ""
     @State private var caseInsensitive = false
     @State private var dotMatchesNewlines = false
+
+    init(initialPattern: String = "") {
+        self.initialPattern = initialPattern
+        _pattern = State(initialValue: initialPattern)
+    }
 
     private var result: Result<[RegexTester.Match], RegexTester.TestError>? {
         guard !pattern.isEmpty else { return nil }

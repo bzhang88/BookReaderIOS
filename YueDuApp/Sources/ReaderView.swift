@@ -2016,7 +2016,7 @@ struct ReaderView: View {
                 )
             }
             let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
-            let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+            let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, bookName: bookTitle, sourceUrl: source.bookSourceUrl)
             text = applyChineseConversion(purified.result)
             matchedReplaceRules = purified.matchedRules
             highlightRules = (try? await env.highlightRuleStore.enabled()) ?? []
@@ -2069,7 +2069,7 @@ struct ReaderView: View {
         // chapter some other way (e.g. jumped via TOC/search while this fetch was still in flight).
         guard prevIndex == currentIndex - 1 else { return }
         let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
-        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, bookName: bookTitle, sourceUrl: source.bookSourceUrl)
         let previewText = applyChineseConversion(purified.result)
         var preview = AdjacentChapterPreview(
             index: prevIndex, title: prevChapter.title, text: previewText, matchedRules: purified.matchedRules
@@ -2117,7 +2117,7 @@ struct ReaderView: View {
         // chapter some other way (e.g. jumped via TOC/search while this fetch was still in flight).
         guard nextIndex == currentIndex + 1 else { return }
         let replaceRules = (try? await env.replaceRuleStore.enabled()) ?? []
-        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, sourceUrl: source.bookSourceUrl)
+        let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: content.text, bookName: bookTitle, sourceUrl: source.bookSourceUrl)
         let previewText = applyChineseConversion(purified.result)
         var preview = AdjacentChapterPreview(
             index: nextIndex, title: nextChapter.title, text: previewText, matchedRules: purified.matchedRules

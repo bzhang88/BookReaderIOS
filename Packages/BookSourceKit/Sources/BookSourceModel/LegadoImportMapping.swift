@@ -5,16 +5,23 @@ import Foundation
 /// own simpler models. `bookSource`/`dictRule`/`rssSource` don't need one of these -- their real
 /// field names already match this app's model 1:1, so `JSONDecoder` reads them directly.
 
-/// Real `ReplaceRule.kt` fields: `id` (Int64), `name`, `pattern`, `replacement`, `scope`,
-/// `isEnabled`, `isRegex`, plus several this app doesn't model (`group`, `scopeTitle`,
-/// `scopeContent`, `excludeScope`, `timeoutMillisecond`, `order`) that are simply dropped, the same
-/// "decode what v1 uses, ignore the rest" leniency `BookSource` itself already relies on.
+/// Real `ReplaceRule.kt` fields: `id` (Int64), `name`, `group`, `pattern`, `replacement`, `scope`,
+/// `excludeScope`, `scopeTitle`, `scopeContent`, `order`, `isEnabled`, `isRegex`, plus one this app
+/// still doesn't model (`timeoutMillisecond` -- a per-execution regex timeout `NSRegularExpression`
+/// has no simple built-in way to enforce, and a real one would need running the regex on a
+/// cancellable background queue; not attempted here, same "decode what v1 uses, ignore the rest"
+/// leniency `BookSource` itself already relies on for its own still-unmodeled fields).
 public struct LegadoReplaceRuleImport: Decodable {
     public var id: Int64?
     public var name: String
+    public var group: String?
     public var pattern: String
     public var replacement: String?
     public var scope: String?
+    public var excludeScope: String?
+    public var scopeTitle: Bool?
+    public var scopeContent: Bool?
+    public var order: Int?
     public var isEnabled: Bool?
     public var isRegex: Bool?
 
@@ -25,10 +32,15 @@ public struct LegadoReplaceRuleImport: Decodable {
         ReplaceRule(
             id: id.map(String.init) ?? UUID().uuidString,
             name: name,
+            group: group,
             pattern: pattern,
             replacement: replacement ?? "",
             isRegex: isRegex ?? true,
-            scopeSourceUrl: scope,
+            scope: scope,
+            excludeScope: excludeScope,
+            scopeTitle: scopeTitle ?? false,
+            scopeContent: scopeContent ?? true,
+            order: order ?? 0,
             enabled: isEnabled ?? true
         )
     }
