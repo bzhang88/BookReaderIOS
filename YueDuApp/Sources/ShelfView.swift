@@ -3,9 +3,31 @@ import BookSourceModel
 import WebBookOrchestrator
 import Persistence
 
+/// Matches Legado_Max's real `AppConfig.bookshelfSort` options 0/2/3 (its "最近阅读"/"书名"/
+/// "手动" -- this app has no drag-to-reorder shelf yet, so "手动" isn't offered) plus "加入时间"
+/// in place of Legado's "最近更新" (option 1, `latestChapterTime`): this app's `ShelfBook` has no
+/// persisted "when was a new chapter last detected" timestamp (`checkForUpdates`/
+/// `updateTotalChapterCount` only ever store the current count, not when it last changed), so
+/// sorting by that isn't something this data actually supports yet -- `addedAt` is a real stored
+/// field that gives a still-useful "newest additions first" ordering without inventing a field.
+private enum ShelfSortOption: String, CaseIterable, Identifiable {
+    case recentlyRead, name, recentlyAdded
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .recentlyRead: return "最近阅读"
+        case .name: return "书名"
+        case .recentlyAdded: return "加入时间"
+        }
+    }
+}
+
 struct ShelfView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var books: [ShelfBook] = []
+    @AppStorage("shelf.sortOption") private var sortOption: ShelfSortOption = .recentlyRead
     @State private var changeSourceTarget: ShelfBook?
     @State private var detailTarget: ShelfBook?
     @State private var groupPickerTarget: ShelfBook?
@@ -191,6 +213,24 @@ struct ShelfView: View {
                 ShelfListImportExportView()
             } label: {
                 Label("书单导入/导出", systemImage: "square.and.arrow.up.on.square")
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                ForEach(ShelfSortOption.allCases) { option in
+                    Button {
+                        sortOption = option
+                        books = sorted(books)
+                    } label: {
+                        if sortOption == option {
+                            Label(option.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(option.displayName)
+                        }
+                    }
+                }
+            } label: {
+                Label("排序", systemImage: "arrow.up.arrow.down")
             }
         }
         if isSelecting {
@@ -381,8 +421,19 @@ struct ShelfView: View {
 
     private func reload() async {
         let all = (try? await env.shelfStore.all()) ?? []
-        books = all.sorted { ($0.lastReadAt ?? $0.addedAt) > ($1.lastReadAt ?? $1.addedAt) }
+        books = sorted(all)
         registeredGroupNames = (try? await env.shelfGroupStore.all()) ?? []
+    }
+
+    private func sorted(_ list: [ShelfBook]) -> [ShelfBook] {
+        switch sortOption {
+        case .recentlyRead:
+            return list.sorted { ($0.lastReadAt ?? $0.addedAt) > ($1.lastReadAt ?? $1.addedAt) }
+        case .name:
+            return list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .recentlyAdded:
+            return list.sorted { $0.addedAt > $1.addedAt }
+        }
     }
 
     /// Sets (or clears, when `newGroup` is nil) one book's group directly -- shares `setGroups`
