@@ -42,6 +42,35 @@ final class BookSourceDecodingTests: XCTestCase {
         XCTAssertTrue(source.enabled)
         XCTAssertTrue(source.enabledExplore)
         XCTAssertNil(source.ruleSearch)
+        XCTAssertNil(source.bookSourceComment)
+        XCTAssertNil(source.respondTime)
+        XCTAssertNil(source.lastUpdateTime)
+        XCTAssertEqual(source.customOrder, 0)
+    }
+
+    func testDecodesAndRoundTripsCheckAndOrderingFields() throws {
+        let json = """
+        {
+            "bookSourceUrl": "https://www.example.com",
+            "bookSourceName": "示例源",
+            "bookSourceComment": "// 校验失败: 搜索 - 0 个结果",
+            "respondTime": 842,
+            "lastUpdateTime": 1734567890123,
+            "customOrder": 7
+        }
+        """
+        let source = try decode(json)
+        XCTAssertEqual(source.bookSourceComment, "// 校验失败: 搜索 - 0 个结果")
+        XCTAssertEqual(source.respondTime, 842)
+        XCTAssertEqual(source.lastUpdateTime, 1734567890123)
+        XCTAssertEqual(source.customOrder, 7)
+
+        // Round-trips through encode/decode -- `BookSource` relies on `CodingKeys` matching stored
+        // property names for `encode(to:)` synthesis (no custom encoder), so this also guards
+        // against the new keys silently falling out of sync if `CodingKeys` and the properties ever
+        // drift apart.
+        let reencoded = try JSONDecoder().decode(BookSource.self, from: try JSONEncoder().encode(source))
+        XCTAssertEqual(reencoded, source)
     }
 
     // MARK: - Three-layer leniency on rule sub-objects

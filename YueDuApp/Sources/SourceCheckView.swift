@@ -106,9 +106,31 @@ struct SourceCheckView: View {
                 if Task.isCancelled { break }
                 outcomes.append(outcome)
                 completedCount += 1
+                await writeBack(outcome)
             }
             isChecking = false
         }
+    }
+
+    /// Matches Legado's own `CheckSourceService`: a check result doesn't just live for as long as
+    /// this screen is open -- it gets written back onto the source itself (`respondTime` for
+    /// speed-sorting the source list, `bookSourceComment` so a failing source stays visibly
+    /// annotated in `SourceLibraryView` without having to re-run a check to remember why). A passing
+    /// check clears any earlier failure annotation this same mechanism wrote, but never touches a
+    /// comment the user (or the source file itself) wrote by hand -- see the `hadOwnComment` guard.
+    private func writeBack(_ outcome: SourceValidationOutcome) async {
+        var updated = outcome.source
+        let failureAnnotationPrefix = "// 校验失败: "
+        let hadOwnComment = !(updated.bookSourceComment?.hasPrefix(failureAnnotationPrefix) ?? true)
+        if outcome.isFullyPassing {
+            updated.respondTime = outcome.elapsedMilliseconds
+            if !hadOwnComment { updated.bookSourceComment = nil }
+        } else if let firstFailure = outcome.stageResults.first(where: { !$0.success }) {
+            if !hadOwnComment {
+                updated.bookSourceComment = "\(failureAnnotationPrefix)\(firstFailure.stage.displayName) - \(firstFailure.detail)"
+            }
+        }
+        try? await env.bookSourceStore.importSources([updated])
     }
 
     private func stopChecking() {

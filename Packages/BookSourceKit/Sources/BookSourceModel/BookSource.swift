@@ -33,6 +33,26 @@ public struct BookSource: Codable, Equatable, Identifiable {
     public var ruleToc: TocRule?
     public var ruleContent: ContentRule?
 
+    /// A short, user-visible annotation about this source -- round-trips real book source files
+    /// that already have one, and is also where `SourceCheckView`'s own check results get appended
+    /// (matching Legado's real `CheckSourceService`, which writes an `// Error: ...` block into this
+    /// same field so a failing source stays visibly annotated in the list rather than the check
+    /// result only existing for as long as the check screen is open).
+    public var bookSourceComment: String?
+    /// Milliseconds the most recent successful check took to get a response -- matching Legado's own
+    /// `BookSource.respondTime`, written by `SourceCheckView` and used to sort the source list by
+    /// real-world speed instead of only by name/weight.
+    public var respondTime: Int?
+    /// Epoch milliseconds this source was last imported or edited -- matching Legado's
+    /// `BookSource.lastUpdateTime` convention (milliseconds, not seconds, for direct round-trip
+    /// compatibility with real book source files).
+    public var lastUpdateTime: Int64?
+    /// Manual drag-reorder position within the source list -- matching Legado's own `customOrder`.
+    /// Lower sorts first; `0` (the default for every source that predates this field, and for any
+    /// newly-added one until the user actually reorders) means "wherever the list's other sort mode
+    /// would naturally put it," not literally "always first."
+    public var customOrder: Int
+
     public var id: String { bookSourceUrl }
 
     public var isTextSource: Bool { bookSourceType == 0 }
@@ -54,7 +74,11 @@ public struct BookSource: Codable, Equatable, Identifiable {
         ruleExplore: ExploreRule? = nil,
         ruleBookInfo: BookInfoRule? = nil,
         ruleToc: TocRule? = nil,
-        ruleContent: ContentRule? = nil
+        ruleContent: ContentRule? = nil,
+        bookSourceComment: String? = nil,
+        respondTime: Int? = nil,
+        lastUpdateTime: Int64? = nil,
+        customOrder: Int = 0
     ) {
         self.bookSourceUrl = bookSourceUrl
         self.bookSourceName = bookSourceName
@@ -73,6 +97,10 @@ public struct BookSource: Codable, Equatable, Identifiable {
         self.ruleBookInfo = ruleBookInfo
         self.ruleToc = ruleToc
         self.ruleContent = ruleContent
+        self.bookSourceComment = bookSourceComment
+        self.respondTime = respondTime
+        self.lastUpdateTime = lastUpdateTime
+        self.customOrder = customOrder
     }
 
     enum CodingKeys: String, CodingKey {
@@ -80,6 +108,7 @@ public struct BookSource: Codable, Equatable, Identifiable {
         case enabled, enabledExplore, searchUrl, exploreUrl, weight
         case loginUrl, loginUi
         case ruleSearch, ruleExplore, ruleBookInfo, ruleToc, ruleContent
+        case bookSourceComment, respondTime, lastUpdateTime, customOrder
     }
 
     public init(from decoder: Decoder) throws {
@@ -101,6 +130,10 @@ public struct BookSource: Codable, Equatable, Identifiable {
         ruleBookInfo = try container.decodeIfPresent(BookInfoRule.self, forKey: .ruleBookInfo)
         ruleToc = try container.decodeIfPresent(TocRule.self, forKey: .ruleToc)
         ruleContent = try container.decodeIfPresent(ContentRule.self, forKey: .ruleContent)
+        bookSourceComment = try container.decodeIfPresent(String.self, forKey: .bookSourceComment)
+        respondTime = try container.decodeIfPresent(Int.self, forKey: .respondTime)
+        lastUpdateTime = try container.decodeIfPresent(Int64.self, forKey: .lastUpdateTime)
+        customOrder = try container.decodeIfPresent(Int.self, forKey: .customOrder) ?? 0
     }
 
     /// A default desktop-Chrome UA — real book sources routinely 403 requests with no

@@ -38,10 +38,17 @@ public struct SourceValidationStageResult: Equatable, Sendable {
 public struct SourceValidationOutcome: Equatable, Sendable {
     public var source: BookSource
     public var stageResults: [SourceValidationStageResult]
+    /// How long this source's whole check took, wall-clock -- measured by `validate(sources:...)`
+    /// around the call to `validateOne` (not threaded through its several early-return points),
+    /// since that's simpler than touching every one of them. Feeds `SourceCheckView`'s write-back
+    /// into `BookSource.respondTime`, matching Legado's own `CheckSourceService` timing its checks
+    /// the same way and using the result to sort the source list by real-world speed.
+    public var elapsedMilliseconds: Int
 
-    public init(source: BookSource, stageResults: [SourceValidationStageResult]) {
+    public init(source: BookSource, stageResults: [SourceValidationStageResult], elapsedMilliseconds: Int = 0) {
         self.source = source
         self.stageResults = stageResults
+        self.elapsedMilliseconds = elapsedMilliseconds
     }
 
     public var isFullyPassing: Bool { !stageResults.isEmpty && stageResults.allSatisfy(\.success) }
@@ -59,7 +66,10 @@ public enum SourceValidationService {
                 await withTaskGroup(of: SourceValidationOutcome.self) { group in
                     for source in sources {
                         group.addTask {
-                            await validateOne(source: source, keyword: keyword, depth: depth, httpClient: httpClient)
+                            let start = Date()
+                            var outcome = await validateOne(source: source, keyword: keyword, depth: depth, httpClient: httpClient)
+                            outcome.elapsedMilliseconds = Int(Date().timeIntervalSince(start) * 1000)
+                            return outcome
                         }
                     }
                     for await outcome in group {

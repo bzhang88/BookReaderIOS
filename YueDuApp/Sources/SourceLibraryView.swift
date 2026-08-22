@@ -63,6 +63,21 @@ struct SourceLibraryView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
+                                // Written by `SourceCheckView`'s own check results (respondTime for
+                                // speed, a failure annotation here) -- matches Legado's real source
+                                // list, which keeps a failing/slow source visibly flagged without
+                                // needing to re-run a check to remember why.
+                                if let comment = source.bookSourceComment, !comment.isEmpty {
+                                    Text(comment)
+                                        .font(.caption2)
+                                        .foregroundStyle(.red)
+                                        .lineLimit(1)
+                                }
+                                if let respondTime = source.respondTime {
+                                    Text("响应 \(respondTime) 毫秒")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
                             Image(systemName: source.enabled ? "checkmark.circle.fill" : "circle")
