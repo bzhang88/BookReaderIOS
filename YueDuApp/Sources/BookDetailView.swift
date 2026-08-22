@@ -276,7 +276,10 @@ struct BookDetailView: View {
                     if !previewChapters.isEmpty {
                         infoRow(icon: "list.bullet", text: "共 \(previewChapters.count) 章") {
                             NavigationLink {
-                                TocView(source: source, tocURL: bookInfo?.tocUrl ?? "", bookUrl: bookUrl, bookTitle: name)
+                                TocView(
+                                    source: source, tocURL: bookInfo?.tocUrl ?? "", bookUrl: bookUrl, bookTitle: name,
+                                    currentChapterIndex: shelfLastReadChapterIndex
+                                )
                             } label: {
                                 Text("查看")
                             }
@@ -372,7 +375,7 @@ struct BookDetailView: View {
                     // auto-navigate at all -- "阅读" should always actually start reading).
                     TocView(
                         source: source, tocURL: bookInfo.tocUrl, bookUrl: bookUrl, bookTitle: name,
-                        resumeChapterIndex: shelfLastReadChapterIndex ?? 0
+                        resumeChapterIndex: shelfLastReadChapterIndex ?? 0, currentChapterIndex: shelfLastReadChapterIndex
                     )
                 } label: {
                     Text("阅读").frame(maxWidth: .infinity)
