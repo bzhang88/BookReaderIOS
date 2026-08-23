@@ -19,6 +19,9 @@ final class HttpReadAloudController: NSObject, ObservableObject {
     @Published private(set) var isPaused = false
     @Published private(set) var currentParagraphIndex = 0
     @Published private(set) var errorMessage: String?
+    /// Real gap found comparing against Legado: same sleep-timer gap as `ReadAloudController` --
+    /// see its matching doc comment.
+    @Published private(set) var sleepTimerRemainingSeconds: Int?
 
     /// Same contract as `ReadAloudController.onReachedEnd` -- see its doc comment.
     var onReachedEnd: (() -> Void)?
@@ -33,6 +36,7 @@ final class HttpReadAloudController: NSObject, ObservableObject {
     private var bookTitle = ""
     private var chapterTitle = ""
     private var fetchTask: Task<Void, Never>?
+    private var sleepTimerTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -89,6 +93,34 @@ final class HttpReadAloudController: NSObject, ObservableObject {
         guard currentParagraphIndex > 0 else { return }
         currentParagraphIndex -= 1
         speakCurrentParagraph()
+    }
+
+    /// Same pattern as `AudiobookPlayerController.startSleepTimer`/`ReadAloudController
+    /// .startSleepTimer` -- weak-self `Task` countdown, replaces rather than stacks a previous timer.
+    func startSleepTimer(minutes: Int) {
+        sleepTimerTask?.cancel()
+        sleepTimerRemainingSeconds = minutes * 60
+        sleepTimerTask = Task { @MainActor [weak self] in
+            while let self, let remaining = self.sleepTimerRemainingSeconds, remaining > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self.sleepTimerRemainingSeconds = remaining - 1
+            }
+            guard let self, !Task.isCancelled else { return }
+            if self.isSpeaking, !self.isPaused {
+                self.player?.pause()
+                self.isPaused = true
+                self.updateNowPlayingInfo()
+            }
+            self.sleepTimerRemainingSeconds = nil
+            self.sleepTimerTask = nil
+        }
+    }
+
+    func cancelSleepTimer() {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        sleepTimerRemainingSeconds = nil
     }
 
     private func speakCurrentParagraph() {

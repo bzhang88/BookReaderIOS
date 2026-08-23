@@ -94,6 +94,18 @@ struct TocView: View {
                     ContentUnavailableView.search(text: searchKeyword)
                 }
             }
+            // Real gap found comparing against Legado: the real TOC screen always shows a bottom info
+            // bar with the current position (e.g. "12/300"); this screen had no equivalent anywhere.
+            .safeAreaInset(edge: .bottom) {
+                if !chapters.isEmpty {
+                    Text(positionReadoutText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(.bar)
+                }
+            }
             .navigationTitle("目录")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -108,6 +120,25 @@ struct TocView: View {
                 if currentChapterIndex != nil {
                     ToolbarItem(placement: .primaryAction) {
                         Button("当前") { scrollToCurrent(proxy: proxy) }
+                    }
+                }
+                // Real gap found comparing against Legado: no way to jump straight to the first/last
+                // chapter -- notable for books with thousands of chapters where the newest chapter
+                // (often what you actually want) is always last.
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button {
+                            scrollToEdge(proxy: proxy, toTop: true)
+                        } label: {
+                            Label("跳到顶部", systemImage: "arrow.up.to.line")
+                        }
+                        Button {
+                            scrollToEdge(proxy: proxy, toTop: false)
+                        } label: {
+                            Label("跳到底部", systemImage: "arrow.down.to.line")
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.and.down")
                     }
                 }
             }
@@ -156,6 +187,15 @@ struct TocView: View {
                         .fontWeight(item.index == currentChapterIndex ? .semibold : .regular)
                         .foregroundStyle(item.index == currentChapterIndex ? Color.accentColor : .primary)
                     Spacer(minLength: 8)
+                    // Real gap found comparing against Legado: `isVip`/`isPay` were already extracted
+                    // into `BookChapter` (`TocService`) but never read by either TOC screen --
+                    // Legado's own `ChapterListAdapter` shows a lock icon for `isVip && !isPay`
+                    // (a VIP-only chapter the user hasn't purchased), mirrored here.
+                    if item.chapter.isVip && !item.chapter.isPay {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     // Real bug found comparing against Legado: this used to show the cloud glyph on
                     // *downloaded* chapters, backwards from `ReaderTocDrawerView.tocList`'s own
                     // (correct, Legado-matching) rendering of the exact same `downloadedIndices` data
@@ -179,6 +219,20 @@ struct TocView: View {
         } else {
             proxy.scrollTo(currentChapterIndex, anchor: .center)
         }
+    }
+
+    /// Jumps to whichever end of the *currently displayed* list is "top"/"bottom" -- respects
+    /// `isReversed`/an active search filter, not necessarily chapter index 0 vs. the last one.
+    private func scrollToEdge(proxy: ScrollViewProxy, toTop: Bool) {
+        guard let target = toTop ? displayedChapters.first : displayedChapters.last else { return }
+        withAnimation { proxy.scrollTo(target.index, anchor: toTop ? .top : .bottom) }
+    }
+
+    private var positionReadoutText: String {
+        if let currentChapterIndex, chapters.indices.contains(currentChapterIndex) {
+            return "第 \(currentChapterIndex + 1) / \(chapters.count) 章"
+        }
+        return "共 \(chapters.count) 章"
     }
 
     private func load() async {

@@ -524,6 +524,21 @@ struct ReaderView: View {
                             } label: {
                                 Image(systemName: "stop.fill")
                             }
+                            Menu {
+                                if readAloudSleepTimerRemainingSeconds != nil {
+                                    Button("关闭定时", role: .destructive) { cancelReadAloudSleepTimer() }
+                                }
+                                ForEach([15, 30, 45, 60], id: \.self) { minutes in
+                                    Button("\(minutes) 分钟后暂停") { startReadAloudSleepTimer(minutes: minutes) }
+                                }
+                            } label: {
+                                if let remaining = readAloudSleepTimerRemainingSeconds {
+                                    Text(String(format: "%02d:%02d", remaining / 60, remaining % 60))
+                                        .font(.caption)
+                                } else {
+                                    Image(systemName: "moon.zzz")
+                                }
+                            }
                         }
                         .font(.title3)
                     }
@@ -812,7 +827,9 @@ struct ReaderView: View {
         .overlay {
             ReaderTocDrawerView(
                 isPresented: $isShowingToc,
-                chapters: chapters.map { ReaderTocDrawerView.ChapterItem(id: $0.index, title: $0.title, isVolume: $0.isVolume) },
+                chapters: chapters.map {
+                    ReaderTocDrawerView.ChapterItem(id: $0.index, title: $0.title, isVolume: $0.isVolume, isVip: $0.isVip, isPay: $0.isPay)
+                },
                 currentIndex: currentIndex,
                 bookIdentifier: bookUrl,
                 bookmarkStore: env.bookmarkStore,
@@ -1152,6 +1169,23 @@ struct ReaderView: View {
 
     private func readAloudNextParagraph() {
         if isUsingHttpTTS { httpReadAloud.nextParagraph() } else { readAloud.nextParagraph() }
+    }
+
+    /// Real gap found comparing against Legado: read-aloud had no sleep timer at all (only the
+    /// audiobook player did) -- `readAloud`/`httpReadAloud` both now implement the same
+    /// `startSleepTimer`/`cancelSleepTimer` pair `AudiobookPlayerController` already had; these three
+    /// just dispatch to whichever of the two is actually active, same pattern as
+    /// `toggleReadAloudPause`/`readAloudPreviousParagraph`/`readAloudNextParagraph` above.
+    private var readAloudSleepTimerRemainingSeconds: Int? {
+        isUsingHttpTTS ? httpReadAloud.sleepTimerRemainingSeconds : readAloud.sleepTimerRemainingSeconds
+    }
+
+    private func startReadAloudSleepTimer(minutes: Int) {
+        if isUsingHttpTTS { httpReadAloud.startSleepTimer(minutes: minutes) } else { readAloud.startSleepTimer(minutes: minutes) }
+    }
+
+    private func cancelReadAloudSleepTimer() {
+        if isUsingHttpTTS { httpReadAloud.cancelSleepTimer() } else { readAloud.cancelSleepTimer() }
     }
 
     /// Icon-over-label button matching Legado's real bottom-most row style (`ll_catalog` etc. in

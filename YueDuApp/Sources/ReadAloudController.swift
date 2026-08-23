@@ -12,6 +12,11 @@ final class ReadAloudController: NSObject, ObservableObject {
     @Published private(set) var isSpeaking = false
     @Published private(set) var isPaused = false
     @Published private(set) var currentParagraphIndex = 0
+    /// Real gap found comparing against Legado: `BaseReadAloudService.setTimer`/`addTimer` gives
+    /// read-aloud its own sleep timer (with a notification button); this controller had none, unlike
+    /// `AudiobookPlayerController`, which already implements exactly this pattern. `nil` when no
+    /// timer is running.
+    @Published private(set) var sleepTimerRemainingSeconds: Int?
 
     /// Called when speech naturally runs out of `paragraphs` (not when explicitly stopped via
     /// `stop()`/pausing) -- confirmed against Legado_Max's own `BaseReadAloudService.nextP()`/
@@ -28,6 +33,7 @@ final class ReadAloudController: NSObject, ObservableObject {
     private var rate: Float = AVSpeechUtteranceDefaultSpeechRate
     private var bookTitle = ""
     private var chapterTitle = ""
+    private var sleepTimerTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -85,6 +91,37 @@ final class ReadAloudController: NSObject, ObservableObject {
 
     func setRate(_ newRate: Float) {
         rate = newRate
+    }
+
+    /// Pauses read-aloud once `minutes` has elapsed; same pattern as
+    /// `AudiobookPlayerController.startSleepTimer` (weak-self `Task` countdown, replaces rather than
+    /// stacks a previous timer). Pauses (not `stop()`s) so resuming continues from the exact
+    /// paragraph it left off at, matching what "pause" already means everywhere else in this
+    /// controller.
+    func startSleepTimer(minutes: Int) {
+        sleepTimerTask?.cancel()
+        sleepTimerRemainingSeconds = minutes * 60
+        sleepTimerTask = Task { @MainActor [weak self] in
+            while let self, let remaining = self.sleepTimerRemainingSeconds, remaining > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self.sleepTimerRemainingSeconds = remaining - 1
+            }
+            guard let self, !Task.isCancelled else { return }
+            if self.isSpeaking, !self.isPaused {
+                self.synthesizer.pauseSpeaking(at: .word)
+                self.isPaused = true
+                self.updateNowPlayingInfo()
+            }
+            self.sleepTimerRemainingSeconds = nil
+            self.sleepTimerTask = nil
+        }
+    }
+
+    func cancelSleepTimer() {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        sleepTimerRemainingSeconds = nil
     }
 
     private func speakCurrentParagraph() {

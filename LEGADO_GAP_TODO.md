@@ -64,16 +64,16 @@
 - [ ] 卷/分卷折叠展示，带当前卷高亮
 - [ ] 拆分长章节开关
 - [ ] 章节字数显示（数据层也没提取）—— `BookChapter.swift:3-30`
-- [ ] VIP/付费章节锁图标（数据已取未渲染）—— `BookChapter.swift:8-9`, `TocService.swift:100-101`
+- [x] VIP/付费章节锁图标（数据已取未渲染）—— `BookChapter.swift:8-9`, `TocService.swift:100-101`
 - [ ] 标题净化规则应用开关
-- [ ] 跳到顶部/底部
-- [ ] 当前章节位置读数
+- [x] 跳到顶部/底部
+- [x] 当前章节位置读数
 
 ### 阅读器 / 朗读 / 高亮
-- [ ] 朗读（TTS）睡眠定时器（有声书已有，可照搬）—— `AudiobookPlayerController.swift:81-103`
-- [ ] 书签列表搜索
+- [x] 朗读（TTS）睡眠定时器（有声书已有，可照搬）—— `AudiobookPlayerController.swift:81-103`
+- [x] 书签列表搜索
 - [ ] 高亮规则分组管理 + 作用范围（标题/正文）
-- [ ] 有声书锁屏控制中心加上一曲/下一曲/拖动进度 —— `AudiobookPlayerController.swift:154-174`
+- [x] 有声书锁屏控制中心加上一曲/下一曲/拖动进度 —— `AudiobookPlayerController.swift:154-174`
 - [ ] 有声书跳过片头片尾设置
 - [ ] 有声书循环/随机播放模式
 - [ ] 漫画阅读进度恢复（目前总回到第一页）—— `MangaReaderView.swift:136-138`

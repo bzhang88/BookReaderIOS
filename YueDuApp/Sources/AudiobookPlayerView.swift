@@ -108,7 +108,14 @@ struct AudiobookPlayerView: View {
         .toolbar(.hidden, for: .tabBar)
         .toolbar { toolbarContent }
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
-        .onAppear { player.onFinished = { advanceOnFinish() } }
+        .onAppear {
+            player.onFinished = { advanceOnFinish() }
+            // Real gap found comparing against Legado: lock-screen/Control Center next/previous had
+            // no effect before this -- see `AudiobookPlayerController.onRequestNextChapter`'s doc
+            // comment. Reuses the exact same `goTo` the in-app prev/next buttons already call.
+            player.onRequestNextChapter = { goTo(currentIndex + 1) }
+            player.onRequestPreviousChapter = { goTo(currentIndex - 1) }
+        }
         .onDisappear { player.stop() }
     }
 

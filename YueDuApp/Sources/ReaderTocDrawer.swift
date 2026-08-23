@@ -25,6 +25,10 @@ struct ReaderTocDrawerView: View {
         /// treats every heading as a flat, equal-weight chapter with no volume concept), so
         /// `LocalReaderView` never needs to pass it explicitly.
         var isVolume: Bool = false
+        /// Same default-`false`-for-local-books reasoning as `isVolume` -- see `TocView.tocRow`'s
+        /// matching doc comment for why this shows a lock icon.
+        var isVip: Bool = false
+        var isPay: Bool = false
     }
 
     @Binding var isPresented: Bool
@@ -174,6 +178,13 @@ struct ReaderTocDrawerView: View {
                                 .foregroundStyle(chapterTextColor(for: item.id))
                                 .fontWeight(item.id == currentIndex ? .semibold : .regular)
                             Spacer(minLength: 8)
+                            // Real gap found comparing against Legado: same VIP-lock gap as
+                            // `TocView.tocRow` -- see its matching doc comment.
+                            if item.isVip && !item.isPay {
+                                Image(systemName: "lock.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
                             // Real usage feedback, same screenshot: chapters already saved to disk
                             // (read, or simply prefetched ahead of where you are) show nothing extra;
                             // chapters that would still need a network fetch get a small cloud glyph,

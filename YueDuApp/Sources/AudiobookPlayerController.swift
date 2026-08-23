@@ -22,6 +22,13 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
     /// rather than stopping dead at every chapter boundary (unlike this app's text reader, which
     /// deliberately does *not* auto-continue past a chapter without a manual/scroll trigger).
     var onFinished: (() -> Void)?
+    /// Real gap found comparing against Legado: `AudioPlayService.kt` wires `onSkipToPrevious`/
+    /// `onSkipToNext` to real chapter navigation on the lock screen/Control Center; this controller
+    /// only ever registered `playCommand`/`pauseCommand`/`togglePlayPauseCommand`, even though the
+    /// in-app UI already has prev/next buttons. Set by `AudiobookPlayerView`, same pattern as
+    /// `onFinished`, since chapter navigation is the view's responsibility, not this controller's.
+    var onRequestNextChapter: (() -> Void)?
+    var onRequestPreviousChapter: (() -> Void)?
 
     private var player: AVPlayer?
     private var timeObserverToken: Any?
@@ -169,6 +176,21 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
             self?.togglePlayPause()
+            return .success
+        }
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            guard let self, self.onRequestNextChapter != nil else { return .commandFailed }
+            self.onRequestNextChapter?()
+            return .success
+        }
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            guard let self, self.onRequestPreviousChapter != nil else { return .commandFailed }
+            self.onRequestPreviousChapter?()
+            return .success
+        }
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let self, let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            self.seek(to: event.positionTime)
             return .success
         }
     }

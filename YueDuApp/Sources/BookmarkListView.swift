@@ -19,6 +19,21 @@ struct BookmarkListView: View {
     @State private var noteDraft = ""
     @State private var exportURL: URL?
     @State private var isShowingExportSheet = false
+    // Real gap found comparing against Legado: `AllBookmarkActivity`/`BookmarkDao.flowSearchAll`
+    // search across name/author/chapter/bookText/content -- this list had no search at all before.
+    // `Bookmark` has no separate author field, so this filters bookTitle/chapterTitle/excerpt/note.
+    @State private var searchKeyword = ""
+
+    private var displayedBookmarks: [Bookmark] {
+        let trimmed = searchKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return bookmarks }
+        return bookmarks.filter {
+            $0.bookTitle.localizedCaseInsensitiveContains(trimmed)
+                || $0.chapterTitle.localizedCaseInsensitiveContains(trimmed)
+                || ($0.excerpt?.localizedCaseInsensitiveContains(trimmed) ?? false)
+                || ($0.note?.localizedCaseInsensitiveContains(trimmed) ?? false)
+        }
+    }
 
     var body: some View {
         List {
@@ -27,8 +42,10 @@ struct BookmarkListView: View {
                     "还没有书签", systemImage: "bookmark",
                     description: Text("在阅读器里点书签图标，把当前章节存下来")
                 )
+            } else if displayedBookmarks.isEmpty {
+                ContentUnavailableView.search(text: searchKeyword)
             }
-            ForEach(bookmarks) { bookmark in
+            ForEach(displayedBookmarks) { bookmark in
                 Button {
                     target = bookmark
                 } label: {
@@ -58,6 +75,7 @@ struct BookmarkListView: View {
         }
         .navigationTitle("书签")
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchKeyword, prompt: "搜索书签")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -93,7 +111,10 @@ struct BookmarkListView: View {
     }
 
     private func delete(at offsets: IndexSet) {
-        let toDelete = offsets.map { bookmarks[$0] }
+        // `offsets` are indices into `displayedBookmarks` (whatever `ForEach` is actually
+        // iterating, possibly search-filtered), not the full unfiltered `bookmarks` array -- same
+        // bug shape `SourceLibraryView.delete`/`ReplaceRuleListView.delete` already document.
+        let toDelete = offsets.map { displayedBookmarks[$0] }
         Task {
             for bookmark in toDelete {
                 try? await env.bookmarkStore.remove(id: bookmark.id)
