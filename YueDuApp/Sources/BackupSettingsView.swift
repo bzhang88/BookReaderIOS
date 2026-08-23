@@ -201,6 +201,31 @@ struct BackupSettingsView: View {
                 try await client.upload(path: BackupCategory.aiProviders.fileName, content: try jsonString(items, encoder))
                 summary.append("AI 服务商 \(items.count)")
             }
+            if categories.contains(.dictRules) {
+                let items = try await env.dictRuleStore.all()
+                try await client.upload(path: BackupCategory.dictRules.fileName, content: try jsonString(items, encoder))
+                summary.append("词典规则 \(items.count)")
+            }
+            if categories.contains(.webSearchEngines) {
+                let items = try await env.webSearchEngineStore.all()
+                try await client.upload(path: BackupCategory.webSearchEngines.fileName, content: try jsonString(items, encoder))
+                summary.append("自定义搜索引擎 \(items.count)")
+            }
+            if categories.contains(.httpTTSEngines) {
+                let items = try await env.httpTTSEngineStore.all()
+                try await client.upload(path: BackupCategory.httpTTSEngines.fileName, content: try jsonString(items, encoder))
+                summary.append("自定义朗读引擎 \(items.count)")
+            }
+            if categories.contains(.coverGallery) {
+                let items = try await env.coverGalleryStore.all()
+                try await client.upload(path: BackupCategory.coverGallery.fileName, content: try jsonString(items, encoder))
+                summary.append("封面相册 \(items.count)")
+            }
+            if categories.contains(.shelfGroups) {
+                let items = try await env.shelfGroupStore.all()
+                try await client.upload(path: BackupCategory.shelfGroups.fileName, content: try jsonString(items, encoder))
+                summary.append("书架分组 \(items.count)")
+            }
 
             statusMessage = "备份完成：" + summary.joined(separator: "，")
         } catch {
@@ -332,6 +357,61 @@ struct BackupSettingsView: View {
                     diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
                 ))
             }
+            if categories.contains(.dictRules) {
+                let items = try decoder.decode(
+                    [DictRule].self, from: Data(try await client.download(path: BackupCategory.dictRules.fileName).utf8)
+                )
+                plan.dictRules = items
+                let localIds = Set(try await env.dictRuleStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .dictRules, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.webSearchEngines) {
+                let items = try decoder.decode(
+                    [WebSearchEngine].self, from: Data(try await client.download(path: BackupCategory.webSearchEngines.fileName).utf8)
+                )
+                plan.webSearchEngines = items
+                let localIds = Set(try await env.webSearchEngineStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .webSearchEngines, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.httpTTSEngines) {
+                let items = try decoder.decode(
+                    [HttpTTSEngine].self, from: Data(try await client.download(path: BackupCategory.httpTTSEngines.fileName).utf8)
+                )
+                plan.httpTTSEngines = items
+                let localIds = Set(try await env.httpTTSEngineStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .httpTTSEngines, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.coverGallery) {
+                let items = try decoder.decode(
+                    [SavedCover].self, from: Data(try await client.download(path: BackupCategory.coverGallery.fileName).utf8)
+                )
+                plan.coverGallery = items
+                let localIds = Set(try await env.coverGalleryStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .coverGallery, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if categories.contains(.shelfGroups) {
+                let items = try decoder.decode(
+                    [String].self, from: Data(try await client.download(path: BackupCategory.shelfGroups.fileName).utf8)
+                )
+                plan.shelfGroups = items
+                let localIds = Set(try await env.shelfGroupStore.all())
+                previews.append(RestoreCategoryPreview(
+                    category: .shelfGroups, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items, localIds: localIds, style: .appendDedup)
+                ))
+            }
 
             plan.previews = previews
             pendingRestore = plan
@@ -362,6 +442,11 @@ struct BackupSettingsView: View {
             if categories.contains(.bookmarks) { bundle.bookmarks = try await env.bookmarkStore.all() }
             if categories.contains(.localBooks) { bundle.localBooks = try await env.localBookStore.all() }
             if categories.contains(.aiProviders) { bundle.aiProviders = try await env.aiProviderStore.all() }
+            if categories.contains(.dictRules) { bundle.dictRules = try await env.dictRuleStore.all() }
+            if categories.contains(.webSearchEngines) { bundle.webSearchEngines = try await env.webSearchEngineStore.all() }
+            if categories.contains(.httpTTSEngines) { bundle.httpTTSEngines = try await env.httpTTSEngineStore.all() }
+            if categories.contains(.coverGallery) { bundle.coverGallery = try await env.coverGalleryStore.all() }
+            if categories.contains(.shelfGroups) { bundle.shelfGroups = try await env.shelfGroupStore.all() }
 
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -482,6 +567,46 @@ struct BackupSettingsView: View {
                     diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
                 ))
             }
+            if let items = bundle.dictRules {
+                plan.dictRules = items
+                let localIds = Set(try await env.dictRuleStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .dictRules, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if let items = bundle.webSearchEngines {
+                plan.webSearchEngines = items
+                let localIds = Set(try await env.webSearchEngineStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .webSearchEngines, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if let items = bundle.httpTTSEngines {
+                plan.httpTTSEngines = items
+                let localIds = Set(try await env.httpTTSEngineStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .httpTTSEngines, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if let items = bundle.coverGallery {
+                plan.coverGallery = items
+                let localIds = Set(try await env.coverGalleryStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .coverGallery, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .upsert)
+                ))
+            }
+            if let items = bundle.shelfGroups {
+                plan.shelfGroups = items
+                let localIds = Set(try await env.shelfGroupStore.all())
+                previews.append(RestoreCategoryPreview(
+                    category: .shelfGroups, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items, localIds: localIds, style: .appendDedup)
+                ))
+            }
 
             plan.previews = previews
             pendingRestore = plan
@@ -550,6 +675,28 @@ struct BackupSettingsView: View {
                 for item in items { try await env.aiProviderStore.add(item) }
                 summary.append("AI 服务商 \(items.count)")
             }
+            if let items = plan.dictRules {
+                for item in items { try await env.dictRuleStore.add(item) }
+                summary.append("词典规则 \(items.count)")
+            }
+            if let items = plan.webSearchEngines {
+                for item in items { try await env.webSearchEngineStore.add(item) }
+                summary.append("自定义搜索引擎 \(items.count)")
+            }
+            if let items = plan.httpTTSEngines {
+                for item in items { try await env.httpTTSEngineStore.add(item) }
+                summary.append("自定义朗读引擎 \(items.count)")
+            }
+            if let items = plan.coverGallery {
+                for item in items { try await env.coverGalleryStore.add(item) }
+                summary.append("封面相册 \(items.count)")
+            }
+            if let items = plan.shelfGroups {
+                // `ShelfGroupStore` has no bulk upsert -- `add` is already idempotent (a no-op if
+                // the name is already registered), so no need to pre-check against existing names.
+                for item in items { try await env.shelfGroupStore.add(item) }
+                summary.append("书架分组 \(items.count)")
+            }
 
             statusMessage = "恢复完成：" + summary.joined(separator: "，")
         } catch {
@@ -581,6 +728,11 @@ private struct LocalBackupBundle: Codable {
     var bookmarks: [Bookmark]?
     var localBooks: [LocalBook]?
     var aiProviders: [AIProvider]?
+    var dictRules: [DictRule]?
+    var webSearchEngines: [WebSearchEngine]?
+    var httpTTSEngines: [HttpTTSEngine]?
+    var coverGallery: [SavedCover]?
+    var shelfGroups: [String]?
 }
 
 private struct RestorePlan: Identifiable {
@@ -595,6 +747,11 @@ private struct RestorePlan: Identifiable {
     var bookmarks: [Bookmark]?
     var localBooks: [LocalBook]?
     var aiProviders: [AIProvider]?
+    var dictRules: [DictRule]?
+    var webSearchEngines: [WebSearchEngine]?
+    var httpTTSEngines: [HttpTTSEngine]?
+    var coverGallery: [SavedCover]?
+    var shelfGroups: [String]?
     var previews: [RestoreCategoryPreview] = []
 }
 

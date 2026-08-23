@@ -7,6 +7,13 @@ import Foundation
 enum BackupCategory: String, CaseIterable, Identifiable {
     case bookSources, shelf, replaceRules, highlightRules, tagGroupRules, txtSplitRules, rssSources
     case bookmarks, localBooks, aiProviders
+    // Real gap found comparing against Legado: its own backup selector (`BackupSelectorConfig`)
+    // includes dictRule.json/httpTTS.json/bookGroup.json and a cover-gallery equivalent -- this
+    // app's real, editable dict rules / custom search engines / custom TTS engines / cover gallery
+    // / shelf groups were silently uncovered by both the WebDAV and local-file backup paths, even
+    // though every one of them already has the exact same `all()`-returning store shape every other
+    // category here already uses.
+    case dictRules, webSearchEngines, httpTTSEngines, coverGallery, shelfGroups
 
     var id: String { rawValue }
 
@@ -22,6 +29,11 @@ enum BackupCategory: String, CaseIterable, Identifiable {
         case .bookmarks: return "书签"
         case .localBooks: return "本地书籍（含全文，体积较大）"
         case .aiProviders: return "AI 服务商配置（不含 API Key）"
+        case .dictRules: return "词典规则"
+        case .webSearchEngines: return "自定义搜索引擎"
+        case .httpTTSEngines: return "自定义朗读引擎"
+        case .coverGallery: return "封面相册"
+        case .shelfGroups: return "书架分组"
         }
     }
 
@@ -42,6 +54,11 @@ enum BackupCategory: String, CaseIterable, Identifiable {
         case .bookmarks: return "bookmarks.json"
         case .localBooks: return "local_books.json"
         case .aiProviders: return "ai_providers.json"
+        case .dictRules: return "dict_rules.json"
+        case .webSearchEngines: return "web_search_engines.json"
+        case .httpTTSEngines: return "http_tts_engines.json"
+        case .coverGallery: return "cover_gallery.json"
+        case .shelfGroups: return "shelf_groups.json"
         }
     }
 }

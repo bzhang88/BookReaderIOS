@@ -95,7 +95,7 @@
 - [ ] 模型偏单薄：抓取规则、登录、分类、收藏、已读状态 —— `RssSource.swift:5-19`, `RssFeedService.swift:6-9`
 
 ### 备份 / 恢复
-- [ ] 补上词典规则、自定义搜索引擎、自定义朗读引擎、封面相册、书架分组这 5 类数据 —— `BackupCategory.swift:8-9`
+- [x] 补上词典规则、自定义搜索引擎、自定义朗读引擎、封面相册、书架分组这 5 类数据 —— `BackupCategory.swift:8-9`
 
 ### 本地书籍导入
 - [ ] EPUB / PDF 导入（目前完全没有，建议优先）—— `LocalBookListView.swift:94`
