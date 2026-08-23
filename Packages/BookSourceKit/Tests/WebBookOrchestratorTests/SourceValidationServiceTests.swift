@@ -30,6 +30,9 @@ final class SourceValidationServiceTests: XCTestCase {
 
     private func stubbedClient() -> StubHTTPClient {
         StubHTTPClient(responses: [
+            // The bare base URL -- the new domain-reachability check's target. Any stubbed response
+            // (regardless of content) is enough for it to count as "reachable."
+            "https://example.com": "<html><body>ok</body></html>",
             "https://example.com/search?wd=fixed": """
             <html><body><ul><li class="item"><a class="name" href="/book/1">Novel One</a></li></ul></body></html>
             """,
@@ -58,8 +61,10 @@ final class SourceValidationServiceTests: XCTestCase {
             SourceValidationService.validate(sources: [source], keyword: "novel", depth: .search, httpClient: client)
         )
         XCTAssertEqual(outcomes.count, 1)
-        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.search])
-        XCTAssertTrue(outcomes[0].stageResults[0].success)
+        // .domain always runs first, ahead of whatever `depth` was configured -- see
+        // `SourceValidationStage`'s own doc comment for why it's not part of the depth chain.
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search])
+        XCTAssertTrue(outcomes[0].stageResults.allSatisfy(\.success))
     }
 
     func testContentDepthRunsAllFourStagesInOrder() async throws {
@@ -69,20 +74,36 @@ final class SourceValidationServiceTests: XCTestCase {
             SourceValidationService.validate(sources: [source], keyword: "novel", depth: .content, httpClient: client)
         )
         XCTAssertEqual(outcomes.count, 1)
-        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.search, .detail, .toc, .content])
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search, .detail, .toc, .content])
         XCTAssertTrue(outcomes[0].isFullyPassing)
     }
 
-    func testStopsAtFirstFailingStageRatherThanContinuing() async throws {
+    func testDomainUnreachableAbortsBeforeEverAttemptingSearch() async throws {
         let source = makeFullPipelineSource()
-        // No stubbed response for the search URL -- StubHTTPClient throws for unknown URLs.
+        // Nothing stubbed at all -- StubHTTPClient throws for unknown URLs, including the bare
+        // base URL the domain check hits first.
         let client = StubHTTPClient(responses: [:])
         let outcomes = await collect(
             SourceValidationService.validate(sources: [source], keyword: "novel", depth: .content, httpClient: client)
         )
         XCTAssertEqual(outcomes.count, 1)
-        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.search])
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain], "search should never even be attempted")
         XCTAssertFalse(outcomes[0].stageResults[0].success)
+        XCTAssertFalse(outcomes[0].isFullyPassing)
+    }
+
+    func testStopsAtFirstFailingStageRatherThanContinuing() async throws {
+        let source = makeFullPipelineSource()
+        // Domain resolves, but nothing else is stubbed -- search should fail and the chain should
+        // stop there, before ever attempting detail.
+        let client = StubHTTPClient(responses: ["https://example.com": "<html></html>"])
+        let outcomes = await collect(
+            SourceValidationService.validate(sources: [source], keyword: "novel", depth: .content, httpClient: client)
+        )
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search])
+        XCTAssertTrue(outcomes[0].stageResults[0].success)
+        XCTAssertFalse(outcomes[0].stageResults[1].success)
         XCTAssertFalse(outcomes[0].isFullyPassing)
     }
 
@@ -94,8 +115,8 @@ final class SourceValidationServiceTests: XCTestCase {
             SourceValidationService.validate(sources: [source], keyword: "novel", depth: .content, httpClient: client)
         )
         XCTAssertEqual(outcomes.count, 1)
-        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.search])
-        XCTAssertFalse(outcomes[0].stageResults[0].success, "zero results counts as a search failure for validation purposes")
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search])
+        XCTAssertFalse(outcomes[0].stageResults[1].success, "zero results counts as a search failure for validation purposes")
     }
 
     func testValidatesMultipleSourcesIndependently() async throws {
@@ -104,14 +125,110 @@ final class SourceValidationServiceTests: XCTestCase {
         bad.bookSourceUrl = "https://bad.example.com"
         bad.searchUrl = "https://bad.example.com/search?wd=fixed"
 
-        let client = stubbedClient()
+        let client = StubHTTPClient(responses: [
+            "https://example.com": "<html></html>",
+            "https://example.com/search?wd=fixed": """
+            <html><body><ul><li class="item"><a class="name" href="/book/1">Novel One</a></li></ul></body></html>
+            """,
+            "https://bad.example.com": "<html></html>"
+            // bad's search URL is intentionally left unstubbed -- its domain resolves but search fails.
+        ])
         let outcomes = await collect(
             SourceValidationService.validate(sources: [good, bad], keyword: "novel", depth: .search, httpClient: client)
         )
         XCTAssertEqual(outcomes.count, 2)
         let goodOutcome = outcomes.first { $0.source.bookSourceUrl == "https://example.com" }
         let badOutcome = outcomes.first { $0.source.bookSourceUrl == "https://bad.example.com" }
-        XCTAssertEqual(goodOutcome?.stageResults.first?.success, true)
-        XCTAssertEqual(badOutcome?.stageResults.first?.success, false)
+        XCTAssertEqual(goodOutcome?.stageResults.last?.success, true)
+        XCTAssertEqual(badOutcome?.stageResults.last?.success, false)
+    }
+
+    // MARK: - 发现页 (explore) check
+
+    private func makeExploreSource(exploreUrl: String?) -> BookSource {
+        var source = makeFullPipelineSource()
+        source.exploreUrl = exploreUrl
+        var explore = ExploreRule()
+        explore.bookList = "@css:.item"
+        explore.name = "@css:.name@text"
+        explore.bookUrl = "@css:.name@href"
+        source.ruleExplore = explore
+        return source
+    }
+
+    func testExploreCheckPassesWhenExploreURLReturnsResults() async throws {
+        let source = makeExploreSource(exploreUrl: "https://example.com/explore/fantasy")
+        let client = StubHTTPClient(responses: [
+            "https://example.com": "<html></html>",
+            "https://example.com/search?wd=fixed": """
+            <html><body><ul><li class="item"><a class="name" href="/book/1">Novel One</a></li></ul></body></html>
+            """,
+            "https://example.com/explore/fantasy": """
+            <html><body><ul><li class="item"><a class="name" href="/book/2">Explore Novel</a></li></ul></body></html>
+            """
+        ])
+
+        let outcomes = await collect(
+            SourceValidationService.validate(sources: [source], keyword: "novel", depth: .search, httpClient: client)
+        )
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search, .explore])
+        XCTAssertTrue(outcomes[0].isFullyPassing)
+    }
+
+    func testExploreCheckFailsWhenExploreURLIsUnreachable() async throws {
+        let source = makeExploreSource(exploreUrl: "https://example.com/explore/fantasy")
+        // Explore URL intentionally left unstubbed.
+        let client = StubHTTPClient(responses: [
+            "https://example.com": "<html></html>",
+            "https://example.com/search?wd=fixed": """
+            <html><body><ul><li class="item"><a class="name" href="/book/1">Novel One</a></li></ul></body></html>
+            """
+        ])
+
+        let outcomes = await collect(
+            SourceValidationService.validate(sources: [source], keyword: "novel", depth: .search, httpClient: client)
+        )
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search, .explore])
+        XCTAssertFalse(outcomes[0].stageResults.last?.success ?? true)
+        XCTAssertFalse(outcomes[0].isFullyPassing)
+    }
+
+    func testExploreCheckIsSkippedEntirelyWhenSourceHasNoExploreURL() async throws {
+        let source = makeExploreSource(exploreUrl: nil)
+        let client = stubbedClient()
+
+        let outcomes = await collect(
+            SourceValidationService.validate(sources: [source], keyword: "novel", depth: .search, httpClient: client)
+        )
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search], "no explore result at all, not a failing one")
+        XCTAssertTrue(outcomes[0].isFullyPassing)
+    }
+
+    /// Explore is independent of the search chain -- a source whose search fails should still get an
+    /// explore result, not have it silently skipped, matching Legado's own `checkDiscovery` being a
+    /// separate step from the search/info/category/content checks.
+    func testExploreCheckStillRunsEvenWhenSearchStageFails() async throws {
+        var source = makeExploreSource(exploreUrl: "https://example.com/explore/fantasy")
+        source.ruleSearch?.bookList = "@css:.nonexistent"
+        let client = StubHTTPClient(responses: [
+            "https://example.com": "<html></html>",
+            "https://example.com/search?wd=fixed": """
+            <html><body><ul><li class="item"><a class="name" href="/book/1">Novel One</a></li></ul></body></html>
+            """,
+            "https://example.com/explore/fantasy": """
+            <html><body><ul><li class="item"><a class="name" href="/book/2">Explore Novel</a></li></ul></body></html>
+            """
+        ])
+
+        let outcomes = await collect(
+            SourceValidationService.validate(sources: [source], keyword: "novel", depth: .content, httpClient: client)
+        )
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes[0].stageResults.map(\.stage), [.domain, .search, .explore])
+        XCTAssertFalse(outcomes[0].stageResults[1].success, "search itself still failed")
+        XCTAssertTrue(outcomes[0].stageResults[2].success, "explore ran independently and succeeded")
     }
 }

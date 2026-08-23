@@ -84,12 +84,12 @@
 - [x] 搜索并发限制 —— `MultiSourceSearchService.swift`（`maxConcurrent`，默认 16，对齐 Legado `threadCount` 默认值）
 
 ### 书源管理 / 发现
-- [ ] 书源列表搜索/筛选框
-- [ ] 排序选项
-- [ ] 发现页"全部加入书架"和跳页
-- [ ] 书源检测补上域名可达性和发现页检测
-- [ ] 调试页支持单阶段调试
-- [ ] 清除单个书源的 Cookie
+- [x] 书源列表搜索/筛选框 —— `SourceLibraryView.swift`（`.searchable`）
+- [x] 排序选项 —— `SourceLibraryView.swift`（`SourceSortOption`：手动/名称/网址/更新时间/响应时间/启用状态 + 升降序）
+- [x] 发现页"全部加入书架"和跳页 —— `ExploreView.swift`
+- [x] 书源检测补上域名可达性和发现页检测 —— `SourceValidationService.swift`（新增 `.domain`/`.explore` 独立检测项）
+- [x] 调试页支持单阶段调试 —— `SourceDebugView.swift`（复用 Legado `Debug.startDebug` 的 `--`/`++`/`::`/URL 前缀语法）
+- [x] 清除单个书源的 Cookie —— `SourceVariableAndCookieView.swift`
 
 ### RSS
 - [ ] 模型偏单薄：抓取规则、登录、分类、收藏、已读状态 —— `RssSource.swift:5-19`, `RssFeedService.swift:6-9`

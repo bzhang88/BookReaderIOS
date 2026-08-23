@@ -25,6 +25,9 @@ struct ExploreView: View {
     /// a `Set` rather than a single value since nothing stops the user tapping "+" on more than one
     /// row before the first fetch finishes.
     @State private var addingResultIDs: Set<String> = []
+    @State private var isAddingAllToShelf = false
+    @State private var isShowingPageJump = false
+    @State private var pageJumpText = ""
 
     var body: some View {
         NavigationStack {
@@ -52,10 +55,55 @@ struct ExploreView: View {
                 ToolbarItem(placement: .principal) {
                     sourcePickerMenu
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    exploreOverflowMenu
+                }
             }
             .task { await reloadSources() }
             .refreshable { await reloadSources() }
+            .alert("跳转到第几页", isPresented: $isShowingPageJump) {
+                TextField("页码", text: $pageJumpText)
+                    .keyboardType(.numberPad)
+                Button("取消", role: .cancel) {}
+                Button("跳转") {
+                    if let page = Int(pageJumpText), page > 0 {
+                        Task { await jumpToPage(page) }
+                    }
+                }
+            } message: {
+                Text("当前第 \(currentPage) 页")
+            }
         }
+    }
+
+    /// Real gap found comparing against Legado: this reader's own "发现" screen only ever appended
+    /// one more page at a time (`loadMoreRow`'s "加载更多") with no way to jump straight to a known
+    /// page, and no batch way to shelve everything currently loaded -- both real, requested Legado
+    /// capabilities on its own discover/explore results list.
+    @ViewBuilder
+    private var exploreOverflowMenu: some View {
+        Menu {
+            Button {
+                Task { await addAllToShelf() }
+            } label: {
+                Label("全部加入书架", systemImage: "text.badge.plus")
+            }
+            .disabled(results.isEmpty || isAddingAllToShelf)
+            Button {
+                pageJumpText = "\(currentPage)"
+                isShowingPageJump = true
+            } label: {
+                Label("跳转到指定页", systemImage: "arrow.forward.to.line")
+            }
+            .disabled(selectedKind == nil)
+        } label: {
+            if isAddingAllToShelf {
+                ProgressView()
+            } else {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+        .disabled(isAddingAllToShelf)
     }
 
     private var sourcePickerMenu: some View {
@@ -266,24 +314,64 @@ struct ExploreView: View {
     }
 
     /// Fetches full book info (needed for `tocUrl`, which a bare search/explore result never has)
-    /// before adding to the shelf, mirroring `BookDetailView`'s own 加入书架 logic -- this is what
-    /// lets the "+" button add a book without navigating into the detail page first. Fails silently
-    /// (button just stays as "+" so the user can retry) rather than surfacing an alert, matching
-    /// `loadMore`'s same reasoning.
-    private func quickAdd(_ result: SearchResult) async {
-        guard let selectedSource else { return }
-        addingResultIDs.insert(result.id)
-        defer { addingResultIDs.remove(result.id) }
+    /// before adding to the shelf, mirroring `BookDetailView`'s own 加入书架 logic. Shared by the
+    /// per-row "+" button and "全部加入书架" so both stay in sync with exactly one construction of
+    /// the resulting `ShelfBook`.
+    @discardableResult
+    private func addToShelf(_ result: SearchResult, source: BookSource) async -> Bool {
         guard let info = try? await BookInfoService.fetchBookInfo(
-            source: selectedSource, bookURL: result.bookUrl, httpClient: env.httpClient
-        ) else { return }
+            source: source, bookURL: result.bookUrl, httpClient: env.httpClient
+        ) else { return false }
         let book = ShelfBook(
-            bookSourceUrl: selectedSource.bookSourceUrl, bookUrl: result.bookUrl,
+            bookSourceUrl: source.bookSourceUrl, bookUrl: result.bookUrl,
             name: info.name ?? result.name, author: info.author ?? result.author,
             coverUrl: info.coverUrl ?? result.coverUrl, intro: info.intro ?? result.intro,
             tocUrl: info.tocUrl, lastChapterTitle: info.lastChapter ?? result.lastChapter
         )
         try? await env.shelfStore.addOrUpdate(book)
         shelfKeys.insert(GroupedSearchResult.groupKey(name: book.name, author: book.author))
+        return true
+    }
+
+    /// Fails silently (button just stays as "+" so the user can retry) rather than surfacing an
+    /// alert, matching `loadMore`'s same reasoning -- this is what lets the "+" button add a book
+    /// without navigating into the detail page first.
+    private func quickAdd(_ result: SearchResult) async {
+        guard let selectedSource else { return }
+        addingResultIDs.insert(result.id)
+        defer { addingResultIDs.remove(result.id) }
+        await addToShelf(result, source: selectedSource)
+    }
+
+    /// Sequential, not concurrent -- a typical explore page (tens of results, not hundreds) doesn't
+    /// need `MultiSourceSearchService`-style bounded-worker-pool machinery, and running these one at
+    /// a time keeps `shelfKeys`/the per-row checkmark updating incrementally as it goes rather than
+    /// all jumping to "已加入" at once at the very end.
+    private func addAllToShelf() async {
+        guard let selectedSource else { return }
+        isAddingAllToShelf = true
+        defer { isAddingAllToShelf = false }
+        for result in results {
+            let key = GroupedSearchResult.groupKey(name: result.name, author: result.author)
+            guard !shelfKeys.contains(key) else { continue }
+            await addToShelf(result, source: selectedSource)
+        }
+    }
+
+    /// Replaces `results` outright (unlike `loadMore`, which appends) -- jumping to page 7 means
+    /// "show me page 7," not "also show page 7 after everything already loaded."
+    private func jumpToPage(_ page: Int) async {
+        guard let selectedSource, let selectedKind else { return }
+        isLoading = true
+        errorMessage = nil
+        if let fetched = try? await ExploreService.fetchExploreList(
+            source: selectedSource, exploreURL: selectedKind.url, page: page, httpClient: env.httpClient
+        ) {
+            results = fetched
+            currentPage = page
+        } else {
+            errorMessage = "跳转到第 \(page) 页失败"
+        }
+        isLoading = false
     }
 }

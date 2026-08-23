@@ -21,6 +21,7 @@ struct SourceVariableAndCookieView: View {
     @State private var variableText = ""
     @State private var cookies: [SavedCookie] = []
     @State private var statusMessage: String?
+    @State private var isShowingClearCookiesConfirm = false
 
     var body: some View {
         Form {
@@ -58,6 +59,9 @@ struct SourceVariableAndCookieView: View {
                         UIPasteboard.general.string = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
                         statusMessage = "已复制"
                     }
+                    Button("清除 Cookie", role: .destructive) {
+                        isShowingClearCookiesConfirm = true
+                    }
                 }
             }
         }
@@ -74,6 +78,14 @@ struct SourceVariableAndCookieView: View {
             }
         }
         .task { await reload() }
+        .confirmationDialog(
+            "清除这个书源的 Cookie？", isPresented: $isShowingClearCookiesConfirm, titleVisibility: .visible
+        ) {
+            Button("清除", role: .destructive) { Task { await clearCookies() } }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("清除后需要重新登录/验证才能继续访问需要登录的内容。")
+        }
     }
 
     private func reload() async {
@@ -84,5 +96,26 @@ struct SourceVariableAndCookieView: View {
     private func saveVariable() async {
         try? await env.sourceVariableStore.setVariable(variableText, bookSourceUrl: source.bookSourceUrl)
         statusMessage = "已保存"
+    }
+
+    /// Clears both halves of where a login's cookies actually live -- `loginCookieStore`
+    /// (`setCookies([], ...)` already removes the persisted entry outright, same as `SourceLoginView`
+    /// would if it captured zero cookies) and `HTTPCookieStorage.shared`, the live jar
+    /// `URLSessionHTTPClient` actually reads from this session; clearing only the persisted half
+    /// would leave this session still silently authenticated until the next relaunch. Domain-matching
+    /// mirrors `SourceLoginView.saveCookiesAndDismiss`'s own convention exactly, for the same reason:
+    /// a shared cookie jar can carry cookies from unrelated domains that must not be touched.
+    private func clearCookies() async {
+        try? await env.loginCookieStore.setCookies([], bookSourceUrl: source.bookSourceUrl)
+        if let host = URL(string: source.bookSourceUrl)?.host, let liveCookies = HTTPCookieStorage.shared.cookies {
+            for cookie in liveCookies {
+                let cookieDomain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+                if host == cookieDomain || host.hasSuffix("." + cookieDomain) {
+                    HTTPCookieStorage.shared.deleteCookie(cookie)
+                }
+            }
+        }
+        cookies = []
+        statusMessage = "已清除"
     }
 }

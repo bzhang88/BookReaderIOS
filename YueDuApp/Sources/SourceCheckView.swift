@@ -49,7 +49,7 @@ struct SourceCheckView: View {
                 }
             }
             Picker("检测深度", selection: $depth) {
-                ForEach(SourceValidationStage.allCases, id: \.self) { stage in
+                ForEach(SourceValidationStage.depthOptions, id: \.self) { stage in
                     Text("测到\(stage.displayName)").tag(stage)
                 }
             }

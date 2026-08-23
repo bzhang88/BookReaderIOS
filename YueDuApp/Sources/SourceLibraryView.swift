@@ -28,6 +28,12 @@ struct SourceLibraryView: View {
     /// source collection (real-world Legado collections routinely run 50-200+ sources) had no way
     /// to organize the list at all.
     @State private var groupFilter: String?
+    /// Real gap found comparing against Legado: with the same large-collection reality as
+    /// `groupFilter` above, there was no way to jump straight to a known source by name/url either --
+    /// every search meant scrolling and eyeballing.
+    @State private var searchKeyword = ""
+    @State private var sortOption: SourceSortOption = .manual
+    @State private var sortAscending = true
 
     /// Merges group names still in live use across `sources` with ones registered in
     /// `bookSourceGroupStore` but not currently assigned to any source -- same reasoning as
@@ -43,8 +49,41 @@ struct SourceLibraryView: View {
     }
 
     private var displayedSources: [BookSource] {
-        guard let groupFilter else { return sources }
-        return sources.filter { $0.bookSourceGroup == groupFilter }
+        var result = sources
+        if let groupFilter { result = result.filter { $0.bookSourceGroup == groupFilter } }
+        let trimmedKeyword = searchKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedKeyword.isEmpty {
+            result = result.filter {
+                $0.bookSourceName.localizedCaseInsensitiveContains(trimmedKeyword)
+                    || $0.bookSourceUrl.localizedCaseInsensitiveContains(trimmedKeyword)
+            }
+        }
+        result = sortedAscending(result, by: sortOption)
+        return sortAscending ? result : result.reversed()
+    }
+
+    /// Always returns the "natural ascending" order for `option` -- `displayedSources` is the only
+    /// caller, and applies `sortAscending`'s direction uniformly afterward (a plain `.reversed()`),
+    /// matching Legado's own `BookSourceActivity` architecture: `isSortAscending` is one independent
+    /// toggle applied on top of whichever sort criterion is picked, not baked into each criterion
+    /// separately. `.manual` mirrors Legado's `BookSourceSort.Default` (the store's own persisted
+    /// order, i.e. `customOrder`); `.respondTime` treats a never-checked source (`respondTime == nil`)
+    /// as the slowest rather than sorting it to an arbitrary end regardless of direction.
+    private func sortedAscending(_ items: [BookSource], by option: SourceSortOption) -> [BookSource] {
+        switch option {
+        case .manual:
+            return items
+        case .name:
+            return items.sorted { $0.bookSourceName.localizedStandardCompare($1.bookSourceName) == .orderedAscending }
+        case .url:
+            return items.sorted { $0.bookSourceUrl.localizedStandardCompare($1.bookSourceUrl) == .orderedAscending }
+        case .updateTime:
+            return items.sorted { ($0.lastUpdateTime ?? 0) < ($1.lastUpdateTime ?? 0) }
+        case .respondTime:
+            return items.sorted { ($0.respondTime ?? Int.max) < ($1.respondTime ?? Int.max) }
+        case .enabled:
+            return items.sorted { !$0.enabled && $1.enabled }
+        }
     }
 
     var body: some View {
@@ -190,46 +229,13 @@ struct SourceLibraryView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button("新建书源") { isCreatingSource = true }
-                        Button("从网址导入") { isShowingURLImport = true }
-                        Button("订阅列表") { isShowingSubscriptions = true }
-                        Button("回收站") { isShowingTrash = true }
-                        Button("全部启用") { setAllEnabled(true) }.disabled(sources.isEmpty)
-                        Button("全部停用") { setAllEnabled(false) }.disabled(sources.isEmpty)
-                        NavigationLink {
-                            SourceGroupManagementView()
-                        } label: {
-                            Text("分组管理")
-                        }
-                        if !existingGroupNames.isEmpty {
-                            Menu("筛选分组\(groupFilter.map { "（\($0)）" } ?? "")") {
-                                Button {
-                                    groupFilter = nil
-                                } label: {
-                                    if groupFilter == nil {
-                                        Label("全部", systemImage: "checkmark")
-                                    } else {
-                                        Text("全部")
-                                    }
-                                }
-                                ForEach(existingGroupNames, id: \.self) { name in
-                                    Button {
-                                        groupFilter = name
-                                    } label: {
-                                        if groupFilter == name {
-                                            Label(name, systemImage: "checkmark")
-                                        } else {
-                                            Text(name)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        overflowMenuContent
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
                 }
             }
+            .searchable(text: $searchKeyword, prompt: "搜索书源名称或网址")
             .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.json]) { result in
                 Task { await handleImport(result) }
             }
@@ -285,6 +291,79 @@ struct SourceLibraryView: View {
             }
             .task { await reload() }
             .refreshable { await reload() }
+        }
+    }
+
+    // Broken out of the toolbar's `Menu` closure into its own `@ViewBuilder` -- the same
+    // "compiler unable to type-check this expression in reasonable time" CI failure class this
+    // session already hit twice today (`HighlightRuleListView`/its own doc comment,
+    // `AudiobookPlayerView.toolbarContent`) for a `Menu` that grew past a handful of flat buttons
+    // once a second conditional sub-`Menu` (`sortMenu`, alongside the pre-existing `groupFilterMenu`)
+    // was added -- proactively split this time instead of waiting for CI to catch it.
+    @ViewBuilder
+    private var overflowMenuContent: some View {
+        Button("新建书源") { isCreatingSource = true }
+        Button("从网址导入") { isShowingURLImport = true }
+        Button("订阅列表") { isShowingSubscriptions = true }
+        Button("回收站") { isShowingTrash = true }
+        Button("全部启用") { setAllEnabled(true) }.disabled(sources.isEmpty)
+        Button("全部停用") { setAllEnabled(false) }.disabled(sources.isEmpty)
+        NavigationLink {
+            SourceGroupManagementView()
+        } label: {
+            Text("分组管理")
+        }
+        if !existingGroupNames.isEmpty {
+            groupFilterMenu
+        }
+        sortMenu
+    }
+
+    @ViewBuilder
+    private var groupFilterMenu: some View {
+        Menu("筛选分组\(groupFilter.map { "（\($0)）" } ?? "")") {
+            Button {
+                groupFilter = nil
+            } label: {
+                if groupFilter == nil {
+                    Label("全部", systemImage: "checkmark")
+                } else {
+                    Text("全部")
+                }
+            }
+            ForEach(existingGroupNames, id: \.self) { name in
+                Button {
+                    groupFilter = name
+                } label: {
+                    if groupFilter == name {
+                        Label(name, systemImage: "checkmark")
+                    } else {
+                        Text(name)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sortMenu: some View {
+        Menu("排序: \(sortOption.displayName)") {
+            Button {
+                sortAscending.toggle()
+            } label: {
+                Label(sortAscending ? "升序" : "降序", systemImage: sortAscending ? "arrow.up" : "arrow.down")
+            }
+            ForEach(SourceSortOption.allCases) { option in
+                Button {
+                    sortOption = option
+                } label: {
+                    if sortOption == option {
+                        Label(option.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(option.displayName)
+                    }
+                }
+            }
         }
     }
 
@@ -378,4 +457,26 @@ struct SourceLibraryView: View {
 #Preview {
     SourceLibraryView()
         .environmentObject(AppEnvironment())
+}
+
+/// Mirrors Legado's own `BookSourceSort` options (`BookSourceActivity`'s sort submenu) minus
+/// `Weight`/"自动排序" -- that one sorts by `BookSource.weight`, a field this app decodes but never
+/// computes or writes anywhere (Legado derives it from real usage/search-success heuristics this
+/// port doesn't implement), so including it here would just be a no-op sort by a field that's always
+/// `0`.
+enum SourceSortOption: String, CaseIterable, Identifiable {
+    case manual, name, url, updateTime, respondTime, enabled
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .manual: return "手动排序"
+        case .name: return "名称"
+        case .url: return "网址"
+        case .updateTime: return "更新时间"
+        case .respondTime: return "响应时间"
+        case .enabled: return "启用状态"
+        }
+    }
 }
