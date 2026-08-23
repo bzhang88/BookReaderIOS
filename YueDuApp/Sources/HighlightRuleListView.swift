@@ -41,44 +41,7 @@ struct HighlightRuleListView: View {
                 Button {
                     editingRule = rule
                 } label: {
-                    HStack {
-                        Circle()
-                            .fill(Color(hex: rule.colorHex ?? "") ?? .orange)
-                            .frame(width: 12, height: 12)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(rule.name)
-                                    .font(.headline)
-                                    .foregroundStyle(rule.enabled ? .primary : .secondary)
-                                if let group = rule.group, !group.isEmpty {
-                                    Text(group)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.secondary.opacity(0.12), in: Capsule())
-                                        .foregroundStyle(.secondary)
-                                }
-                                if rule.resolvedTargetScope != .all {
-                                    Text(rule.resolvedTargetScope == .title ? "仅标题" : "仅正文")
-                                        .font(.caption2)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.accentColor.opacity(0.12), in: Capsule())
-                                        .foregroundStyle(.accentColor)
-                                }
-                            }
-                            Text(rule.pattern)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { rule.enabled },
-                            set: { toggleEnabled(rule, enabled: $0) }
-                        ))
-                        .labelsHidden()
-                    }
+                    ruleRow(rule)
                 }
                 .buttonStyle(.plain)
             }
@@ -86,50 +49,7 @@ struct HighlightRuleListView: View {
         }
         .navigationTitle("高亮规则")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    isShowingNewRuleSheet = true
-                } label: {
-                    Label("新建", systemImage: "plus")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    NavigationLink {
-                        HighlightRuleGroupManagementView()
-                    } label: {
-                        Text("分组管理")
-                    }
-                    if !existingGroupNames.isEmpty {
-                        Menu("筛选分组\(groupFilter.map { "（\($0)）" } ?? "")") {
-                            Button {
-                                groupFilter = nil
-                            } label: {
-                                if groupFilter == nil {
-                                    Label("全部", systemImage: "checkmark")
-                                } else {
-                                    Text("全部")
-                                }
-                            }
-                            ForEach(existingGroupNames, id: \.self) { name in
-                                Button {
-                                    groupFilter = name
-                                } label: {
-                                    if groupFilter == name {
-                                        Label(name, systemImage: "checkmark")
-                                    } else {
-                                        Text(name)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
+        .toolbar { toolbarContent }
         .sheet(isPresented: $isShowingNewRuleSheet, onDismiss: { Task { await reload() } }) {
             HighlightRuleEditView(rule: nil, existingGroups: existingGroupNames)
         }
@@ -137,6 +57,110 @@ struct HighlightRuleListView: View {
             HighlightRuleEditView(rule: rule, existingGroups: existingGroupNames)
         }
         .task { await reload() }
+    }
+
+    /// Extracted out of `body` -- the badge row (name + optional group/scope capsules + pattern)
+    /// pushed the enclosing `List`/`ForEach`/`Button` expression past the real `xcodebuild` (Release,
+    /// whole-module optimization) type-checker's time budget ("unable to type-check this expression
+    /// in reasonable time"), the same failure class `ReaderView.body`'s own doc comment already
+    /// documents and works around by splitting into independently-inferred pieces. Windows
+    /// `swift build` never catches this since it only ever compiles the cross-platform package.
+    @ViewBuilder
+    private func ruleRow(_ rule: HighlightRule) -> some View {
+        HStack {
+            Circle()
+                .fill(Color(hex: rule.colorHex ?? "") ?? .orange)
+                .frame(width: 12, height: 12)
+            VStack(alignment: .leading, spacing: 2) {
+                ruleBadges(rule)
+                Text(rule.pattern)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { rule.enabled },
+                set: { toggleEnabled(rule, enabled: $0) }
+            ))
+            .labelsHidden()
+        }
+    }
+
+    @ViewBuilder
+    private func ruleBadges(_ rule: HighlightRule) -> some View {
+        HStack(spacing: 6) {
+            Text(rule.name)
+                .font(.headline)
+                .foregroundStyle(rule.enabled ? .primary : .secondary)
+            if let group = rule.group, !group.isEmpty {
+                Text(group)
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                    .foregroundStyle(.secondary)
+            }
+            if rule.resolvedTargetScope != .all {
+                Text(rule.resolvedTargetScope == .title ? "仅标题" : "仅正文")
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    .foregroundStyle(.accentColor)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                isShowingNewRuleSheet = true
+            } label: {
+                Label("新建", systemImage: "plus")
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                NavigationLink {
+                    HighlightRuleGroupManagementView()
+                } label: {
+                    Text("分组管理")
+                }
+                if !existingGroupNames.isEmpty {
+                    groupFilterMenu
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var groupFilterMenu: some View {
+        Menu("筛选分组\(groupFilter.map { "（\($0)）" } ?? "")") {
+            Button {
+                groupFilter = nil
+            } label: {
+                if groupFilter == nil {
+                    Label("全部", systemImage: "checkmark")
+                } else {
+                    Text("全部")
+                }
+            }
+            ForEach(existingGroupNames, id: \.self) { name in
+                Button {
+                    groupFilter = name
+                } label: {
+                    if groupFilter == name {
+                        Label(name, systemImage: "checkmark")
+                    } else {
+                        Text(name)
+                    }
+                }
+            }
+        }
     }
 
     private func reload() async {
