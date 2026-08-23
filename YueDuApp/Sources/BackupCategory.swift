@@ -14,6 +14,11 @@ enum BackupCategory: String, CaseIterable, Identifiable {
     // though every one of them already has the exact same `all()`-returning store shape every other
     // category here already uses.
     case dictRules, webSearchEngines, httpTTSEngines, coverGallery, shelfGroups
+    /// RSS 收藏 -- added alongside the RSS model's `sortUrl`/`loginUrl`/read-status improvements;
+    /// read-status is deliberately left out of backup (ephemeral per-device state, same call this
+    /// project already made for e.g. reading position not being a distinct backup category of its
+    /// own -- it rides along with `shelf`).
+    case rssFavorites
 
     var id: String { rawValue }
 
@@ -34,6 +39,7 @@ enum BackupCategory: String, CaseIterable, Identifiable {
         case .httpTTSEngines: return "自定义朗读引擎"
         case .coverGallery: return "封面相册"
         case .shelfGroups: return "书架分组"
+        case .rssFavorites: return "RSS 收藏"
         }
     }
 
@@ -59,6 +65,7 @@ enum BackupCategory: String, CaseIterable, Identifiable {
         case .httpTTSEngines: return "http_tts_engines.json"
         case .coverGallery: return "cover_gallery.json"
         case .shelfGroups: return "shelf_groups.json"
+        case .rssFavorites: return "rss_favorites.json"
         }
     }
 }

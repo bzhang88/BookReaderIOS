@@ -226,6 +226,11 @@ struct BackupSettingsView: View {
                 try await client.upload(path: BackupCategory.shelfGroups.fileName, content: try jsonString(items, encoder))
                 summary.append("书架分组 \(items.count)")
             }
+            if categories.contains(.rssFavorites) {
+                let items = try await env.rssFavoriteStore.all()
+                try await client.upload(path: BackupCategory.rssFavorites.fileName, content: try jsonString(items, encoder))
+                summary.append("RSS 收藏 \(items.count)")
+            }
 
             statusMessage = "备份完成：" + summary.joined(separator: "，")
         } catch {
@@ -412,6 +417,17 @@ struct BackupSettingsView: View {
                     diff: RestorePreviewCalculator.diff(remoteIds: items, localIds: localIds, style: .appendDedup)
                 ))
             }
+            if categories.contains(.rssFavorites) {
+                let items = try decoder.decode(
+                    [RssFavoriteArticle].self, from: Data(try await client.download(path: BackupCategory.rssFavorites.fileName).utf8)
+                )
+                plan.rssFavorites = items
+                let localIds = Set(try await env.rssFavoriteStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .rssFavorites, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .appendDedup)
+                ))
+            }
 
             plan.previews = previews
             pendingRestore = plan
@@ -447,6 +463,7 @@ struct BackupSettingsView: View {
             if categories.contains(.httpTTSEngines) { bundle.httpTTSEngines = try await env.httpTTSEngineStore.all() }
             if categories.contains(.coverGallery) { bundle.coverGallery = try await env.coverGalleryStore.all() }
             if categories.contains(.shelfGroups) { bundle.shelfGroups = try await env.shelfGroupStore.all() }
+            if categories.contains(.rssFavorites) { bundle.rssFavorites = try await env.rssFavoriteStore.all() }
 
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -607,6 +624,14 @@ struct BackupSettingsView: View {
                     diff: RestorePreviewCalculator.diff(remoteIds: items, localIds: localIds, style: .appendDedup)
                 ))
             }
+            if let items = bundle.rssFavorites {
+                plan.rssFavorites = items
+                let localIds = Set(try await env.rssFavoriteStore.all().map(\.id))
+                previews.append(RestoreCategoryPreview(
+                    category: .rssFavorites, remoteCount: items.count,
+                    diff: RestorePreviewCalculator.diff(remoteIds: items.map(\.id), localIds: localIds, style: .appendDedup)
+                ))
+            }
 
             plan.previews = previews
             pendingRestore = plan
@@ -697,6 +722,12 @@ struct BackupSettingsView: View {
                 for item in items { try await env.shelfGroupStore.add(item) }
                 summary.append("书架分组 \(items.count)")
             }
+            if let items = plan.rssFavorites {
+                // `RssFavoriteStore.add` is already idempotent (a no-op if the link is already
+                // favorited), matching `shelfGroups`'s reasoning above.
+                for item in items { try await env.rssFavoriteStore.add(item) }
+                summary.append("RSS 收藏 \(items.count)")
+            }
 
             statusMessage = "恢复完成：" + summary.joined(separator: "，")
         } catch {
@@ -733,6 +764,7 @@ private struct LocalBackupBundle: Codable {
     var httpTTSEngines: [HttpTTSEngine]?
     var coverGallery: [SavedCover]?
     var shelfGroups: [String]?
+    var rssFavorites: [RssFavoriteArticle]?
 }
 
 private struct RestorePlan: Identifiable {
@@ -752,6 +784,7 @@ private struct RestorePlan: Identifiable {
     var httpTTSEngines: [HttpTTSEngine]?
     var coverGallery: [SavedCover]?
     var shelfGroups: [String]?
+    var rssFavorites: [RssFavoriteArticle]?
     var previews: [RestoreCategoryPreview] = []
 }
 

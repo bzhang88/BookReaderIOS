@@ -12,6 +12,8 @@ final class AppEnvironment: ObservableObject {
     let shelfStore: ShelfStore
     let replaceRuleStore: ReplaceRuleStore
     let rssSourceStore: RssSourceStore
+    let rssFavoriteStore: RssFavoriteStore
+    let rssReadStore: RssReadStore
     let aiProviderStore: AIProviderStore
     let highlightRuleStore: HighlightRuleStore
     let tagGroupRuleStore: TagGroupRuleStore
@@ -50,6 +52,8 @@ final class AppEnvironment: ObservableObject {
         shelfStore = ShelfStore(fileURL: appSupport.appendingPathComponent("shelf.json"))
         replaceRuleStore = ReplaceRuleStore(fileURL: appSupport.appendingPathComponent("replace_rules.json"))
         rssSourceStore = RssSourceStore(fileURL: appSupport.appendingPathComponent("rss_sources.json"))
+        rssFavoriteStore = RssFavoriteStore(fileURL: appSupport.appendingPathComponent("rss_favorites.json"))
+        rssReadStore = RssReadStore(fileURL: appSupport.appendingPathComponent("rss_read.json"))
         aiProviderStore = AIProviderStore(fileURL: appSupport.appendingPathComponent("ai_providers.json"))
         highlightRuleStore = HighlightRuleStore(fileURL: appSupport.appendingPathComponent("highlight_rules.json"))
         tagGroupRuleStore = TagGroupRuleStore(fileURL: appSupport.appendingPathComponent("tag_group_rules.json"))

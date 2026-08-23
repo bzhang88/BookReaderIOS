@@ -92,7 +92,7 @@
 - [x] 清除单个书源的 Cookie —— `SourceVariableAndCookieView.swift`
 
 ### RSS
-- [ ] 模型偏单薄：抓取规则、登录、分类、收藏、已读状态 —— `RssSource.swift:5-19`, `RssFeedService.swift:6-9`
+- [x] 模型改进：登录、分类、收藏、已读状态（抓取规则/HTML抓取引擎不做，标准 RSS/Atom 用真正的 XML 解析器不需要）—— `RssSource.swift`（`sortUrl`/`loginUrl`）、新增 `RssFavoriteStore`/`RssReadStore`、`RssArticleListView.swift`（分类 tab、登录、收藏星标、已读加粗区分）、新增 `RssFavoritesView.swift`、备份新增 `rssFavorites` 分类
 
 ### 备份 / 恢复
 - [x] 补上词典规则、自定义搜索引擎、自定义朗读引擎、封面相册、书架分组这 5 类数据 —— `BackupCategory.swift:8-9`
