@@ -107,7 +107,7 @@ struct HighlightRuleListView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.accentColor.opacity(0.12), in: Capsule())
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
             }
         }
     }
