@@ -79,9 +79,9 @@
 - [x] 漫画阅读进度恢复（之前总回到第一页）—— `MangaReaderView.swift`（复用 `ShelfBook.lastReadCharacterOffset` 存图片下标，`ScrollViewReader`+`PreferenceKey` 跟踪/恢复滚动位置，跟文字阅读器同一套模式）
 
 ### 换源
-- [ ] 兼容性徽章接入换源界面 —— `ChangeSourceView.swift:86-90,180-184`
-- [ ] 章节换源展示真实目录、手动选择
-- [ ] 搜索并发限制 —— `MultiSourceSearchService.swift:26-48`
+- [x] 兼容性徽章接入换源界面 —— `ChangeSourceView.swift`（复用已有的 `CapabilityScanner`/`BookResultCard.compatibilityIssueCount`）
+- [x] 章节换源展示真实目录、手动选择 —— `ChapterSourcePickerView.swift`（新文件）、`ReaderView.swift`（`switchChapterSource`/`commitChapterSourcePick`）
+- [x] 搜索并发限制 —— `MultiSourceSearchService.swift`（`maxConcurrent`，默认 16，对齐 Legado `threadCount` 默认值）
 
 ### 书源管理 / 发现
 - [ ] 书源列表搜索/筛选框

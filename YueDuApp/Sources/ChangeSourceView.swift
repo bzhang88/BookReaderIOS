@@ -1,6 +1,7 @@
 import SwiftUI
 import BookSourceModel
 import WebBookOrchestrator
+import RuleEngine
 import Persistence
 
 /// Searches other enabled sources by book title and groups the results (reusing the same
@@ -86,7 +87,9 @@ struct ChangeSourceView: View {
                         BookResultCard(
                             name: entry.name, author: entry.author, coverUrl: entry.coverUrl,
                             wordCount: entry.wordCount, lastChapter: entry.lastChapter, intro: entry.intro,
-                            trailingLabel: entry.bookSourceName, chapterCount: chapterCounts[entry.bookUrl]
+                            trailingLabel: entry.bookSourceName,
+                            compatibilityIssueCount: compatibilityIssueCount(for: entry),
+                            chapterCount: chapterCounts[entry.bookUrl]
                         )
                     }
                     .disabled(isSwitching)
@@ -180,10 +183,24 @@ struct ChangeSourceView: View {
             BookResultCard(
                 name: group.name, author: group.author, coverUrl: group.coverUrl, wordCount: group.wordCount,
                 lastChapter: group.lastChapter, intro: group.intro,
-                trailingLabel: group.sourceCount > 1 ? "共 \(group.sourceCount) 个源" : group.entries[0].bookSourceName
+                trailingLabel: group.sourceCount > 1 ? "共 \(group.sourceCount) 个源" : group.entries[0].bookSourceName,
+                // Only meaningful for a single known candidate -- a multi-source group's badge would
+                // have to represent several different sources at once, which the picker sheet (once
+                // opened) already shows per-candidate instead.
+                compatibilityIssueCount: group.sourceCount == 1 ? compatibilityIssueCount(for: group.entries[0]) : 0
             )
         }
         .disabled(isSwitching)
+    }
+
+    /// A pure, network-free static parse of the candidate's own rule strings -- same
+    /// `CapabilityScanner` already used for `SourceLibraryView`'s badge and (inline, per-row, same
+    /// reasoning as here) `GlobalSearchView.BookSourcePickerView`'s. Cheap enough to call directly
+    /// from a row builder: this view's candidate lists are always "however many sources matched this
+    /// one book," never hundreds.
+    private func compatibilityIssueCount(for entry: SearchResult) -> Int {
+        guard let source = sources.first(where: { $0.bookSourceUrl == entry.bookSourceUrl }) else { return 0 }
+        return CapabilityScanner.scan(source).issues.count
     }
 
     private func search() async {

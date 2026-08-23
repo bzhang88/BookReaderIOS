@@ -51,6 +51,10 @@ struct ReaderView: View {
     @State private var isShowingTapZoneConfig = false
     @State private var isShowingChangeSource = false
     @State private var isShowingChapterSourceSwitch = false
+    /// Non-nil once `switchChapterSource` has auto-matched a candidate chapter and fetched the
+    /// alternate source's real TOC -- drives `ChapterSourcePickerView` via `.sheet(item:)`. See that
+    /// context type's own doc comment.
+    @State private var chapterSourcePicker: ChapterSourcePickerContext?
     @State private var isShowingToc = false
     @State private var isShowingContentSearch = false
     @State private var isShowingAISummary = false
@@ -824,6 +828,13 @@ struct ReaderView: View {
                 }
             }
         }
+        .sheet(item: $chapterSourcePicker) { context in
+            ChapterSourcePickerView(context: context) { chosen in
+                await commitChapterSourcePick(
+                    source: context.source, chapters: context.chapters, originalIndex: context.originalIndex, chosen: chosen
+                )
+            }
+        }
         .overlay {
             ReaderTocDrawerView(
                 isPresented: $isShowingToc,
@@ -1488,11 +1499,13 @@ struct ReaderView: View {
     }
 
     /// Fixes just the chapter currently on screen without switching the book's source for anything
-    /// else -- finds this chapter's title in another source's table of contents (falling back to
-    /// the same index if no title matches), fetches its content from there, and saves it into
-    /// `chapterCacheStore` under the *original* book/index. `load()`'s existing cache-first lookup
-    /// then picks it up transparently, exactly as if the chapter had been downloaded normally, so
-    /// the fix persists across relaunches without any new loading path.
+    /// else -- fetches the alternate source's real table of contents, auto-matches this chapter's
+    /// title within it (falling back to the same index if no title matches) purely to pre-highlight
+    /// a sensible default, then hands off to `ChapterSourcePickerView` for the user to confirm or pick
+    /// a different chapter themselves. Real gap found comparing against Legado's own
+    /// `ChangeChapterSourceDialog`: this used to auto-commit the matched chapter with no way to see
+    /// the real TOC or override a wrong guess (different chapter splitting/numbering between sources
+    /// is common enough that a title match can legitimately land on the wrong chapter).
     private func switchChapterSource(to newSource: BookSource, match: SearchResult) async {
         let originalIndex = chapter.index
         let originalTitle = chapter.title
@@ -1500,21 +1513,36 @@ struct ReaderView: View {
         do {
             let bookInfo = try await BookInfoService.fetchBookInfo(source: newSource, bookURL: match.bookUrl, httpClient: env.httpClient)
             let altChapters = try await TocService.fetchChapterList(source: newSource, tocURL: bookInfo.tocUrl, httpClient: env.httpClient)
-            let byTitle = altChapters.first(where: { $0.title == originalTitle })
-            let fallback: BookChapter? = altChapters.indices.contains(originalIndex) ? altChapters[originalIndex] : altChapters.first
-            guard let matchedChapter = byTitle ?? fallback else {
+            guard !altChapters.isEmpty else {
                 errorMessage = "对方书源没有可用章节"
                 isLoading = false
                 return
             }
+            let byTitle = altChapters.first(where: { $0.title == originalTitle })
+            let fallback: BookChapter? = altChapters.indices.contains(originalIndex) ? altChapters[originalIndex] : altChapters.first
+            chapterSourcePicker = ChapterSourcePickerContext(
+                source: newSource, chapters: altChapters, highlightedIndex: (byTitle ?? fallback)?.index,
+                originalIndex: originalIndex
+            )
+        } catch {
+            errorMessage = "本章换源失败: \(error)"
+        }
+        isLoading = false
+    }
+
+    /// The tail half of the old `switchChapterSource` -- fetches the user's actually-chosen chapter's
+    /// content and saves it into `chapterCacheStore` under the *original* book/index. `load()`'s
+    /// existing cache-first lookup then picks it up transparently, exactly as if the chapter had been
+    /// downloaded normally, so the fix persists across relaunches without any new loading path.
+    private func commitChapterSourcePick(source: BookSource, chapters: [BookChapter], originalIndex: Int, chosen: BookChapter) async {
+        do {
             let content = try await ContentService.fetchContent(
-                source: newSource, chapter: matchedChapter, httpClient: env.httpClient,
-                nextChapterUrl: altChapters.indices.contains(matchedChapter.index + 1) ? altChapters[matchedChapter.index + 1].url : nil
+                source: source, chapter: chosen, httpClient: env.httpClient,
+                nextChapterUrl: chapters.indices.contains(chosen.index + 1) ? chapters[chosen.index + 1].url : nil
             )
             try await env.chapterCacheStore.save(bookUrl: bookUrl, index: originalIndex, content: content)
         } catch {
             errorMessage = "本章换源失败: \(error)"
-            isLoading = false
             return
         }
         await load()

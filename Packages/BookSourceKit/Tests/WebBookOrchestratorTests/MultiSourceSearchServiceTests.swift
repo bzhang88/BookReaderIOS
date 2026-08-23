@@ -25,6 +25,31 @@ private actor DelayedStubHTTPClient: HTTPClient {
     }
 }
 
+/// Tracks how many `fetch` calls are simultaneously in flight, and the highest count ever reached --
+/// lets a test assert on real observed peak concurrency rather than just trusting the implementation.
+private actor ConcurrencyTrackingHTTPClient: HTTPClient {
+    private let delayNanoseconds: UInt64
+    private let responses: [String: String]
+    private var inFlight = 0
+    private(set) var peakInFlight = 0
+
+    init(delaySeconds: Double, responses: [String: String]) {
+        self.delayNanoseconds = UInt64(delaySeconds * 1_000_000_000)
+        self.responses = responses
+    }
+
+    func fetch(_ request: HTTPRequest) async throws -> HTTPResponse {
+        inFlight += 1
+        peakInFlight = max(peakInFlight, inFlight)
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        inFlight -= 1
+        guard let body = responses[request.url] else {
+            throw HTTPClientError.invalidURL(request.url)
+        }
+        return HTTPResponse(finalURL: request.url, statusCode: 200, body: body)
+    }
+}
+
 final class MultiSourceSearchServiceTests: XCTestCase {
     private func makeSource(name: String, url: String) -> BookSource {
         var rule = SearchRule()
@@ -104,6 +129,44 @@ final class MultiSourceSearchServiceTests: XCTestCase {
 
         let finalCount = await collector.outcomes.count
         XCTAssertLessThan(finalCount, sources.count, "expected cancellation to stop the stream before all 5 sources completed")
+    }
+
+    func testConcurrencyIsBoundedByMaxConcurrent() async throws {
+        let sources = (0..<10).map { makeSource(name: "S\($0)", url: "https://s\($0).example.com") }
+        var responses: [String: String] = [:]
+        for (i, _) in sources.enumerated() {
+            responses["https://s\(i).example.com/search?wd=fixed"] = html
+        }
+        let client = ConcurrencyTrackingHTTPClient(delaySeconds: 0.05, responses: responses)
+
+        var outcomes: [MultiSourceSearchService.SourceOutcome] = []
+        for await outcome in MultiSourceSearchService.search(sources: sources, keyword: "novel", httpClient: client, maxConcurrent: 3) {
+            outcomes.append(outcome)
+        }
+
+        XCTAssertEqual(outcomes.count, 10, "every source should still eventually complete, just not all at once")
+        let peak = await client.peakInFlight
+        XCTAssertLessThanOrEqual(peak, 3, "expected at most maxConcurrent (3) simultaneous searches, observed \(peak)")
+    }
+
+    func testUnboundedDefaultStillLetsAllSourcesRunConcurrentlyForASmallCollection() async throws {
+        // Real-world default (16) shouldn't visibly throttle a small, everyday-sized collection --
+        // guards against accidentally serializing everything by making maxConcurrent too small.
+        let sources = (0..<5).map { makeSource(name: "S\($0)", url: "https://s\($0).example.com") }
+        var responses: [String: String] = [:]
+        for (i, _) in sources.enumerated() {
+            responses["https://s\(i).example.com/search?wd=fixed"] = html
+        }
+        let client = ConcurrencyTrackingHTTPClient(delaySeconds: 0.05, responses: responses)
+
+        var outcomes: [MultiSourceSearchService.SourceOutcome] = []
+        for await outcome in MultiSourceSearchService.search(sources: sources, keyword: "novel", httpClient: client) {
+            outcomes.append(outcome)
+        }
+
+        XCTAssertEqual(outcomes.count, 5)
+        let peak = await client.peakInFlight
+        XCTAssertEqual(peak, 5, "expected all 5 sources to run concurrently under the default 16-way cap")
     }
 }
 
