@@ -33,9 +33,13 @@ struct BookDetailView: View {
     @State private var shelfCoverUrl: String?
     @State private var shelfGroups: [String] = []
     @State private var existingGroupNames: [String] = []
+    @State private var shelfCustomName: String?
+    @State private var shelfCustomAuthor: String?
+    @State private var shelfCustomIntro: String?
     @State private var isShowingCoverPicker = false
     @State private var isShowingChangeSource = false
     @State private var isShowingGroupPicker = false
+    @State private var isShowingEditInfo = false
     @State private var previewChapters: [BookChapter] = []
     @State private var downloadedCount = 0
     @State private var isDownloading = false
@@ -99,8 +103,20 @@ struct BookDetailView: View {
         )
     }
 
-    private var name: String { bookInfo?.name ?? fallbackName }
-    private var author: String? { bookInfo?.author ?? fallbackAuthor }
+    /// Real gap found comparing against Legado: `Book.getDisplayIntro()`/`getDisplayCover()` check a
+    /// custom override *before* the real fetched value -- this screen used to have that for cover
+    /// only, so a manually-edited name/author/intro would silently revert to whatever the source's
+    /// detail page returned the very next time `bookInfo` re-fetched (this app fetches `bookInfo`
+    /// live on every `load()`, unlike Legado's DB-source-of-truth model, so a plain field edit alone
+    /// doesn't stick without a real override this priority chain checks first).
+    private var name: String {
+        if let shelfCustomName, !shelfCustomName.isEmpty { return shelfCustomName }
+        return bookInfo?.name ?? fallbackName
+    }
+    private var author: String? {
+        if let shelfCustomAuthor, !shelfCustomAuthor.isEmpty { return shelfCustomAuthor }
+        return bookInfo?.author ?? fallbackAuthor
+    }
     /// Once a book is shelved, its shelf-stored cover (which may be a manual override the user
     /// picked via `CoverPickerView`) takes priority over whatever the source's own detail page
     /// currently returns -- otherwise a manually-picked cover would silently revert to the
@@ -109,7 +125,10 @@ struct BookDetailView: View {
         if let shelfCoverUrl, !shelfCoverUrl.isEmpty { return shelfCoverUrl }
         return bookInfo?.coverUrl ?? fallbackCoverUrl
     }
-    private var intro: String? { bookInfo?.intro ?? fallbackIntro }
+    private var intro: String? {
+        if let shelfCustomIntro, !shelfCustomIntro.isEmpty { return shelfCustomIntro }
+        return bookInfo?.intro ?? fallbackIntro
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -153,6 +172,11 @@ struct BookDetailView: View {
         .sheet(isPresented: $isShowingGroupPicker) {
             ShelfGroupPickerView(existingGroups: existingGroupNames, initialGroups: shelfGroups) { newGroups in
                 await setGroups(newGroups)
+            }
+        }
+        .sheet(isPresented: $isShowingEditInfo) {
+            BookInfoEditView(name: name, author: author ?? "", intro: intro ?? "") { newName, newAuthor, newIntro in
+                await setCustomInfo(name: newName, author: newAuthor, intro: newIntro)
             }
         }
         .sheet(isPresented: $isShowingExportSheet) {
@@ -200,6 +224,13 @@ struct BookDetailView: View {
             isShowingCoverPicker = true
         } label: {
             Label("更换封面", systemImage: "photo")
+        }
+        if isInShelf {
+            Button {
+                isShowingEditInfo = true
+            } label: {
+                Label("编辑书名/作者/简介", systemImage: "pencil")
+            }
         }
         if downloadedCount > 0 {
             if downloadedCount == previewChapters.count {
@@ -480,6 +511,9 @@ struct BookDetailView: View {
             isInShelf = existingShelfBook != nil
             shelfCoverUrl = existingShelfBook?.coverUrl
             shelfGroups = existingShelfBook?.groups ?? []
+            shelfCustomName = existingShelfBook?.customName
+            shelfCustomAuthor = existingShelfBook?.customAuthor
+            shelfCustomIntro = existingShelfBook?.customIntro
             shelfLastReadTitle = existingShelfBook?.lastReadChapterTitle
             shelfLastReadChapterIndex = existingShelfBook?.lastReadChapterIndex
             existingGroupNames = Array(Set(allShelfBooks.flatMap {
@@ -600,6 +634,16 @@ struct BookDetailView: View {
         shelfGroups = newGroups
     }
 
+    private func setCustomInfo(name newName: String, author newAuthor: String, intro newIntro: String) async {
+        try? await env.shelfStore.setCustomInfo(bookUrl: bookUrl, name: newName, author: newAuthor, intro: newIntro)
+        let trimmedName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAuthor = newAuthor.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedIntro = newIntro.trimmingCharacters(in: .whitespacesAndNewlines)
+        shelfCustomName = trimmedName.isEmpty ? nil : trimmedName
+        shelfCustomAuthor = trimmedAuthor.isEmpty ? nil : trimmedAuthor
+        shelfCustomIntro = trimmedIntro.isEmpty ? nil : trimmedIntro
+    }
+
     /// Toggles shelf membership both ways -- Legado's own detail page button is a real toggle
     /// (加入书架/移出书架), not the add-only button this screen had before.
     private func toggleShelf() async {
@@ -661,7 +705,9 @@ struct BookDetailView: View {
                 lastReadChapterTitle: nil,
                 lastReadCharacterOffset: 0,
                 lastReadAt: existing.lastReadAt,
-                totalChapterCount: previewChapters.isEmpty ? nil : previewChapters.count
+                totalChapterCount: previewChapters.isEmpty ? nil : previewChapters.count,
+                customName: existing.customName, customAuthor: existing.customAuthor, customIntro: existing.customIntro,
+                pinnedAt: existing.pinnedAt
             )
             try? await env.shelfStore.remove(bookUrl: oldBookUrl)
             try? await env.shelfStore.addOrUpdate(updated)
@@ -669,6 +715,64 @@ struct BookDetailView: View {
             shelfGroups = updated.groups
             shelfLastReadTitle = nil
             shelfLastReadChapterIndex = nil
+        }
+    }
+}
+
+/// Editable overrides for a shelved book's displayed name/author/intro -- see `BookDetailView.name`/
+/// `.author`/`.intro`'s own doc comment for why these need to be real override fields (not a direct
+/// edit of the source-fetched values) to actually stick. Pre-filled with whatever's currently
+/// displayed (already the effective override-or-real value), not the raw override alone, so opening
+/// this to "just fix the author" doesn't show a blank name/intro field.
+private struct BookInfoEditView: View {
+    let name: String
+    let author: String
+    let intro: String
+    let onSave: (String, String, String) async -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var editedName: String
+    @State private var editedAuthor: String
+    @State private var editedIntro: String
+
+    init(name: String, author: String, intro: String, onSave: @escaping (String, String, String) async -> Void) {
+        self.name = name
+        self.author = author
+        self.intro = intro
+        self.onSave = onSave
+        _editedName = State(initialValue: name)
+        _editedAuthor = State(initialValue: author)
+        _editedIntro = State(initialValue: intro)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("书名", text: $editedName)
+                    TextField("作者", text: $editedAuthor)
+                }
+                Section("简介") {
+                    TextEditor(text: $editedIntro)
+                        .frame(minHeight: 120)
+                }
+            }
+            .navigationTitle("编辑书籍信息")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        Task {
+                            await onSave(editedName, editedAuthor, editedIntro)
+                            dismiss()
+                        }
+                    }
+                    .disabled(editedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
         }
     }
 }

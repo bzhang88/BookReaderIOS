@@ -1491,7 +1491,9 @@ struct ReaderView: View {
                 lastReadChapterTitle: newChapters[newIndex].title,
                 lastReadCharacterOffset: 0,
                 lastReadAt: existing.lastReadAt,
-                totalChapterCount: newChapters.count
+                totalChapterCount: newChapters.count,
+                customName: existing.customName, customAuthor: existing.customAuthor, customIntro: existing.customIntro,
+                pinnedAt: existing.pinnedAt
             )
             try? await env.shelfStore.remove(bookUrl: oldBookUrl)
             try? await env.shelfStore.addOrUpdate(updated)

@@ -295,5 +295,82 @@ final class ShelfStoreTests: XCTestCase {
         XCTAssertEqual(books.count, 1)
         XCTAssertNil(books.first?.canUpdate)
         XCTAssertEqual(books.first?.groups, [], "group key entirely absent should decode as no groups, not throw")
+        XCTAssertNil(books.first?.customName)
+        XCTAssertNil(books.first?.customAuthor)
+        XCTAssertNil(books.first?.customIntro)
+        XCTAssertNil(books.first?.pinnedAt)
+    }
+
+    // MARK: - Custom info overrides
+
+    func testSetCustomInfoPersistsAllThreeOverrides() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.addOrUpdate(sampleBook())
+
+        try await store.setCustomInfo(bookUrl: "https://example.com/book/1", name: "自定义书名", author: "自定义作者", intro: "自定义简介")
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.customName, "自定义书名")
+        XCTAssertEqual(all.first?.customAuthor, "自定义作者")
+        XCTAssertEqual(all.first?.customIntro, "自定义简介")
+    }
+
+    func testSetCustomInfoWithBlankStringsClearsTheOverride() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.customName = "旧的自定义书名"
+        try await store.addOrUpdate(book)
+
+        try await store.setCustomInfo(bookUrl: "https://example.com/book/1", name: "  ", author: nil, intro: nil)
+
+        let all = try await store.all()
+        XCTAssertNil(all.first?.customName, "a blank/whitespace-only override should clear back to nil, not be stored as blank")
+    }
+
+    func testCustomInfoRoundTripsThroughEncodeDecode() throws {
+        var book = sampleBook()
+        book.customName = "自定义书名"
+        book.customAuthor = "自定义作者"
+        book.customIntro = "自定义简介"
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(book)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ShelfBook.self, from: data)
+        XCTAssertEqual(decoded.customName, "自定义书名")
+        XCTAssertEqual(decoded.customAuthor, "自定义作者")
+        XCTAssertEqual(decoded.customIntro, "自定义简介")
+    }
+
+    // MARK: - Pinning
+
+    func testSetPinnedTrueStampsATimestamp() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.addOrUpdate(sampleBook())
+
+        try await store.setPinned(bookUrl: "https://example.com/book/1", pinned: true)
+
+        let all = try await store.all()
+        XCTAssertNotNil(all.first?.pinnedAt)
+    }
+
+    func testSetPinnedFalseClearsTheTimestamp() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.pinnedAt = Date()
+        try await store.addOrUpdate(book)
+
+        try await store.setPinned(bookUrl: "https://example.com/book/1", pinned: false)
+
+        let all = try await store.all()
+        XCTAssertNil(all.first?.pinnedAt)
+    }
+
+    func testSetPinnedForUnknownBookIsANoOp() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.setPinned(bookUrl: "https://nope.com", pinned: true)
+        let all = try await store.all()
+        XCTAssertTrue(all.isEmpty)
     }
 }

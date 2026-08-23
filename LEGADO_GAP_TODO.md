@@ -51,13 +51,13 @@
 - [x] 书单导入支持本地文件选择 —— `ShelfListImportExportView.swift:42-61`
 
 ### 书籍详情
-- [ ] 可编辑书名/作者/简介覆盖值
+- [x] 可编辑书名/作者/简介覆盖值 —— `ShelfBook.swift`（新增 `customName`/`customAuthor`/`customIntro`，仿 Legado `customIntro`/`customCoverUrl` 的"覆盖值优先，留空则回退真实值"模式，扩展到书名/作者）、`ShelfStore.setCustomInfo`、`BookDetailView.swift`（`name`/`author`/`intro` 计算属性改为先查覆盖值；"..."菜单新增"编辑书名/作者/简介"入口 + `BookInfoEditView` 表单；换源时保留覆盖值）
 - [x] 移出书架前二次确认
 - [x] 无论是否在架都显示"最新章节"
 - [x] 点击来源名跳转编辑该书源
 - [x] 点击书名/作者/分类跳转搜索
-- [ ] 分享/复制书籍链接、目录链接
-- [ ] 置顶书籍
+- [ ] 分享/复制书籍链接、目录链接 —— 还没开始，下次从这里接着做
+- [ ] 置顶书籍 —— **数据层已完成**（`ShelfBook.pinnedAt: Date?` + `ShelfStore.setPinned(bookUrl:pinned:)`，均已写好单元测试），**UI 还没接**：还需要 (1) `ShelfView` 每行加"置顶/取消置顶"操作（swipe action 或 contextMenu），(2) `ShelfView.sorted(_:)` 改成置顶书籍按 `pinnedAt` 倒序排在最前面（不管当前选的是哪种排序，也不管是否按分组分区展示），(3) `BookDetailView` 可能也要加个置顶入口。下次从这里接着做
 
 ### 目录 TOC
 - [ ] 书签 tab（含搜索/筛选/导出）

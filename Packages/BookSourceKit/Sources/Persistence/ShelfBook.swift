@@ -49,6 +49,20 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
     /// present as an *empty shelf*, not an error. This project already hit exactly this shape of bug
     /// once before (`Bookmark.characterOffset`) and settled on Optional as the safe fix.
     public var canUpdate: Bool?
+    /// Overrides shown in place of the real `name`/`author`/`intro` whenever set -- generalizes
+    /// Legado's own `customIntro`/`customCoverUrl` "override, falls back to the real value when
+    /// unset" pattern (`Book.getDisplayIntro`/`getDisplayCover`) to also cover name/author. Legado
+    /// itself doesn't need that for name/author (`Book.name`/`author` are the single real fields
+    /// there, no separate override), but this app's `BookDetailView` re-fetches `bookInfo` live from
+    /// the source on every load, so a plain edit to `name`/`author` themselves would just get
+    /// silently overwritten by the next fetch -- a real override field the display logic checks
+    /// *before* the freshly-fetched value is what actually makes an edit stick.
+    public var customName: String?
+    public var customAuthor: String?
+    public var customIntro: String?
+    /// Non-nil means pinned to the top of the shelf, sorted among other pinned books by this
+    /// timestamp (most-recently-pinned first) ahead of whatever the shelf's normal sort option is.
+    public var pinnedAt: Date?
 
     public var id: String { bookUrl }
 
@@ -57,7 +71,8 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         coverUrl: String? = nil, intro: String? = nil, tocUrl: String, lastChapterTitle: String? = nil,
         addedAt: Date = Date(), groups: [String] = [], lastReadChapterIndex: Int? = nil,
         lastReadChapterTitle: String? = nil, lastReadCharacterOffset: Int = 0, lastReadAt: Date? = nil,
-        totalChapterCount: Int? = nil, canUpdate: Bool? = nil
+        totalChapterCount: Int? = nil, canUpdate: Bool? = nil, customName: String? = nil,
+        customAuthor: String? = nil, customIntro: String? = nil, pinnedAt: Date? = nil
     ) {
         self.bookSourceUrl = bookSourceUrl
         self.bookUrl = bookUrl
@@ -75,6 +90,10 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         self.lastReadAt = lastReadAt
         self.totalChapterCount = totalChapterCount
         self.canUpdate = canUpdate
+        self.customName = customName
+        self.customAuthor = customAuthor
+        self.customIntro = customIntro
+        self.pinnedAt = pinnedAt
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -83,7 +102,7 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         // not the JSON key, so a re-saved file doesn't leave a stale duplicate key behind.
         case groups = "group"
         case lastReadChapterIndex, lastReadChapterTitle, lastReadCharacterOffset, lastReadAt
-        case totalChapterCount, canUpdate
+        case totalChapterCount, canUpdate, customName, customAuthor, customIntro, pinnedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -114,6 +133,10 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         lastReadAt = try container.decodeIfPresent(Date.self, forKey: .lastReadAt)
         totalChapterCount = try container.decodeIfPresent(Int.self, forKey: .totalChapterCount)
         canUpdate = try container.decodeIfPresent(Bool.self, forKey: .canUpdate)
+        customName = try container.decodeIfPresent(String.self, forKey: .customName)
+        customAuthor = try container.decodeIfPresent(String.self, forKey: .customAuthor)
+        customIntro = try container.decodeIfPresent(String.self, forKey: .customIntro)
+        pinnedAt = try container.decodeIfPresent(Date.self, forKey: .pinnedAt)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -134,5 +157,9 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         try container.encodeIfPresent(lastReadAt, forKey: .lastReadAt)
         try container.encodeIfPresent(totalChapterCount, forKey: .totalChapterCount)
         try container.encodeIfPresent(canUpdate, forKey: .canUpdate)
+        try container.encodeIfPresent(customName, forKey: .customName)
+        try container.encodeIfPresent(customAuthor, forKey: .customAuthor)
+        try container.encodeIfPresent(customIntro, forKey: .customIntro)
+        try container.encodeIfPresent(pinnedAt, forKey: .pinnedAt)
     }
 }

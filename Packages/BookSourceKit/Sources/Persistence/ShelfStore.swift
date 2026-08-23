@@ -151,4 +151,26 @@ public actor ShelfStore {
         books[idx].canUpdate = canUpdate
         try await store.save(books)
     }
+
+    /// Sets all three overrides in one write -- `BookDetailView`'s edit form always saves them
+    /// together. An empty/whitespace-only string is treated the same as `nil` (clears the override
+    /// back to the real value) since there's no meaningful difference between "never set" and
+    /// "set to blank" for a display override.
+    public func setCustomInfo(bookUrl: String, name: String?, author: String?, intro: String?) async throws {
+        var books = try await all()
+        guard let idx = books.firstIndex(where: { $0.bookUrl == bookUrl }) else { return }
+        books[idx].customName = name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? name : nil
+        books[idx].customAuthor = author?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? author : nil
+        books[idx].customIntro = intro?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? intro : nil
+        try await store.save(books)
+    }
+
+    /// Pins/unpins one book -- `pinned: true` stamps the current time (so the most-recently-pinned
+    /// book sorts first among other pinned ones), `false` clears it back to unpinned.
+    public func setPinned(bookUrl: String, pinned: Bool) async throws {
+        var books = try await all()
+        guard let idx = books.firstIndex(where: { $0.bookUrl == bookUrl }) else { return }
+        books[idx].pinnedAt = pinned ? Date() : nil
+        try await store.save(books)
+    }
 }
