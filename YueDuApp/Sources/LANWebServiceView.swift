@@ -84,9 +84,21 @@ private struct LANWebServiceForm: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// Real bug found comparing against Legado: if "需要访问密码" is on but `accessToken` is blank
+    /// (never typed anything, or cleared it), `requireAuth ? accessToken : nil` used to pass an
+    /// empty string straight through -- `LANWebServer.start`/`LANWebAuth` both treat an empty token
+    /// as "no auth configured" and silently serve every request unauthenticated, while the toggle
+    /// still shows as on. Generating a real token here whenever the toggle is on (and persisting it
+    /// back to `accessToken` so the UI shows what's actually enforced) means turning the switch on
+    /// can never silently fail open.
     private func start() {
         let port = UInt16(portText) ?? 8080
-        let token = requireAuth ? accessToken : nil
+        var token: String?
+        if requireAuth {
+            let trimmed = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            accessToken = trimmed.isEmpty ? Self.randomToken() : trimmed
+            token = accessToken
+        }
         server.start(port: port, requiredToken: token)
     }
 
