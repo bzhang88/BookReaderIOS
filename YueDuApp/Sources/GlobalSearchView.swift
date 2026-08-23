@@ -11,6 +11,13 @@ import RuleEngine
 /// remember has the book, and some sources are slow/dead so waiting for all of them isn't
 /// reasonable.
 struct GlobalSearchView: View {
+    /// Real gap found comparing against Legado: `tvName`/`tvAuthor`/the kind chip on the real detail
+    /// page all jump straight into a search for that value (`BookInfoActivity.kt`'s click handlers) --
+    /// `BookDetailView`'s equivalents were inert. Same prefill-param pattern as `DictLookupView
+    /// .initialWord`/`ChapterContentSearchView.initialKeyword`: seeds `keyword` and fires a search
+    /// once sources are loaded, rather than landing on an empty search field the user has to retype.
+    var initialKeyword: String = ""
+
     @EnvironmentObject private var env: AppEnvironment
     @State private var keyword: String = ""
     @State private var sources: [BookSource] = []
@@ -42,6 +49,11 @@ struct GlobalSearchView: View {
     // length) per result, and the reference reading app's own search results can run into the
     // thousands, so recomputing all of them on every SwiftUI redraw would be real, avoidable work.
     @State private var relevanceBuckets: [SearchRelevanceFilter: [GroupedSearchResult]] = [:]
+
+    init(initialKeyword: String = "") {
+        self.initialKeyword = initialKeyword
+        _keyword = State(initialValue: initialKeyword)
+    }
 
     private var displayedGroups: [GroupedSearchResult] {
         relevanceBuckets[relevanceFilter] ?? groups
@@ -124,6 +136,9 @@ struct GlobalSearchView: View {
             sources = (try? await env.bookSourceStore.enabled()) ?? []
             await reloadHistory()
             await reloadShelfBooks()
+            if !initialKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                startSearching()
+            }
         }
     }
 

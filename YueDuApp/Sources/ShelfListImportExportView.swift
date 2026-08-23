@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import BookSourceModel
 import WebBookOrchestrator
 import Persistence
@@ -19,6 +20,9 @@ struct ShelfListImportExportView: View {
     @State private var exportItems: [Any] = []
     @State private var isShowingExportSheet = false
     @State private var isExporting = false
+    // Real gap found comparing against Legado: its own "导入书单" dialog offers a "select_file"
+    // button alongside the URL/paste text field -- this view used to only support the latter.
+    @State private var isShowingFileImporter = false
 
     var body: some View {
         Form {
@@ -44,26 +48,34 @@ struct ShelfListImportExportView: View {
                     .lineLimit(4...10)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                Button {
-                    Task { await importList() }
-                } label: {
-                    if isImporting {
-                        ProgressView()
-                    } else {
-                        Text("开始导入")
+                HStack {
+                    Button {
+                        Task { await importList() }
+                    } label: {
+                        if isImporting {
+                            ProgressView()
+                        } else {
+                            Text("开始导入")
+                        }
                     }
+                    .disabled(isImporting || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Spacer()
+                    Button("从文件导入") { isShowingFileImporter = true }
+                        .disabled(isImporting)
                 }
-                .disabled(isImporting || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } header: {
                 Text("导入")
             } footer: {
-                Text("支持粘贴一个书单地址，或者直接粘贴 JSON 内容（格式：[{\"name\":\"书名\",\"author\":\"作者\"}]）。会在已启用的书源里搜索匹配，找不到精确匹配的书会在结果里列出来，已经在书架里的书会被跳过。")
+                Text("支持粘贴一个书单地址，或者直接粘贴 JSON 内容（格式：[{\"name\":\"书名\",\"author\":\"作者\"}]），也可以直接选一个书单文件。会在已启用的书源里搜索匹配，找不到精确匹配的书会在结果里列出来，已经在书架里的书会被跳过。")
             }
         }
         .navigationTitle("书单导入/导出")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingExportSheet) {
             ShareSheet(items: exportItems)
+        }
+        .fileImporter(isPresented: $isShowingFileImporter, allowedContentTypes: [.json, .plainText]) { result in
+            Task { await handleFileImport(result) }
         }
         .alert("导入结果", isPresented: Binding(
             get: { importSummary != nil }, set: { if !$0 { importSummary = nil } }
@@ -101,6 +113,29 @@ struct ShelfListImportExportView: View {
         } else {
             text = trimmed
         }
+        await performImport(text: text)
+    }
+
+    private func handleFileImport(_ result: Result<URL, Error>) async {
+        isImporting = true
+        defer { isImporting = false }
+        guard let url = try? result.get() else {
+            importSummary = "无法读取选中的文件"
+            return
+        }
+        // `startAccessingSecurityScopedResource`/`stopAccessingSecurityScopedResource` bracket the
+        // read -- `.fileImporter` hands back a security-scoped URL outside the app's own sandbox
+        // (e.g. a Files app location), which needs this exact pairing to actually be readable.
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else {
+            importSummary = "无法读取文件内容"
+            return
+        }
+        await performImport(text: text)
+    }
+
+    private func performImport(text: String) async {
         guard let entries = ShelfListFormat.decode(text) else {
             importSummary = "格式不对，请确认是书单 JSON 内容或者一个有效地址"
             return

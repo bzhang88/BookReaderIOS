@@ -44,6 +44,19 @@ struct BookDetailView: View {
     @State private var isExporting = false
     @State private var exportURL: URL?
     @State private var isShowingExportSheet = false
+    // Real gap found comparing against Legado: `menu_del`'s real confirm alert defaults to on
+    // (`LocalConfig.bookInfoDeleteAlert`) -- this screen's "移出书架" used to fire the instant it was
+    // tapped, with progress/group/everything gone on one mis-tap.
+    @State private var isShowingRemoveFromShelfConfirm = false
+    // Real gap found comparing against Legado: `tvName`/`tvAuthor`/the kind chip on the real detail
+    // page all jump into a search for that value (`BookInfoActivity.kt`'s click handlers); these were
+    // inert here. Driving navigation off an optional (rather than a plain `Bool` flag) is what lets
+    // `GlobalSearchView(initialKeyword:)` receive the *specific* tapped value.
+    @State private var searchKeyword: String?
+    // Real gap found comparing against Legado: `tvOrigin.setOnClickListener` opens the book source's
+    // own edit screen -- the "来源" row here only ever offered the "换源" pill, not a way to jump to
+    // editing the current source's rules directly.
+    @State private var isShowingSourceEdit = false
     // Real bug found comparing against Legado: `switchSource` used to swallow a failed re-fetch via
     // `try?` and still commit `source`/`bookUrl` to the new source regardless -- with `bookInfo` left
     // `nil`, the computed `name`/`author`/etc. properties silently fell back to this screen's
@@ -146,6 +159,14 @@ struct BookDetailView: View {
             if let exportURL {
                 ShareSheet(items: [exportURL])
             }
+        }
+        .sheet(isPresented: $isShowingSourceEdit) {
+            NavigationStack {
+                BookSourceEditView(source: source)
+            }
+        }
+        .navigationDestination(item: $searchKeyword) { keyword in
+            GlobalSearchView(initialKeyword: keyword)
         }
         .alert("换源失败", isPresented: Binding(
             get: { switchSourceErrorMessage != nil }, set: { if !$0 { switchSourceErrorMessage = nil } }
@@ -257,6 +278,7 @@ struct BookDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .multilineTextAlignment(.center)
                     .padding(.top, 12)
+                    .onTapGesture { searchKeyword = name }
 
                 if let kind = bookInfo?.kind, !kind.isEmpty {
                     Text(kind)
@@ -266,13 +288,22 @@ struct BookDetailView: View {
                         .background(Color.accentColor.opacity(0.15), in: Capsule())
                         .foregroundStyle(Color.accentColor)
                         .frame(maxWidth: .infinity, alignment: .center)
+                        .onTapGesture { searchKeyword = kind }
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
                     if let author, !author.isEmpty {
                         infoRow(icon: "person.fill", text: author)
+                            .contentShape(Rectangle())
+                            .onTapGesture { searchKeyword = author }
                     }
-                    infoRow(icon: "globe", text: "来源: \(source.bookSourceName)") {
+                    HStack(spacing: 6) {
+                        Image(systemName: "globe").font(.caption).foregroundStyle(.secondary).frame(width: 16)
+                        Text("来源: \(source.bookSourceName)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .onTapGesture { isShowingSourceEdit = true }
+                        Spacer()
                         Button("换源") { isShowingChangeSource = true }
                             .buttonStyle(.pillAction)
                     }
@@ -284,6 +315,14 @@ struct BookDetailView: View {
                             Button("改分组") { isShowingGroupPicker = true }
                                 .buttonStyle(.pillAction)
                         }
+                    }
+                    // Real gap found comparing against Legado: `tvLasted` ("最新章节: …") always shows
+                    // on the real detail page, regardless of shelf state -- this screen fetches the
+                    // same data (`BookInfo.lastChapter`, already used as this init's own
+                    // `fallbackLastChapter` fallback) but used to never render it at all; the only
+                    // chapter-related row was "上次读到", gated behind `isInShelf`.
+                    if let latestChapter = bookInfo?.lastChapter ?? fallbackLastChapter, !latestChapter.isEmpty {
+                        infoRow(icon: "text.book.closed", text: "最新章节: \(latestChapter)")
                     }
                     // Real bug found comparing against Legado: the `bookInfo == nil` branch here used
                     // to fall back to `fallbackLastChapter` -- the source's *latest chapter* title,
@@ -376,13 +415,25 @@ struct BookDetailView: View {
     private var bottomActionBar: some View {
         HStack(spacing: 0) {
             Button {
-                Task { await toggleShelf() }
+                if isInShelf {
+                    isShowingRemoveFromShelfConfirm = true
+                } else {
+                    Task { await toggleShelf() }
+                }
             } label: {
                 Text(isInShelf ? "移出书架" : "加入书架")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .disabled(bookInfo == nil)
+            .confirmationDialog(
+                "确定要把《\(name)》移出书架吗？", isPresented: $isShowingRemoveFromShelfConfirm, titleVisibility: .visible
+            ) {
+                Button("移出书架", role: .destructive) { Task { await toggleShelf() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("阅读进度和分组都会一起丢失，无法恢复。")
+            }
 
             if let bookInfo {
                 NavigationLink {

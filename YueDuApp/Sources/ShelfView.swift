@@ -282,6 +282,13 @@ struct ShelfView: View {
     @ToolbarContentBuilder
     private var batchActionsToolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .bottomBar) {
+            // Real gap found comparing against Legado: selection mode had no 全选/反选 -- only
+            // tapping rows one at a time. `books.isEmpty` guards against toggling on/off with
+            // nothing to select.
+            Button(selectedBookUrls.count == books.count && !books.isEmpty ? "取消全选" : "全选") {
+                toggleSelectAll()
+            }
+            .disabled(books.isEmpty)
             Text("已选 \(selectedBookUrls.count) 本")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -302,6 +309,31 @@ struct ShelfView: View {
                 Button("导出") { batchExport() }
                     .disabled(selectedBookUrls.isEmpty)
             }
+            Spacer()
+            // Real gap found comparing against Legado: no batch 启用/禁用自动更新 (per-book toggle
+            // already existed via the row's own "…" menu) and no batch 清除缓存, even though 换源/
+            // 移动分组/导出/删除 all had batch equivalents. Folded into one menu rather than two more
+            // standalone buttons, since the bottom bar was already getting crowded.
+            Menu {
+                Button {
+                    Task { await batchSetCanUpdate(true) }
+                } label: {
+                    Label("恢复自动更新", systemImage: "play.circle")
+                }
+                Button {
+                    Task { await batchSetCanUpdate(false) }
+                } label: {
+                    Label("停止自动更新", systemImage: "pause.circle")
+                }
+                Button {
+                    Task { await batchClearCache() }
+                } label: {
+                    Label("清除缓存", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .disabled(selectedBookUrls.isEmpty)
             Spacer()
             Button("删除", role: .destructive) { isShowingBatchDeleteConfirm = true }
                 .disabled(selectedBookUrls.isEmpty)
@@ -458,6 +490,36 @@ struct ShelfView: View {
         } else {
             selectedBookUrls.insert(book.bookUrl)
         }
+    }
+
+    private func toggleSelectAll() {
+        if selectedBookUrls.count == books.count {
+            selectedBookUrls.removeAll()
+        } else {
+            selectedBookUrls = Set(books.map(\.bookUrl))
+        }
+    }
+
+    /// Batch enable/disable auto-update -- the per-row "…" menu already had this via
+    /// `toggleCanUpdate`, but selecting multiple books had no equivalent, even though 换源/移动分组/
+    /// 导出/删除 all did.
+    private func batchSetCanUpdate(_ canUpdate: Bool) async {
+        let targets = selectedBookUrls
+        for bookUrl in targets {
+            try? await env.shelfStore.setCanUpdate(bookUrl: bookUrl, canUpdate: canUpdate)
+        }
+        exitSelection()
+        await reload()
+    }
+
+    /// Batch 清除缓存 -- `BookDetailView`'s single-book "清除缓存" action already exists
+    /// (`env.chapterCacheStore.removeBook`); this is the same call applied to every selected book.
+    private func batchClearCache() async {
+        let targets = selectedBookUrls
+        for bookUrl in targets {
+            try? await env.chapterCacheStore.removeBook(bookUrl: bookUrl)
+        }
+        exitSelection()
     }
 
     private func reload() async {
