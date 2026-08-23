@@ -21,6 +21,16 @@ public enum DictLookupService {
             url: built.url, method: built.method, headers: built.headers,
             body: built.body?.data(using: .utf8)
         ))
+        // Real bug found comparing against Legado: a blank `showRule` is a real, documented shape --
+        // Legado's own `DictRule.search()` explicitly treats it as "use the raw response body"
+        // (`if (showRule.isBlank()) return body!!`) -- but this used to unconditionally hand `""` to
+        // `RuleEngine.extractString`, which had no matching fallback branch.
+        let trimmedShowRule = rule.showRule.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedShowRule.isEmpty else {
+            let trimmedBody = response.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedBody.isEmpty else { throw DictLookupError.emptyResult }
+            return trimmedBody
+        }
         let content = try RuleContent.parse(body: response.body, baseURL: response.finalURL)
         guard let result = try RuleEngine.extractString(rule.showRule, from: content),
               !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

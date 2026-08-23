@@ -75,10 +75,20 @@ public actor ShelfStore {
     /// Refreshes `totalChapterCount` -- called opportunistically wherever a book's real chapter
     /// list is already being fetched (resuming into the reader, switching source), not on its own
     /// schedule. A no-op for a book no longer on the shelf.
-    public func updateTotalChapterCount(bookUrl: String, count: Int) async throws {
+    ///
+    /// `lastChapterTitle` defaults to `nil`, meaning "leave it alone" -- most callers (resuming into
+    /// the reader) only ever know the chapter *count*, not which chapter is actually newest. Real bug
+    /// found comparing against Legado: `ShelfView.checkForUpdates()` used to only ever call this
+    /// two-arg form, so a successful update-check that found real new chapters bumped the unread
+    /// badge but left the shelf row's "最新: …" text showing the old title -- passing the freshly
+    /// fetched title through here (only when the caller actually has one) is that missing write path.
+    public func updateTotalChapterCount(bookUrl: String, count: Int, lastChapterTitle: String? = nil) async throws {
         var books = try await all()
         guard let idx = books.firstIndex(where: { $0.bookUrl == bookUrl }) else { return }
         books[idx].totalChapterCount = count
+        if let lastChapterTitle {
+            books[idx].lastChapterTitle = lastChapterTitle
+        }
         try await store.save(books)
     }
 

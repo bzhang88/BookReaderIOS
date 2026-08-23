@@ -26,15 +26,15 @@
 - [x] **[换源] "完全匹配"用严格字符串相等，会漏掉真正同一本书的源** —— `ChangeSourceView.swift:208-213`
 - [x] **[换源] 阅读器内换源固定传空作者，弱化同名书过滤** —— `ReaderView.swift:791,800`
 - [x] **[换源] 批量换源不让用户选目标源，可能分散换到不同源** —— `ShelfView.swift:631-668`
-- [ ] **[书架] "检查更新"扫描后不刷新"最新章节"文字** —— `ShelfView.swift:481-514`, `ShelfStore.swift:78-83`
-- [ ] **[书籍详情] 换源失败时静默吞错误，界面显示"新源名字+旧书籍信息"错配状态** —— `BookDetailView.swift:551-587`
-- [ ] **[书籍详情] 上述失败场景下"上次读到"这行显示错误数据** —— `BookDetailView.swift:273-274`
-- [ ] **[朗读 TTS] 不会跳过纯标点/空白段落** —— `ReadAloudController.swift:94-98`, `HttpReadAloudController.swift:99-103`
-- [ ] **[阅读器] 目录抽屉里"全文搜索"tab 没有正则开关，和独立搜索页面不一致** —— `ReaderTocDrawer.swift:213-256`, `ChapterContentSearchView.swift:22`
-- [ ] **[本地书籍] 默认分章正则丢失超过 40 字的副标题章节**（已实测复现）—— `TxtChapterSplitter.swift:22`
-- [ ] **[书源管理] 词典规则 showRule 留空应合法，却被禁止保存** —— `DictRuleListView.swift:142-143`, `DictLookupService.swift:16-30`
-- [ ] **[书源管理] 导入书源失败时输入框仍会自动关闭** —— `BookSourceURLImportView.swift:34-41`
-- [ ] **[备份/WebDAV] 路径含中文或空格导致请求失败**（未做 URL 编码，中文小说文件名几乎必触发）—— `WebDAVClient.swift:103-107`, `WebDAVBookImportView.swift:71-74`, `URLSessionHTTPClient.swift:13`
+- [x] **[书架] "检查更新"扫描后不刷新"最新章节"文字** —— `ShelfView.swift:481-514`, `ShelfStore.swift:78-83`
+- [x] **[书籍详情] 换源失败时静默吞错误，界面显示"新源名字+旧书籍信息"错配状态** —— `BookDetailView.swift:551-587`
+- [x] **[书籍详情] 上述失败场景下"上次读到"这行显示错误数据** —— `BookDetailView.swift:273-274`
+- [x] **[朗读 TTS] 不会跳过纯标点/空白段落** —— `ReadAloudController.swift:94-98`, `HttpReadAloudController.swift:99-103`
+- [x] **[阅读器] 目录抽屉里"全文搜索"tab 没有正则开关，和独立搜索页面不一致** —— `ReaderTocDrawer.swift:213-256`, `ChapterContentSearchView.swift:22`
+- [x] **[本地书籍] 默认分章正则丢失超过 40 字的副标题章节**（已实测复现）—— `TxtChapterSplitter.swift:22`
+- [x] **[书源管理] 词典规则 showRule 留空应合法，却被禁止保存** —— `DictRuleListView.swift:142-143`, `DictLookupService.swift:16-30`
+- [x] **[书源管理] 导入书源失败时输入框仍会自动关闭** —— `BookSourceURLImportView.swift:34-41`
+- [x] **[备份/WebDAV] 路径含中文或空格导致请求失败**（未做 URL 编码，中文小说文件名几乎必触发）—— `WebDAVClient.swift:103-107`, `WebDAVBookImportView.swift:71-74`, `URLSessionHTTPClient.swift:13`
 
 ---
 

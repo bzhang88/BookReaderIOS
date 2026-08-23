@@ -3,6 +3,7 @@ import AVFoundation
 import MediaPlayer
 import BookSourceModel
 import Persistence
+import WebBookOrchestrator
 
 /// A cloud-TTS alternative to `ReadAloudController`'s `AVSpeechSynthesizer` -- fetches each
 /// paragraph's audio from a user-configured `HttpTTSEngine`, caching through `HttpTTSCache` so
@@ -97,7 +98,12 @@ final class HttpReadAloudController: NSObject, ObservableObject {
             return
         }
         let text = paragraphs[currentParagraphIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        // Real bug found comparing against Legado: this used to only skip a paragraph that's empty
+        // after trimming whitespace -- a punctuation-only paragraph (e.g. a lone "——" scene-break
+        // marker) isn't empty, so it used to be sent to the cloud TTS engine as a raw-punctuation
+        // fetch instead of cleanly skipped. `ReadAloudTextFilter.isSpeakable` matches Legado's own
+        // `notReadAloudRegex`.
+        guard ReadAloudTextFilter.isSpeakable(text) else {
             advanceToNextParagraphOrStop()
             return
         }

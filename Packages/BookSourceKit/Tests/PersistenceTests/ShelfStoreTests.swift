@@ -88,6 +88,27 @@ final class ShelfStoreTests: XCTestCase {
         XCTAssertTrue(all.isEmpty)
     }
 
+    func testUpdateTotalChapterCountWithLastChapterTitleUpdatesBoth() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        try await store.addOrUpdate(sampleBook())
+        try await store.updateTotalChapterCount(
+            bookUrl: "https://example.com/book/1", count: 121, lastChapterTitle: "第121章 新章节"
+        )
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.totalChapterCount, 121)
+        XCTAssertEqual(all.first?.lastChapterTitle, "第121章 新章节")
+    }
+
+    func testUpdateTotalChapterCountWithoutLastChapterTitleLeavesItUnchanged() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.lastChapterTitle = "旧章节标题"
+        try await store.addOrUpdate(book)
+        try await store.updateTotalChapterCount(bookUrl: "https://example.com/book/1", count: 5)
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.lastChapterTitle, "旧章节标题")
+    }
+
     func testSetCoverUrlOverridesJustThatField() async throws {
         let store = ShelfStore(fileURL: tempFileURL())
         var book = sampleBook()

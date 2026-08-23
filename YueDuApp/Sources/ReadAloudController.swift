@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import MediaPlayer
+import WebBookOrchestrator
 
 /// Wraps `AVSpeechSynthesizer` for paragraph-by-paragraph read-aloud, one chapter's worth of
 /// `paragraphs` at a time -- crossing into the next chapter is the *owner's* job (see
@@ -92,7 +93,11 @@ final class ReadAloudController: NSObject, ObservableObject {
             return
         }
         let paragraphText = paragraphs[currentParagraphIndex]
-        guard !paragraphText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        // Real bug found comparing against Legado: this used to only skip a paragraph that's empty
+        // after trimming whitespace -- a punctuation-only paragraph (e.g. a lone "——" scene-break
+        // marker) isn't empty, so it used to get spoken as a raw-punctuation blip instead of cleanly
+        // skipped. `ReadAloudTextFilter.isSpeakable` matches Legado's own `notReadAloudRegex`.
+        guard ReadAloudTextFilter.isSpeakable(paragraphText) else {
             advanceToNextParagraphOrStop()
             return
         }

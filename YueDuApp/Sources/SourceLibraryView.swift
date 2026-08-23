@@ -352,20 +352,25 @@ struct SourceLibraryView: View {
     /// Same import pipeline as `handleImport`, just sourcing the bytes from a URL instead of a
     /// local file -- reuses `BookSourceImportDecoder` so a malformed or unreachable URL surfaces the
     /// same kind of specific error rather than a separate, possibly worse-worded one.
-    private func handleURLImport(_ urlString: String) async {
-        guard !urlString.isEmpty else { return }
+    /// Returns whether the import actually succeeded -- `BookSourceURLImportView` only dismisses
+    /// itself on `true`, so a failure's `errorMessage` stays visible with the input still on screen
+    /// instead of surfacing behind an already-closed sheet.
+    private func handleURLImport(_ urlString: String) async -> Bool {
+        guard !urlString.isEmpty else { return false }
         do {
             let response = try await env.httpClient.fetch(HTTPRequest(url: urlString))
             guard let data = response.body.data(using: .utf8) else {
                 errorMessage = "下载内容无法解析为文本"
-                return
+                return false
             }
             let imported = try BookSourceImportDecoder.decode(from: data)
             let (inserted, updated) = try await env.bookSourceStore.importSources(imported)
             await reload()
             importSummary = "新增 \(inserted) 个，更新 \(updated) 个"
+            return true
         } catch {
             errorMessage = "\(error)"
+            return false
         }
     }
 }

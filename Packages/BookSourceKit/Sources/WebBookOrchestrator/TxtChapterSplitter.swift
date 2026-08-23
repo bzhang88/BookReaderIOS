@@ -15,11 +15,20 @@ public enum TxtChapterSplitter {
         }
     }
 
-    /// Matches a chapter-heading line at the start of a line: "第<digits-or-CJK-numeral>章/节/回/卷/集部"
+    /// Matches a chapter-heading line at the start of a line: "第<digits-or-CJK-numeral>章/节/回/卷/集部/篇/话"
     /// optionally followed by a subtitle on the same line, e.g. "第12章 风起" or "第三卷 第一章".
     /// `.anchorsMatchLines` makes `^` match at the start of every line, not just the whole string.
+    ///
+    /// Real bug found comparing against Legado: the subtitle segment used to be capped at
+    /// `.{0,40}` -- since the whole line still has to match through to `$`, a heading whose subtitle
+    /// ran past 40 characters (routine for real web-novel chapter titles) failed to match *at all*,
+    /// silently merging that chapter's content into the previous one with no error or fallback
+    /// signal. The cap didn't meaningfully guard against false positives either (`^`/`$` already
+    /// anchor the match to a whole line), so it's dropped rather than just raised. Also added `篇`/
+    /// `话` to the marker class, both present in Legado's own chapter-heading regex
+    /// (`BookHelp.kt`) but missing here.
     public static let defaultPattern =
-        #"^第[0-9〇零一二三四五六七八九十百千万廿卅两]+[章节回卷集部].{0,40}$"#
+        #"^第[0-9〇零一二三四五六七八九十百千万廿卅两]+[章节回卷集部篇话].*$"#
 
     /// Splits `text` at every line matching `pattern`. Each matched line becomes a chapter title;
     /// its body runs until the next match (or end of text). Text before the first match, if any

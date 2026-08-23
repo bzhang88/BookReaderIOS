@@ -531,23 +531,28 @@ struct ShelfView: View {
         let sources = (try? await env.bookSourceStore.all()) ?? []
         var checkedCount = 0
         var updatedCount = 0
-        await withTaskGroup(of: (String, Int?).self) { taskGroup in
+        // Real bug found comparing against Legado: this used to only ever call the two-arg
+        // `updateTotalChapterCount(bookUrl:count:)`, so a successful check that found real new
+        // chapters bumped the unread badge but left the shelf row's "最新: …" text showing the old
+        // title. `chapters?.last?.title` is the same "last item in the freshly fetched TOC" source
+        // every other `lastChapterTitle` write in this app already uses.
+        await withTaskGroup(of: (String, Int?, String?).self) { taskGroup in
             for book in targets {
                 guard let source = sources.first(where: { $0.bookSourceUrl == book.bookSourceUrl }) else { continue }
                 taskGroup.addTask {
                     let chapters = try? await TocService.fetchChapterList(
                         source: source, tocURL: book.tocUrl, httpClient: httpClient
                     )
-                    return (book.bookUrl, chapters?.count)
+                    return (book.bookUrl, chapters?.count, chapters?.last?.title)
                 }
             }
-            for await (bookUrl, count) in taskGroup {
+            for await (bookUrl, count, lastChapterTitle) in taskGroup {
                 checkedCount += 1
                 guard let count else { continue }
                 if let book = targets.first(where: { $0.bookUrl == bookUrl }), count > (book.totalChapterCount ?? 0) {
                     updatedCount += 1
                 }
-                try? await env.shelfStore.updateTotalChapterCount(bookUrl: bookUrl, count: count)
+                try? await env.shelfStore.updateTotalChapterCount(bookUrl: bookUrl, count: count, lastChapterTitle: lastChapterTitle)
             }
         }
         await reload()

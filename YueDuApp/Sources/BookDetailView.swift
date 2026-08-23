@@ -44,6 +44,14 @@ struct BookDetailView: View {
     @State private var isExporting = false
     @State private var exportURL: URL?
     @State private var isShowingExportSheet = false
+    // Real bug found comparing against Legado: `switchSource` used to swallow a failed re-fetch via
+    // `try?` and still commit `source`/`bookUrl` to the new source regardless -- with `bookInfo` left
+    // `nil`, the computed `name`/`author`/etc. properties silently fell back to this screen's
+    // *original* `fallbackName`/`fallbackAuthor` (captured when it first opened), showing the new
+    // source's label paired with the old book's stale data, with zero indication anything went wrong.
+    // A separate alert (not the full-screen `errorMessage`, which would replace the still-valid,
+    // already-loaded book info with an error screen) reports this without discarding what's on screen.
+    @State private var switchSourceErrorMessage: String?
 
     init(
         source: BookSource, bookUrl: String, fallbackName: String, fallbackAuthor: String? = nil,
@@ -138,6 +146,13 @@ struct BookDetailView: View {
             if let exportURL {
                 ShareSheet(items: [exportURL])
             }
+        }
+        .alert("换源失败", isPresented: Binding(
+            get: { switchSourceErrorMessage != nil }, set: { if !$0 { switchSourceErrorMessage = nil } }
+        )) {
+            Button("好") { switchSourceErrorMessage = nil }
+        } message: {
+            Text(switchSourceErrorMessage ?? "")
         }
         .task { await load() }
     }
@@ -270,7 +285,14 @@ struct BookDetailView: View {
                                 .buttonStyle(.pillAction)
                         }
                     }
-                    if isInShelf, let lastRead = bookInfo == nil ? fallbackLastChapter : shelfLastReadTitle {
+                    // Real bug found comparing against Legado: the `bookInfo == nil` branch here used
+                    // to fall back to `fallbackLastChapter` -- the source's *latest chapter* title,
+                    // not reading progress -- and label it "上次读到" (last read to). That branch was
+                    // only ever reachable through `switchSource`'s old silent-failure bug (see its own
+                    // doc comment); now that `switchSource` can't leave `bookInfo` nil while this
+                    // content panel is showing, `shelfLastReadTitle` is the only value this could ever
+                    // correctly show.
+                    if isInShelf, let lastRead = shelfLastReadTitle {
                         infoRow(icon: "clock", text: "上次读到: \(lastRead)")
                     }
                     if !previewChapters.isEmpty {
@@ -551,12 +573,22 @@ struct BookDetailView: View {
     /// meaningfully across sources with different chapter counts, so they reset).
     private func switchSource(to newSource: BookSource, match: SearchResult) async {
         let oldBookUrl = bookUrl
-        let newInfo = try? await BookInfoService.fetchBookInfo(source: newSource, bookURL: match.bookUrl, httpClient: env.httpClient)
+        // Gating on a successful info fetch (rather than falling back to `try?` + `nil`) is the fix:
+        // `source`/`bookUrl` are never committed to the new source unless the new book's own data is
+        // actually in hand, so this screen can never show "new source name + old book data" again.
+        // This also removes the old `newInfo?.tocUrl ?? match.bookUrl` fallback for the TOC fetch --
+        // that only existed to paper over a failed info fetch, which now bails out before reaching it.
+        guard let newInfo = try? await BookInfoService.fetchBookInfo(
+            source: newSource, bookURL: match.bookUrl, httpClient: env.httpClient
+        ) else {
+            switchSourceErrorMessage = "无法获取新书源的书籍信息，换源已取消"
+            return
+        }
         source = newSource
         bookUrl = match.bookUrl
         bookInfo = newInfo
         previewChapters = (try? await TocService.fetchChapterList(
-            source: newSource, tocURL: newInfo?.tocUrl ?? match.bookUrl, httpClient: env.httpClient
+            source: newSource, tocURL: newInfo.tocUrl, httpClient: env.httpClient
         )) ?? []
         await refreshDownloadedCount()
 

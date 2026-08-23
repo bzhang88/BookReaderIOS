@@ -100,9 +100,18 @@ public struct WebDAVClient {
         return ["Authorization": "Basic \(encoded)"]
     }
 
+    /// Real bug found comparing against Legado: `path` used to be appended to `base` with zero
+    /// percent-encoding. For a Chinese novel reader, WebDAV folder/file names routinely contain
+    /// Chinese characters or spaces (a real book title, or `WebDAVPropfindParser`'s raw, unencoded
+    /// `displayname`) -- `URL(string:)` on the caller side (`URLSessionHTTPClient.fetch`) returns
+    /// `nil` for a string containing a literal space or non-ASCII character, so "browse/import from
+    /// WebDAV" would fail outright for almost any real book file. `.urlPathAllowed` already treats
+    /// `/` as allowed, so this encodes the whole path in one pass without splitting on path
+    /// separators first.
     private func resolvedURL(_ path: String) throws -> String {
         guard !config.baseURL.isEmpty else { throw WebDAVClientError.invalidBaseURL(config.baseURL) }
         let base = config.baseURL.hasSuffix("/") ? config.baseURL : config.baseURL + "/"
-        return base + path
+        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+        return base + encodedPath
     }
 }

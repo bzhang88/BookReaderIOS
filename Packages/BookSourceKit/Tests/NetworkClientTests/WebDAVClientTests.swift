@@ -148,6 +148,25 @@ final class WebDAVClientTests: XCTestCase {
         XCTAssertEqual(recorded[0].headers["Depth"], "1")
     }
 
+    /// Real bug found comparing against Legado: `path` used to be appended to the base URL with zero
+    /// percent-encoding -- for a Chinese novel reader, WebDAV file/folder names routinely contain
+    /// Chinese characters or spaces, and `URL(string:)` (in `URLSessionHTTPClient`) returns `nil` for
+    /// a literal space or non-ASCII character, so this would fail outright for almost any real book
+    /// file before this fix.
+    func testPathWithSpacesAndChineseCharactersIsPercentEncoded() async throws {
+        let client = RecordingStubHTTPClient(responses: [
+            "https://dav.example.com/YueDu/Books/%E5%B0%8F%E8%AF%B4%20%E4%B8%80.txt":
+                HTTPResponse(finalURL: "x", statusCode: 200, body: "content")
+        ])
+        let webdav = WebDAVClient(httpClient: client, config: config)
+
+        let content = try await webdav.download(path: "Books/小说 一.txt")
+
+        XCTAssertEqual(content, "content")
+        let recorded = await client.recorded
+        XCTAssertEqual(recorded[0].url, "https://dav.example.com/YueDu/Books/%E5%B0%8F%E8%AF%B4%20%E4%B8%80.txt")
+    }
+
     func testListDirectoryThrowsOnNonSuccessStatus() async throws {
         let client = RecordingStubHTTPClient(responses: [
             "https://dav.example.com/YueDu/Books": HTTPResponse(finalURL: "x", statusCode: 404, body: "")

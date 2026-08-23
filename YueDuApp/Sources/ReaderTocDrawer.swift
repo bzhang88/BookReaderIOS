@@ -53,6 +53,12 @@ struct ReaderTocDrawerView: View {
     @State private var selectedTab: Tab = .toc
     @State private var bookmarks: [Bookmark] = []
     @State private var searchKeyword = ""
+    // Real bug found comparing against Legado: this drawer's own "全文搜索" tab is a lightweight
+    // reimplementation of `ChapterContentSearchView` (see this type's own doc comment for why it's
+    // not embedded directly), but it never got that view's regex-mode toggle -- the same feature
+    // behaved differently depending on which of the two search entry points the user happened to
+    // open.
+    @State private var isRegexSearch = false
     @State private var searchableChapters: [(index: Int, title: String, text: String)] = []
     @State private var searchResults: [ChapterSearchMatch] = []
     @State private var isLoadingSearchChapters = true
@@ -105,7 +111,7 @@ struct ReaderTocDrawerView: View {
             bookmarks = (try? await loadedBookmarks) ?? []
             searchableChapters = await loadedChapters
             isLoadingSearchChapters = false
-            searchResults = ChapterContentSearch.search(chapters: searchableChapters, keyword: searchKeyword)
+            searchResults = ChapterContentSearch.search(chapters: searchableChapters, keyword: searchKeyword, isRegex: isRegexSearch)
             if let loadDownloadedIndices {
                 downloadedIndices = await loadDownloadedIndices()
             }
@@ -226,15 +232,30 @@ struct ReaderTocDrawerView: View {
         }
     }
 
+    private var isSearchPatternInvalid: Bool {
+        let trimmed = searchKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isRegexSearch && !trimmed.isEmpty && !ChapterContentSearch.isValidPattern(trimmed)
+    }
+
+    private func refreshDrawerSearchResults() {
+        guard !isSearchPatternInvalid else {
+            searchResults = []
+            return
+        }
+        searchResults = ChapterContentSearch.search(chapters: searchableChapters, keyword: searchKeyword, isRegex: isRegexSearch)
+    }
+
     private var searchTab: some View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("搜索本书内容", text: $searchKeyword)
                     .textFieldStyle(.plain)
-                    .onChange(of: searchKeyword) { _, newValue in
-                        searchResults = ChapterContentSearch.search(chapters: searchableChapters, keyword: newValue)
-                    }
+                    .onChange(of: searchKeyword) { _, _ in refreshDrawerSearchResults() }
+                Toggle("正则", isOn: $isRegexSearch)
+                    .toggleStyle(.button)
+                    .controlSize(.mini)
+                    .onChange(of: isRegexSearch) { _, _ in refreshDrawerSearchResults() }
             }
             .padding(8)
             .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
@@ -251,6 +272,8 @@ struct ReaderTocDrawerView: View {
             List {
                 if isLoadingSearchChapters {
                     ProgressView("正在准备搜索…")
+                } else if isSearchPatternInvalid {
+                    ContentUnavailableView("正则表达式无效", systemImage: "exclamationmark.triangle")
                 } else if searchResults.isEmpty && !searchKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     ContentUnavailableView("没有找到", systemImage: "magnifyingglass")
                 }

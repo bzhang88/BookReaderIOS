@@ -120,4 +120,30 @@ final class TxtChapterSplitterTests: XCTestCase {
         let chapters = TxtChapterSplitter.splitTryingRules(text, rules: [], fallbackTitle: "全文")
         XCTAssertEqual(chapters.map(\.title), ["第一章 开始", "第二章 继续"])
     }
+
+    /// Real bug found comparing against Legado: the default pattern used to cap the subtitle at 40
+    /// characters (`.{0,40}$`), so a heading whose subtitle ran longer than that failed to match at
+    /// all, silently merging that chapter's content into the previous one.
+    func testDefaultPatternMatchesHeadingsWithSubtitlesLongerThan40Characters() {
+        let longSubtitle = String(repeating: "字", count: 45)
+        let text = """
+        第123章 \(longSubtitle)
+        正文一
+        第124章 短标题
+        正文二
+        """
+        let chapters = TxtChapterSplitter.split(text, fallbackTitle: "全文")
+        XCTAssertEqual(chapters.map(\.title), ["第123章 \(longSubtitle)", "第124章 短标题"])
+    }
+
+    func testDefaultPatternRecognizesPianAndHuaMarkers() {
+        let text = """
+        第一篇 开篇
+        正文一
+        第二话 后续
+        正文二
+        """
+        let chapters = TxtChapterSplitter.split(text, fallbackTitle: "全文")
+        XCTAssertEqual(chapters.map(\.title), ["第一篇 开篇", "第二话 后续"])
+    }
 }

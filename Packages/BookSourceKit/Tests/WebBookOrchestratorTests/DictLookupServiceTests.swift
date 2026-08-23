@@ -32,6 +32,39 @@ final class DictLookupServiceTests: XCTestCase {
         }
     }
 
+    /// Real bug found comparing against Legado: `DictRule.search()` explicitly treats a blank
+    /// `showRule` as "return the raw response body" -- this used to hand `""` straight to the rule
+    /// engine instead, which had no matching fallback.
+    func testBlankShowRuleReturnsRawResponseBody() async throws {
+        let body = "纯文本释义，没有 HTML 结构"
+        let rule = DictRule(name: "测试词典", urlRule: "https://dict.example.com/search?w=fixed", showRule: "")
+        let client = StubHTTPClient(responses: ["https://dict.example.com/search?w=fixed": body])
+
+        let result = try await DictLookupService.lookup(rule: rule, word: "书", httpClient: client)
+        XCTAssertEqual(result, body)
+    }
+
+    func testWhitespaceOnlyShowRuleAlsoReturnsRawResponseBody() async throws {
+        let body = "释义内容"
+        let rule = DictRule(name: "测试词典", urlRule: "https://dict.example.com/search?w=fixed", showRule: "   ")
+        let client = StubHTTPClient(responses: ["https://dict.example.com/search?w=fixed": body])
+
+        let result = try await DictLookupService.lookup(rule: rule, word: "书", httpClient: client)
+        XCTAssertEqual(result, body)
+    }
+
+    func testBlankShowRuleWithBlankResponseBodyThrowsEmptyResult() async throws {
+        let rule = DictRule(name: "测试词典", urlRule: "https://dict.example.com/search?w=fixed", showRule: "")
+        let client = StubHTTPClient(responses: ["https://dict.example.com/search?w=fixed": "   "])
+
+        do {
+            _ = try await DictLookupService.lookup(rule: rule, word: "书", httpClient: client)
+            XCTFail("expected an error")
+        } catch DictLookupError.emptyResult {
+            // expected
+        }
+    }
+
     #if canImport(JavaScriptCore)
     func testKeyPlaceholderIsSubstitutedWithTheLookedUpWordOnApplePlatforms() async throws {
         let html = "<div class=\"definition\">a mythical bird</div>"

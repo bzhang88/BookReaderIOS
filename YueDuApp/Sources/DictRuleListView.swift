@@ -119,7 +119,7 @@ struct DictRuleEditView: View {
                 Section {
                     Toggle("启用", isOn: $enabled)
                 } footer: {
-                    Text("提取规则跟书源规则是同一套语法，比如 @css:.definition@text")
+                    Text("提取规则跟书源规则是同一套语法，比如 @css:.definition@text；留空则直接使用返回的原始文本内容")
                 }
             }
             .navigationTitle(rule == nil ? "新建词典规则" : "编辑词典规则")
@@ -139,8 +139,10 @@ struct DictRuleEditView: View {
                             dismiss()
                         }
                     }
-                    .disabled(urlRule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || showRule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    // Real bug found comparing against Legado: a blank 提取规则 is a real,
+                    // supported shape (see `DictLookupService.lookup`'s matching doc comment) --
+                    // this used to disable saving whenever it was empty, blocking a valid config.
+                    .disabled(urlRule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
