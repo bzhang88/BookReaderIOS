@@ -4,6 +4,17 @@ import WebBookOrchestrator
 import RuleEngine
 import Persistence
 
+/// Tracks each visible image's top offset within the scroll view, same idea as `ReaderView`'s
+/// `ParagraphTopOffsetKey`/`LocalReaderView`'s `LocalParagraphTopOffsetKey` -- kept as its own type
+/// since each reader's coordinate space is named differently and there's no other reason to couple
+/// them.
+private struct MangaImageTopOffsetKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 /// Reader for image-type book sources (`bookSourceType == 2`) -- the rule engine and
 /// `ContentService` needed no changes at all for this: a manga source's `ruleContent` just extracts
 /// image URLs (one per line, via e.g. `@css:.img-list img@src`) instead of prose paragraphs, and
@@ -25,40 +36,77 @@ struct MangaReaderView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var isChromeVisible = true
+    /// Which image the reader should land on once this chapter's `imageURLs` finish loading -- real
+    /// gap found comparing against Legado: this reader always reopened at the first image of
+    /// whatever chapter, discarding `ShelfBook.lastReadCharacterOffset` even though the shelf-resume
+    /// code path already computed it (repurposed here as an image index rather than a text character
+    /// offset -- see `BookOpenerView.resumeCharacterOffset`'s doc comment). `nil` once consumed, and
+    /// whenever `resumeImageIndex` is 0 (an explicit chapter jump, e.g. from the table of contents,
+    /// means "start this chapter from the top," not "resume").
+    @State private var pendingResumeImageIndex: Int?
+    /// The topmost currently-visible image's index -- tracked via `MangaImageTopOffsetKey` the same
+    /// way the text readers track `currentTopParagraphIndex`, and periodically persisted as this
+    /// chapter's `characterOffset` so reopening the book lands back on roughly the same page instead
+    /// of always the first one.
+    @State private var currentTopImageIndex = 0
 
-    init(source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int, bookTitle: String) {
+    init(
+        source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int,
+        bookTitle: String, resumeImageIndex: Int = 0
+    ) {
         self._source = State(initialValue: source)
         self._bookUrl = State(initialValue: bookUrl)
         self.tocUrl = tocUrl
         self._chapters = State(initialValue: chapters)
         self._currentIndex = State(initialValue: currentIndex)
         self.bookTitle = bookTitle
+        if resumeImageIndex > 0 {
+            self._pendingResumeImageIndex = State(initialValue: resumeImageIndex)
+        }
     }
 
     private var chapter: BookChapter { chapters[currentIndex] }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(Array(imageURLs.enumerated()), id: \.offset) { _, url in
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFit().frame(maxWidth: .infinity)
-                        case .failure:
-                            Color.secondary.opacity(0.15)
-                                .frame(height: 200)
-                                .overlay(Image(systemName: "photo.badge.exclamationmark").foregroundStyle(.secondary))
-                        default:
-                            Color.secondary.opacity(0.08)
-                                .frame(height: 200)
-                                .overlay(ProgressView())
-                        }
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, url in
+                        mangaImage(url)
+                            .id(index)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: MangaImageTopOffsetKey.self,
+                                        value: [index: geo.frame(in: .named("mangaScroll")).minY]
+                                    )
+                                }
+                            )
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { isChromeVisible.toggle() }
+            }
+            .coordinateSpace(name: "mangaScroll")
+            .onPreferenceChange(MangaImageTopOffsetKey.self) { offsets in
+                if let closest = offsets.min(by: { abs($0.value) < abs($1.value) }) {
+                    currentTopImageIndex = closest.key
+                }
+            }
+            .onChange(of: imageURLs) { _, newValue in
+                guard !newValue.isEmpty else { return }
+                // Every chapter load reaches here, not just a resumed one -- `ScrollView` position is
+                // a raw pixel offset, not tied to which content is currently showing, so without this
+                // a freshly-loaded chapter would open scrolled to wherever the *previous* chapter's
+                // scroll offset happened to land rather than the top (or the saved resume point).
+                let target = pendingResumeImageIndex ?? 0
+                pendingResumeImageIndex = nil
+                DispatchQueue.main.async {
+                    withAnimation(nil) {
+                        scrollProxy.scrollTo(target, anchor: .top)
                     }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { isChromeVisible.toggle() }
         }
         .background(Color.black)
         .overlay {
@@ -110,11 +158,45 @@ struct MangaReaderView: View {
         .toolbar(.hidden, for: .tabBar)
         .animation(.easeInOut(duration: 0.2), value: isChromeVisible)
         .task(id: "\(source.bookSourceUrl)#\(currentIndex)") { await load() }
+        // Periodic (not on every scroll frame -- that would mean writing to disk continuously) plus
+        // on `.onDisappear`, same cadence rationale as `ReaderView.saveReadingProgress`'s doc comment,
+        // just via a dedicated timer instead of piggybacking on that reader's eye-care schedule timer
+        // (this reader has no eye-care feature to share one with).
+        .onReceive(Timer.publish(every: 20, on: .main, in: .common).autoconnect()) { _ in saveReadingProgress() }
+        .onDisappear { saveReadingProgress() }
+    }
+
+    @ViewBuilder
+    private func mangaImage(_ url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().scaledToFit().frame(maxWidth: .infinity)
+            case .failure:
+                Color.secondary.opacity(0.15)
+                    .frame(height: 200)
+                    .overlay(Image(systemName: "photo.badge.exclamationmark").foregroundStyle(.secondary))
+            default:
+                Color.secondary.opacity(0.08)
+                    .frame(height: 200)
+                    .overlay(ProgressView())
+            }
+        }
     }
 
     private func goTo(_ index: Int) {
         guard chapters.indices.contains(index) else { return }
         currentIndex = index
+    }
+
+    private func saveReadingProgress() {
+        guard !imageURLs.isEmpty else { return }
+        Task {
+            try? await env.shelfStore.updateProgress(
+                bookUrl: bookUrl, chapterIndex: chapter.index, chapterTitle: chapter.title,
+                characterOffset: currentTopImageIndex
+            )
+        }
     }
 
     private func load() async {

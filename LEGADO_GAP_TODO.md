@@ -76,7 +76,7 @@
 - [x] 有声书锁屏控制中心加上一曲/下一曲/拖动进度 —— `AudiobookPlayerController.swift:154-174`
 - [x] 有声书跳过片头片尾设置 —— `AudiobookPlayerController.swift`（片头 seek / 片尾轮询阈值检测），`AudiobookPlayerView.swift`（每本书独立设置的 Stepper 面板）
 - [x] 有声书循环/随机播放模式 —— `AudioPlayMode`（顺序/单曲循环/随机/列表循环），手动"下一曲"、锁屏下一曲、自然播完/片尾跳过统一走同一个 `advanceToNextByPlayMode` 分发
-- [ ] 漫画阅读进度恢复（目前总回到第一页）—— `MangaReaderView.swift:136-138`
+- [x] 漫画阅读进度恢复（之前总回到第一页）—— `MangaReaderView.swift`（复用 `ShelfBook.lastReadCharacterOffset` 存图片下标，`ScrollViewReader`+`PreferenceKey` 跟踪/恢复滚动位置，跟文字阅读器同一套模式）
 
 ### 换源
 - [ ] 兼容性徽章接入换源界面 —— `ChangeSourceView.swift:86-90,180-184`

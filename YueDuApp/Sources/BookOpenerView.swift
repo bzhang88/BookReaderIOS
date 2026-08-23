@@ -18,9 +18,11 @@ struct BookOpenerView: View {
     /// (e.g. `BookmarkListView`, whose `Bookmark` model has no author field at all) compiling
     /// unchanged; that just means change-source falls back to name-only matching there, same as before.
     var bookAuthor: String? = nil
-    /// Only meaningful for the text-reader (`default`) case -- audio/manga sources have no notion of
-    /// a character offset into chapter text. Defaults to 0 (no saved position) so every existing
-    /// call site that doesn't know/care about this keeps compiling unchanged.
+    /// Threaded to the text reader as a real character offset, and to the manga reader (repurposing
+    /// the same `ShelfBook.lastReadCharacterOffset` storage slot) as a top-visible-image index --
+    /// audio sources still have no use for it (a single continuous stream has no per-chapter
+    /// "position within a list of things" to resume). Defaults to 0 (no saved position) so every
+    /// existing call site that doesn't know/care about this keeps compiling unchanged.
     var resumeCharacterOffset: Int = 0
 
     var body: some View {
@@ -33,7 +35,7 @@ struct BookOpenerView: View {
         case 2:
             MangaReaderView(
                 source: source, bookUrl: bookUrl, tocUrl: tocUrl, chapters: chapters,
-                currentIndex: currentIndex, bookTitle: bookTitle
+                currentIndex: currentIndex, bookTitle: bookTitle, resumeImageIndex: resumeCharacterOffset
             )
         default:
             ReaderView(
