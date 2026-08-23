@@ -35,16 +35,29 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
     private var bookTitle = ""
     private var chapterTitle = ""
     private var sleepTimerTask: Task<Void, Never>?
+    /// 片尾跳过 (seconds) -- see `checkCloseCreditsThreshold`'s doc comment.
+    private var closeCreditsSeconds: Double = 0
+    /// Guards against `onFinished` firing twice for the same stream -- once from
+    /// `checkCloseCreditsThreshold` reaching the skip-tail threshold (which `pause()`s rather than
+    /// letting the item genuinely end) and again from `AVPlayerItemDidPlayToEndTime`, or from the
+    /// end-notification racing the last periodic time-observer tick right at the real end.
+    private var hasFinishedForCurrentItem = false
 
     override init() {
         super.init()
         configureRemoteCommands()
     }
 
-    func play(url: URL, bookTitle: String, chapterTitle: String) {
+    /// `openCreditsSeconds`/`closeCreditsSeconds` mirror Legado's real per-book "片头/片尾跳过"
+    /// (`AudioPlayService.loadPlayUrl`'s initial `seekTo(skipStartMs)` and
+    /// `upPlayProgress`'s polling `skipEnds` threshold check) -- both default to 0 (no skip) so
+    /// existing callers that don't pass them behave exactly as before.
+    func play(url: URL, bookTitle: String, chapterTitle: String, openCreditsSeconds: Double = 0, closeCreditsSeconds: Double = 0) {
         activateAudioSession()
         self.bookTitle = bookTitle
         self.chapterTitle = chapterTitle
+        self.closeCreditsSeconds = closeCreditsSeconds
+        hasFinishedForCurrentItem = false
         removeTimeObserver()
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
 
@@ -61,6 +74,9 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
         newPlayer.rate = playbackRate
         isPlaying = true
         updateNowPlayingInfo()
+        if openCreditsSeconds > 0 {
+            seek(to: openCreditsSeconds)
+        }
     }
 
     func togglePlayPause() {
@@ -147,8 +163,22 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
                 if let itemDuration = self.player?.currentItem?.duration.seconds, itemDuration.isFinite {
                     self.duration = itemDuration
                 }
+                self.checkCloseCreditsThreshold()
             }
         }
+    }
+
+    /// Mirrors Legado's own `AudioPlayService.upPlayProgress` skip-tail check: once playback
+    /// reaches `duration - closeCreditsSeconds`, this treats it exactly like the stream reaching its
+    /// real end -- pausing and firing `onFinished` -- rather than playing out the last
+    /// `closeCreditsSeconds` of (typically outro/credits) audio.
+    private func checkCloseCreditsThreshold() {
+        guard closeCreditsSeconds > 0, duration > 0, !hasFinishedForCurrentItem else { return }
+        guard currentTime >= duration - closeCreditsSeconds else { return }
+        hasFinishedForCurrentItem = true
+        player?.pause()
+        isPlaying = false
+        onFinished?()
     }
 
     private func removeTimeObserver() {
@@ -210,6 +240,8 @@ final class AudiobookPlayerController: NSObject, ObservableObject {
 
     @objc nonisolated private func handleDidPlayToEnd() {
         Task { @MainActor in
+            guard !self.hasFinishedForCurrentItem else { return }
+            self.hasFinishedForCurrentItem = true
             self.isPlaying = false
             self.onFinished?()
         }
