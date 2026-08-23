@@ -44,4 +44,33 @@ final class HighlightRuleStoreTests: XCTestCase {
         let all = try await reloaded.all()
         XCTAssertEqual(all.first?.enabled, false)
     }
+
+    func testSetGroupsReassignsGroupForListedIDs() async throws {
+        let store = HighlightRuleStore(fileURL: tempFileURL())
+        let a = HighlightRule(name: "A", pattern: "a", group: "旧分组")
+        let b = HighlightRule(name: "B", pattern: "b", group: "旧分组")
+        let c = HighlightRule(name: "C", pattern: "c", group: "其他分组")
+        try await store.add(a)
+        try await store.add(b)
+        try await store.add(c)
+
+        try await store.setGroups([a.id: "新分组", b.id: "新分组"])
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first { $0.id == a.id }?.group, "新分组")
+        XCTAssertEqual(all.first { $0.id == b.id }?.group, "新分组")
+        XCTAssertEqual(all.first { $0.id == c.id }?.group, "其他分组")
+    }
+
+    func testSetGroupsCanClearAGroupBackToNil() async throws {
+        let store = HighlightRuleStore(fileURL: tempFileURL())
+        let rule = HighlightRule(name: "A", pattern: "a", group: "旧分组")
+        try await store.add(rule)
+
+        let clearedGroup: String? = nil
+        try await store.setGroups([rule.id: clearedGroup])
+
+        let all = try await store.all()
+        XCTAssertNil(all.first?.group)
+    }
 }

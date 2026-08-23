@@ -40,4 +40,17 @@ public actor HighlightRuleStore {
         rules[idx].enabled = enabled
         try await store.save(rules)
     }
+
+    /// Batch group reassignment, keyed by rule `id` -- same pattern as `ReplaceRuleStore.setGroups`,
+    /// used by `HighlightRuleGroupManagementView` to rename/delete a group across every rule in it
+    /// in one write.
+    public func setGroups(_ groups: [String: String?]) async throws {
+        var rules = try await all()
+        for idx in rules.indices {
+            if let newGroup = groups[rules[idx].id] {
+                rules[idx].group = newGroup
+            }
+        }
+        try await store.save(rules)
+    }
 }

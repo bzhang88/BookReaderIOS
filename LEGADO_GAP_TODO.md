@@ -72,7 +72,7 @@
 ### 阅读器 / 朗读 / 高亮
 - [x] 朗读（TTS）睡眠定时器（有声书已有，可照搬）—— `AudiobookPlayerController.swift:81-103`
 - [x] 书签列表搜索
-- [ ] 高亮规则分组管理 + 作用范围（标题/正文）
+- [x] 高亮规则分组管理 + 作用范围（标题/正文）—— `HighlightRule.swift`, `HighlightRuleApplier.swift`, `HighlightRuleGroupManagementView.swift`, `ReaderView.swift`/`LocalReaderView.swift`（顺带修复本地书籍阅读器此前完全不生效的高亮规则）
 - [x] 有声书锁屏控制中心加上一曲/下一曲/拖动进度 —— `AudiobookPlayerController.swift:154-174`
 - [ ] 有声书跳过片头片尾设置
 - [ ] 有声书循环/随机播放模式

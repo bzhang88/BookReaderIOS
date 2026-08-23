@@ -22,9 +22,13 @@ public enum HighlightRuleApplier {
     /// using `AttributedString`'s `String`-index bridging APIs, which are less battle-tested here
     /// and can't be verified without a real device; plain `NSRegularExpression`/`String` range
     /// handling is the same well-tested approach `ReplaceRuleApplier` already uses successfully.
-    public static func segments(_ rules: [HighlightRule], in text: String) -> [Segment] {
+    ///
+    /// `isTitle` filters by each rule's own `targetScope` (matching Legado's title/body split) --
+    /// defaults to `false` since most callers style body paragraphs; a chapter-heading renderer
+    /// passes `true` so title-only rules apply there and body-only rules don't leak into it.
+    public static func segments(_ rules: [HighlightRule], in text: String, isTitle: Bool = false) -> [Segment] {
         var matches: [(range: Range<String.Index>, rule: HighlightRule)] = []
-        for rule in rules where rule.enabled {
+        for rule in rules where rule.enabled && rule.applies(toTitle: isTitle) {
             guard !rule.pattern.isEmpty, let regex = try? NSRegularExpression(pattern: rule.pattern) else { continue }
             let nsText = text as NSString
             let found = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))

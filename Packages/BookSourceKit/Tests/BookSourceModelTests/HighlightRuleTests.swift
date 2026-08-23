@@ -28,4 +28,43 @@ final class HighlightRuleTests: XCTestCase {
         XCTAssertTrue(rule.resolvedIsBold)
         XCTAssertFalse(rule.resolvedIsUnderlined)
     }
+
+    /// Migration-safety case for `group`/`targetScope`, same reasoning as the style-fields test above.
+    func testDecodesPreExistingRuleJSONMissingGroupAndScopeFields() throws {
+        let json = """
+        {"id": "abc", "name": "Name", "pattern": "张三", "enabled": true}
+        """
+        let rule = try JSONDecoder().decode(HighlightRule.self, from: Data(json.utf8))
+        XCTAssertNil(rule.group)
+        XCTAssertEqual(rule.resolvedTargetScope, .all)
+    }
+
+    func testResolvedTargetScopeDefaultsToAll() {
+        let rule = HighlightRule(name: "Name", pattern: "张三")
+        XCTAssertEqual(rule.resolvedTargetScope, .all)
+        XCTAssertTrue(rule.applies(toTitle: true))
+        XCTAssertTrue(rule.applies(toTitle: false))
+    }
+
+    func testTargetScopeTitleOnlyAppliesToTitle() {
+        let rule = HighlightRule(name: "Name", pattern: "张三", targetScope: .title)
+        XCTAssertTrue(rule.applies(toTitle: true))
+        XCTAssertFalse(rule.applies(toTitle: false))
+    }
+
+    func testTargetScopeBodyOnlyAppliesToBody() {
+        let rule = HighlightRule(name: "Name", pattern: "张三", targetScope: .body)
+        XCTAssertFalse(rule.applies(toTitle: true))
+        XCTAssertTrue(rule.applies(toTitle: false))
+    }
+
+    /// An out-of-range raw value (e.g. a future version wrote a scope this build doesn't know about)
+    /// must degrade to `.all` rather than crash or silently exclude the rule everywhere.
+    func testUnrecognizedRawTargetScopeFallsBackToAll() throws {
+        let json = """
+        {"id": "abc", "name": "Name", "pattern": "张三", "enabled": true, "targetScope": 99}
+        """
+        let rule = try JSONDecoder().decode(HighlightRule.self, from: Data(json.utf8))
+        XCTAssertEqual(rule.resolvedTargetScope, .all)
+    }
 }

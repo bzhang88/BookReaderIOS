@@ -66,4 +66,30 @@ final class HighlightRuleApplierTests: XCTestCase {
         let segments = HighlightRuleApplier.segments([rule], in: "unchanged text")
         XCTAssertEqual(segments, [Segment(text: "unchanged text")])
     }
+
+    func testTitleOnlyRuleAppliesWhenRenderingATitleButNotBody() {
+        let rule = HighlightRule(name: "TitleOnly", pattern: "张三", targetScope: .title)
+        let titleSegments = HighlightRuleApplier.segments([rule], in: "张三来了", isTitle: true)
+        XCTAssertEqual(titleSegments, [Segment(text: "张三", rule: rule), Segment(text: "来了")])
+
+        let bodySegments = HighlightRuleApplier.segments([rule], in: "张三来了", isTitle: false)
+        XCTAssertEqual(bodySegments, [Segment(text: "张三来了")])
+    }
+
+    func testBodyOnlyRuleAppliesWhenRenderingBodyButNotATitle() {
+        let rule = HighlightRule(name: "BodyOnly", pattern: "张三", targetScope: .body)
+        let bodySegments = HighlightRuleApplier.segments([rule], in: "张三来了", isTitle: false)
+        XCTAssertEqual(bodySegments, [Segment(text: "张三", rule: rule), Segment(text: "来了")])
+
+        let titleSegments = HighlightRuleApplier.segments([rule], in: "张三来了", isTitle: true)
+        XCTAssertEqual(titleSegments, [Segment(text: "张三来了")])
+    }
+
+    func testAllScopeRuleAppliesToBothTitleAndBody() {
+        let rule = HighlightRule(name: "All", pattern: "张三", targetScope: .all)
+        XCTAssertEqual(
+            HighlightRuleApplier.segments([rule], in: "张三来了", isTitle: true),
+            HighlightRuleApplier.segments([rule], in: "张三来了", isTitle: false)
+        )
+    }
 }

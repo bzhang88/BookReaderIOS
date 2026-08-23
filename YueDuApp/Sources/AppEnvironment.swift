@@ -29,6 +29,8 @@ final class AppEnvironment: ObservableObject {
     let bookSourceGroupStore: ShelfGroupStore
     /// Registered 净化规则 group names -- same reused-generic-store story as `bookSourceGroupStore`.
     let replaceRuleGroupStore: ShelfGroupStore
+    /// Registered 高亮规则 group names -- same reused-generic-store story as `bookSourceGroupStore`.
+    let highlightRuleGroupStore: ShelfGroupStore
     let dictRuleStore: DictRuleStore
     let webSearchEngineStore: WebSearchEngineStore
     let httpTTSEngineStore: HttpTTSEngineStore
@@ -60,6 +62,7 @@ final class AppEnvironment: ObservableObject {
         shelfGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("shelf_groups.json"))
         bookSourceGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("book_source_groups.json"))
         replaceRuleGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("replace_rule_groups.json"))
+        highlightRuleGroupStore = ShelfGroupStore(fileURL: appSupport.appendingPathComponent("highlight_rule_groups.json"))
         dictRuleStore = DictRuleStore(fileURL: appSupport.appendingPathComponent("dict_rules.json"))
         webSearchEngineStore = WebSearchEngineStore(fileURL: appSupport.appendingPathComponent("web_search_engines.json"))
         httpTTSEngineStore = HttpTTSEngineStore(fileURL: appSupport.appendingPathComponent("http_tts_engines.json"))

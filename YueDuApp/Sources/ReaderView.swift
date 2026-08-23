@@ -1565,14 +1565,27 @@ struct ReaderView: View {
     /// to read as genuine blank space, not a drawn rule -- a plain `Divider()` line was tried first
     /// and reads as "a UI element," not "empty space between chapters," so this is just padding.
     private func chapterHeading(_ title: String) -> some View {
-        Text(title)
+        highlightedTitleText(title)
             .font(.title3.bold())
-            .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
             .padding(.bottom, 12)
             .padding(.horizontal, 4)
+    }
+
+    /// Same `HighlightRuleApplier` pipeline `highlightedText` runs body paragraphs through, just with
+    /// `isTitle: true` -- previously this heading never ran highlight rules at all, so a rule scoped
+    /// to "仅标题" had nowhere in the reading UI it could ever actually show up.
+    private func highlightedTitleText(_ title: String) -> Text {
+        let segments = HighlightRuleApplier.segments(highlightRules, in: title, isTitle: true)
+        return segments.reduce(Text("")) { partial, segment in
+            if let rule = segment.rule {
+                return partial + Text.highlighted(segment.text, rule: rule)
+            } else {
+                return partial + Text(segment.text).foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
+            }
+        }
     }
 
     /// Real, screen-measured `.scroll` mode rendering, built directly on Legado_Max's own real

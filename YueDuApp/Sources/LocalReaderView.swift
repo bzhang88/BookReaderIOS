@@ -34,6 +34,7 @@ struct LocalReaderView: View {
     @State private var isSettingsPanelVisible = false
     @State private var isCurrentChapterBookmarked = false
     @State private var matchedReplaceRules: [ReplaceRule] = []
+    @State private var highlightRules: [HighlightRule] = []
     @State private var isShowingContentSearch = false
     @State private var isShowingAISummary = false
     @State private var isShowingDictLookup = false
@@ -135,23 +136,51 @@ struct LocalReaderView: View {
     /// local `.txt` novels commonly already have "　　" manually typed at the start of every
     /// paragraph in the raw file itself (the traditional plain-text convention), which would
     /// otherwise stack with this setting's own indent instead of being controlled by it.
+    /// Same `HighlightRuleApplier` pipeline `ReaderView.highlightedText` runs body paragraphs
+    /// through -- local books used to pass `highlightRules: []` to the paged reader and render
+    /// plain, unhighlighted `Text` here in scroll mode, so a highlight rule the user configured
+    /// simply never did anything while reading a local `.txt`/EPUB import. Color is set per-segment
+    /// (not via an outer `.foregroundStyle`) so a rule's own color isn't silently overridden --
+    /// same reasoning as `ReaderView.highlightedText`.
+    private func highlightedText(_ paragraph: String) -> Text {
+        let segments = HighlightRuleApplier.segments(highlightRules, in: paragraph)
+        return segments.reduce(Text("")) { partial, segment in
+            if let rule = segment.rule {
+                return partial + Text.highlighted(segment.text, rule: rule)
+            } else {
+                return partial + Text(segment.text).foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
+            }
+        }
+    }
+
     private func indentedText(_ paragraph: String) -> Text {
         let normalized = String(paragraph.drop(while: \.isWhitespace))
-        guard paragraphIndent > 0 else { return Text(normalized) }
-        return Text(String(repeating: "　", count: paragraphIndent) + normalized)
+        guard paragraphIndent > 0 else { return highlightedText(normalized) }
+        return Text(String(repeating: "　", count: paragraphIndent)) + highlightedText(normalized)
     }
 
     /// See `ReaderView.chapterHeading`'s matching doc comment -- same real usage feedback applies
-    /// here regardless of reader type.
+    /// here regardless of reader type. Now also runs title-scoped highlight rules, matching
+    /// `ReaderView.highlightedTitleText`.
     private func chapterHeading(_ title: String) -> some View {
-        Text(title)
+        highlightedTitleText(title)
             .font(.title3.bold())
-            .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
             .padding(.bottom, 12)
             .padding(.horizontal, 4)
+    }
+
+    private func highlightedTitleText(_ title: String) -> Text {
+        let segments = HighlightRuleApplier.segments(highlightRules, in: title, isTitle: true)
+        return segments.reduce(Text("")) { partial, segment in
+            if let rule = segment.rule {
+                return partial + Text.highlighted(segment.text, rule: rule)
+            } else {
+                return partial + Text(segment.text).foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
+            }
+        }
     }
 
     private var chapterProgressText: String {
@@ -263,7 +292,7 @@ struct LocalReaderView: View {
                     paragraphSpacing: paragraphSpacing,
                     textColor: theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)),
                     backgroundColor: theme.backgroundColor(for: colorScheme, customBackground: Color(hex: customThemeBackgroundHex)),
-                    highlightRules: [],
+                    highlightRules: highlightRules,
                     readAloudParagraphIndex: nil,
                     initialAnchor: pageAnchor,
                     pageTurnRequest: $pageTurnRequest,
@@ -284,7 +313,6 @@ struct LocalReaderView: View {
                     indentedText(paragraph)
                         .font(.system(size: fontSize))
                         .lineSpacing(lineSpacing)
-                        .foregroundStyle(theme.textColor(for: colorScheme, customText: Color(hex: customThemeTextHex)))
                         .padding(.horizontal, 4)
                         // See `ReaderView.pageBlock`'s matching `.contextMenu` doc comment -- same
                         // custom long-press menu, replacing the plain system Copy/Look Up/Share menu
@@ -691,6 +719,7 @@ struct LocalReaderView: View {
         let purified = ReplaceRuleApplier.applyReportingMatches(replaceRules, to: chapter.text, bookName: book.title, sourceUrl: "")
         purifiedText = applyChineseConversion(purified.result)
         matchedReplaceRules = purified.matchedRules
+        highlightRules = (try? await env.highlightRuleStore.enabled()) ?? []
         try? await env.localBookStore.updateProgress(id: book.id, chapterIndex: currentIndex)
         isCurrentChapterBookmarked = (try? await env.bookmarkStore.isBookmarked(
             bookIdentifier: book.id, chapterIndex: currentIndex
