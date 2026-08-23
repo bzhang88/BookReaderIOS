@@ -99,9 +99,9 @@
 
 ### 本地书籍导入
 - [ ] EPUB / PDF 导入（目前完全没有，建议优先）—— `LocalBookListView.swift:94`
-- [ ] UTF-16 编码自动检测 —— `CharsetDetector.swift:46-54`
-- [ ] 重复导入检测 —— `LocalBookListView.swift:150-174`
-- [ ] 多文件批量导入 —— `LocalBookListView.swift:94`
+- [x] UTF-16 编码自动检测 —— `CharsetDetector.swift:46-77`
+- [x] 重复导入检测 —— `LocalBookListView.swift:186-206`（按标题去重，命中则原地替换内容并保留 id/书签，而不是产生重复条目）
+- [x] 多文件批量导入 —— `LocalBookListView.swift:94-96`（`allowsMultipleSelection`，逐文件独立 try/catch，失败互不影响）
 - [ ] 导入结果预览界面
 
 ---

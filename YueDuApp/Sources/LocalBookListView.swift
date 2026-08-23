@@ -91,7 +91,9 @@ struct LocalBookListView: View {
                 }
             }
         }
-        .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.plainText]) { result in
+        .fileImporter(
+            isPresented: $isImporterPresented, allowedContentTypes: [.plainText], allowsMultipleSelection: true
+        ) { result in
             Task { await handleImport(result) }
         }
         .alert("导入失败", isPresented: .constant(errorMessage != nil)) {
@@ -147,29 +149,57 @@ struct LocalBookListView: View {
         books = all.sorted { ($0.lastReadAt ?? $0.addedAt) > ($1.lastReadAt ?? $1.addedAt) }
     }
 
-    private func handleImport(_ result: Result<URL, Error>) async {
+    private enum LocalImportError: LocalizedError {
+        case emptyFile
+        var errorDescription: String? { "这个文件看起来是空的" }
+    }
+
+    /// Legado's `importFiles(uris: List<Uri>)` imports many files in one picker round-trip with
+    /// per-file error isolation -- one bad file (empty, unreadable) doesn't abort the rest of the
+    /// batch. Matched here: each URL gets its own do/catch, failures are collected and reported
+    /// together after the whole batch finishes rather than stopping at the first error.
+    private func handleImport(_ result: Result<[URL], Error>) async {
         isImporting = true
         defer { isImporting = false }
         do {
-            let url = try result.get()
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            let data = try Data(contentsOf: url)
-            let text = localImportCharset == .auto
-                ? CharsetDetector.decodeAutodetectingBytes(data)
-                : CharsetDetector.decode(data, charset: localImportCharset.charsetIdentifier)
-            let title = url.deletingPathExtension().lastPathComponent
-            let patterns = ((try? await env.txtSplitRuleStore.enabled()) ?? []).map(\.pattern)
-            let split = TxtChapterSplitter.splitTryingRules(text, rules: patterns, fallbackTitle: title)
-            guard !split.isEmpty else {
-                errorMessage = "这个文件看起来是空的"
-                return
+            let urls = try result.get()
+            var failures: [String] = []
+            for url in urls {
+                do {
+                    try await importSingleFile(url)
+                } catch {
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
             }
-            let chapters = split.map { LocalChapter(title: $0.title, text: $0.text) }
-            try await env.localBookStore.add(LocalBook(title: title, chapters: chapters))
             await reload()
+            if !failures.isEmpty {
+                errorMessage = failures.joined(separator: "\n")
+            }
         } catch {
             errorMessage = "\(error)"
+        }
+    }
+
+    /// Dedups by title (derived from the filename, same as Legado): re-importing a file that
+    /// matches an already-shelved book updates that book's content in place, rather than the old
+    /// always-`add` behavior which silently produced a second, fully duplicate entry with orphaned
+    /// bookmarks still pointing at the abandoned original.
+    private func importSingleFile(_ url: URL) async throws {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: url)
+        let text = localImportCharset == .auto
+            ? CharsetDetector.decodeAutodetectingBytes(data)
+            : CharsetDetector.decode(data, charset: localImportCharset.charsetIdentifier)
+        let title = url.deletingPathExtension().lastPathComponent
+        let patterns = ((try? await env.txtSplitRuleStore.enabled()) ?? []).map(\.pattern)
+        let split = TxtChapterSplitter.splitTryingRules(text, rules: patterns, fallbackTitle: title)
+        guard !split.isEmpty else { throw LocalImportError.emptyFile }
+        let chapters = split.map { LocalChapter(title: $0.title, text: $0.text) }
+        if let existing = books.first(where: { $0.title == title }) {
+            try await env.localBookStore.replaceContent(id: existing.id, title: title, chapters: chapters)
+        } else {
+            try await env.localBookStore.add(LocalBook(title: title, chapters: chapters))
         }
     }
 

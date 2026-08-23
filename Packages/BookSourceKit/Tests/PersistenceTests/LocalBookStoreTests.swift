@@ -70,6 +70,35 @@ final class LocalBookStoreTests: XCTestCase {
     /// A `local_books.json` saved before `lastReadCharacterOffset` existed has no such key at all --
     /// confirms the field being `Int?` (not a non-optional with only a memberwise-init default)
     /// actually matters: a non-optional field would fail this decode.
+    func testReplaceContentPreservesIdAndResetsProgress() async throws {
+        let store = LocalBookStore(fileURL: tempFileURL())
+        try await store.add(sampleBook())
+        try await store.updateProgress(id: "book-1", chapterIndex: 1, characterOffset: 250)
+
+        try await store.replaceContent(
+            id: "book-1", title: "本地小说 修订版",
+            chapters: [LocalChapter(title: "新第一章", text: "新正文一")]
+        )
+
+        let all = try await store.all()
+        XCTAssertEqual(all.count, 1)
+        XCTAssertEqual(all.first?.id, "book-1")
+        XCTAssertEqual(all.first?.title, "本地小说 修订版")
+        XCTAssertEqual(all.first?.chapters.map(\.title), ["新第一章"])
+        XCTAssertNil(all.first?.lastReadChapterIndex)
+        XCTAssertNil(all.first?.lastReadCharacterOffset)
+        XCTAssertNil(all.first?.lastReadAt)
+    }
+
+    func testReplaceContentForUnknownIdIsANoOp() async throws {
+        let store = LocalBookStore(fileURL: tempFileURL())
+        try await store.add(sampleBook())
+        try await store.replaceContent(id: "nope", title: "无关标题", chapters: [])
+        let all = try await store.all()
+        XCTAssertEqual(all.count, 1)
+        XCTAssertEqual(all.first?.title, "本地小说")
+    }
+
     func testDecodesOldFileMissingTheCharacterOffsetKey() async throws {
         let fileURL = tempFileURL()
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)

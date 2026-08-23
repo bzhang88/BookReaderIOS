@@ -74,6 +74,31 @@ final class CharsetDetectorTests: XCTestCase {
         XCTAssertEqual(CharsetDetector.decodeAutodetectingBytes(data), text)
     }
 
+    /// Real gap found comparing against Legado: a "Unicode" (UTF-16LE) save from Windows Notepad --
+    /// a real, common way local TXT novels get produced -- used to fail strict UTF-8 and fall
+    /// through to GB18030/lossy-UTF-8, producing garbage. Plain `Foundation` API, not gated behind
+    /// `canImport(CoreFoundation)` the way GB18030/Big5 are, so this is real cross-platform coverage.
+    func testAutodetectDecodesUTF16LittleEndianWithBOM() throws {
+        let text = "第一章 你好，世界"
+        let utf16Data = try XCTUnwrap(text.data(using: .utf16LittleEndian))
+        let bom = Data([0xFF, 0xFE])
+        XCTAssertEqual(CharsetDetector.decodeAutodetectingBytes(bom + utf16Data), text)
+    }
+
+    func testAutodetectDecodesUTF16BigEndianWithBOM() throws {
+        let text = "第一章 你好，世界"
+        let utf16Data = try XCTUnwrap(text.data(using: .utf16BigEndian))
+        let bom = Data([0xFE, 0xFF])
+        XCTAssertEqual(CharsetDetector.decodeAutodetectingBytes(bom + utf16Data), text)
+    }
+
+    func testAutodetectWithoutBOMIsNotMisreadAsUTF16() {
+        // No BOM present -- must fall through to the UTF-8 path rather than guessing UTF-16.
+        let text = "第一章 开始"
+        let data = Data(text.utf8)
+        XCTAssertEqual(CharsetDetector.decodeAutodetectingBytes(data), text)
+    }
+
     #if canImport(CoreFoundation)
     func testAutodetectDecodesGBKBytesOnApplePlatforms() {
         // GBK encoding of "中文": 0xD6D0 0xCEC4 -- not a valid UTF-8 byte sequence, so strict

@@ -44,6 +44,16 @@ public enum CharsetDetector {
     /// reliable signal the bytes really are UTF-8. Falls back to GB18030, then a lossy UTF-8
     /// decode as the last resort so this always returns something rather than throwing.
     public static func decodeAutodetectingBytes(_ data: Data) -> String {
+        // Real gap found comparing against Legado: `EncodingDetect.getEncode` (ICU4J-backed) also
+        // recognizes UTF-16 -- a common "Unicode"/"Unicode big endian" save from Windows Notepad --
+        // which this detector never tried. A real UTF-16 file always fails the strict-UTF-8 check
+        // below and used to fall through to GB18030/lossy-UTF-8, producing garbage. Checked first
+        // (before UTF-8), and only attempted when a real BOM is present -- a bare UTF-16 file with
+        // no BOM is rare/ambiguous enough that guessing wrong (misreading a real UTF-8/GBK file
+        // whose first two bytes unluckily match) is worse than not trying.
+        if let utf16 = decodeUTF16IfBOMPresent(data) {
+            return utf16
+        }
         if let strictUTF8 = String(data: data, encoding: .utf8) {
             return strictUTF8
         }
@@ -51,6 +61,19 @@ public enum CharsetDetector {
             return gb
         }
         return decodeUTF8Lossy(data)
+    }
+
+    private static func decodeUTF16IfBOMPresent(_ data: Data) -> String? {
+        guard data.count >= 2 else { return nil }
+        let bom = data.prefix(2)
+        let body = data.dropFirst(2)
+        if bom == Data([0xFF, 0xFE]) {
+            return String(data: body, encoding: .utf16LittleEndian)
+        }
+        if bom == Data([0xFE, 0xFF]) {
+            return String(data: body, encoding: .utf16BigEndian)
+        }
+        return nil
     }
 
     private static func decodeUTF8Lossy(_ data: Data) -> String {
