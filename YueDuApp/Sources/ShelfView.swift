@@ -52,14 +52,23 @@ struct ShelfView: View {
     @State private var isCheckingUpdates = false
     @State private var updateCheckSummary: String?
 
-    /// Sections books by `group` -- a mix of names assigned by the "自动分组" tag-rule sweep and
-    /// ones set manually via the row's "设置分组" menu; both write the same field (see `ShelfBook
-    /// .group`'s doc comment), so there's no separate "manual group" data model to keep in sync.
-    /// Un-grouped books land in a synthetic "未分组" section, sorted last.
+    /// Sections books by `groups` -- a mix of names assigned by the "自动分组" tag-rule sweep and
+    /// ones set manually via the row's "改分组" menu; both write the same field (see `ShelfBook
+    /// .groups`'s doc comment), so there's no separate "manual group" data model to keep in sync.
+    /// A book in more than one group appears once per section it belongs to (real multi-group
+    /// membership, not just a single-group tag) -- un-grouped books land in a synthetic "未分组"
+    /// section, sorted last.
     private var groupedSections: [(key: String, books: [ShelfBook])] {
-        let grouped = Dictionary(grouping: books) { book -> String in
-            let trimmed = book.group?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmed.isEmpty ? "未分组" : trimmed
+        var grouped: [String: [ShelfBook]] = [:]
+        for book in books {
+            let trimmedGroups = book.groups.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            if trimmedGroups.isEmpty {
+                grouped["未分组", default: []].append(book)
+            } else {
+                for group in trimmedGroups {
+                    grouped[group, default: []].append(book)
+                }
+            }
         }
         return grouped.sorted { lhs, rhs in
             if lhs.key == "未分组" { return false }
@@ -69,7 +78,7 @@ struct ShelfView: View {
     }
 
     private var hasAnyGroup: Bool {
-        books.contains { !($0.group?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
+        books.contains { !$0.groups.isEmpty }
     }
 
     /// Merges group names still in live use on the shelf with ones registered in `shelfGroupStore`
@@ -127,13 +136,13 @@ struct ShelfView: View {
                 }
             }
             .sheet(item: $groupPickerTarget) { book in
-                ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
-                    await setGroup(of: book, to: newGroup)
+                ShelfGroupPickerView(existingGroups: existingGroupNames, initialGroups: book.groups) { newGroups in
+                    await setGroups(of: book, to: newGroups)
                 }
             }
             .sheet(isPresented: $isShowingBatchGroupPicker) {
-                ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
-                    await batchSetGroup(to: newGroup)
+                ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroups in
+                    await batchSetGroups(to: newGroups)
                 }
             }
             .sheet(isPresented: $isShowingBatchSourcePicker) {
@@ -444,13 +453,17 @@ struct ShelfView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(book.name).font(.headline).lineLimit(1)
-                    if let group = book.group, !group.isEmpty {
-                        Text(group)
+                    if !book.groups.isEmpty {
+                        // Every group this book belongs to, not just whichever section it's
+                        // currently being rendered under -- a book filed under both "玄幻" and
+                        // "在读" shows both here regardless of which of those two sections drew it.
+                        Text(book.groups.joined(separator: "、"))
                             .font(.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.accentColor.opacity(0.15), in: Capsule())
                             .foregroundStyle(Color.accentColor)
+                            .lineLimit(1)
                     }
                 }
                 if let author = book.author, !author.isEmpty {
@@ -539,33 +552,35 @@ struct ShelfView: View {
         }
     }
 
-    /// Sets (or clears, when `newGroup` is nil) one book's group directly -- shares `setGroups`
-    /// with the batch auto-grouping sweep rather than a separate single-book store method, since
-    /// the underlying write is identical either way. Also registers the name in `shelfGroupStore`
-    /// (a no-op if already registered) so it stays pickable even if this book later leaves the group.
-    private func setGroup(of book: ShelfBook, to newGroup: String?) async {
-        try? await env.shelfStore.setGroups([book.bookUrl: newGroup])
-        if let newGroup {
-            try? await env.shelfGroupStore.add(newGroup)
+    /// Sets one book's complete group membership directly -- confirming the multi-select picker
+    /// applies its whole checked set at once, not one group at a time. Also registers every newly
+    /// picked name in `shelfGroupStore` (a no-op if already registered) so each stays pickable even
+    /// if this book later leaves that group.
+    private func setGroups(of book: ShelfBook, to newGroups: [String]) async {
+        try? await env.shelfStore.setGroups(bookUrl: book.bookUrl, to: newGroups)
+        for group in newGroups {
+            try? await env.shelfGroupStore.add(group)
         }
         await reload()
     }
 
     /// Matches every shelf book against the user's enabled tag-group rules and saves the results in
     /// one batch. Manual/on-demand rather than automatic-on-reload -- running regexes over every
-    /// shelf book on every launch would be wasted work for a shelf that rarely changes.
+    /// shelf book on every launch would be wasted work for a shelf that rarely changes. Adds the
+    /// matched group to each book's existing groups (a union, not a replace) -- a book manually
+    /// filed under "在读" keeps that after the sweep also matches it into "玄幻".
     private func autoGroup() async {
         isAutoGrouping = true
         defer { isAutoGrouping = false }
         let rules = (try? await env.tagGroupRuleStore.enabled()) ?? []
         guard !rules.isEmpty else { return }
-        var groups: [String: String?] = [:]
+        var additions: [String: String] = [:]
         for book in books {
-            groups[book.bookUrl] = TagGroupRuleApplier.matchGroup(
-                rules, name: book.name, author: book.author, intro: book.intro
-            )
+            if let matched = TagGroupRuleApplier.matchGroup(rules, name: book.name, author: book.author, intro: book.intro) {
+                additions[book.bookUrl] = matched
+            }
         }
-        try? await env.shelfStore.setGroups(groups)
+        try? await env.shelfStore.addGroupToBooks(additions)
         await reload()
     }
 
@@ -630,17 +645,17 @@ struct ShelfView: View {
         }
     }
 
-    /// Applies one group to every selected book in a single batch write -- shares `setGroups` with
-    /// both the auto-grouping sweep and the single-row picker, since all three are just "write this
-    /// group value for these book URLs" with a different source for which URLs to write.
-    private func batchSetGroup(to newGroup: String?) async {
-        var updates: [String: String?] = [:]
+    /// Applies the same group set to every selected book in a single batch write -- replaces each
+    /// selected book's whole `groups`, matching the multi-select picker's "confirmed selection is
+    /// the new complete membership" semantics used by the single-row picker too.
+    private func batchSetGroups(to newGroups: [String]) async {
+        var updates: [String: [String]] = [:]
         for bookUrl in selectedBookUrls {
-            updates[bookUrl] = newGroup
+            updates[bookUrl] = newGroups
         }
         try? await env.shelfStore.setGroups(updates)
-        if let newGroup {
-            try? await env.shelfGroupStore.add(newGroup)
+        for group in newGroups {
+            try? await env.shelfGroupStore.add(group)
         }
         exitSelection()
         await reload()

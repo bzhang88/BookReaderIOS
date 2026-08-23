@@ -35,14 +35,64 @@ public actor ShelfStore {
         return books
     }
 
-    /// Applies a batch of tag-group matches (bookUrl -> group name) in one save rather than one
-    /// `addOrUpdate` round-trip per book -- matters once a shelf has dozens of books.
-    public func setGroups(_ groups: [String: String?]) async throws {
+    /// Full replacement of one book's group membership -- used by the manual multi-select group
+    /// picker (`ShelfGroupPickerView`), where the confirmed selection *is* the book's new complete
+    /// set of groups, not an addition to whatever it already had.
+    public func setGroups(bookUrl: String, to groups: [String]) async throws {
+        var books = try await all()
+        guard let idx = books.firstIndex(where: { $0.bookUrl == bookUrl }) else { return }
+        books[idx].groups = groups
+        try await store.save(books)
+    }
+
+    /// Batch version of `setGroups(bookUrl:to:)` -- one save instead of one `addOrUpdate` round-trip
+    /// per book, matters once a shelf has dozens of books. Used by `ShelfView`'s batch "移动分组"
+    /// action: every selected book's groups are replaced with the same chosen set in one write.
+    public func setGroups(_ groups: [String: [String]]) async throws {
         var books = try await all()
         for idx in books.indices {
-            if let newGroup = groups[books[idx].bookUrl] {
-                books[idx].group = newGroup
+            if let newGroups = groups[books[idx].bookUrl] {
+                books[idx].groups = newGroups
             }
+        }
+        try await store.save(books)
+    }
+
+    /// Adds one group to each listed book's *existing* groups (a union, not a replace) -- used by
+    /// the "自动分组" tag-rule sweep, which computes one matched group per book but shouldn't wipe
+    /// out groups the user assigned manually; a book the sweep matches into "玄幻" while it's also
+    /// manually filed under "在读" keeps both after the sweep runs.
+    public func addGroupToBooks(_ additions: [String: String]) async throws {
+        var books = try await all()
+        for idx in books.indices {
+            guard let group = additions[books[idx].bookUrl], !books[idx].groups.contains(group) else { continue }
+            books[idx].groups.append(group)
+        }
+        try await store.save(books)
+    }
+
+    /// Renames a group across every book that currently has it, preserving each book's other group
+    /// memberships -- a book filed under both `oldName` and some unrelated group keeps that other
+    /// group after the rename, unlike a naive "replace the whole array with just the new name."
+    /// De-dupes afterward in case a book already happened to be in both `oldName` and `newName`.
+    public func renameGroupEverywhere(_ oldName: String, to newName: String) async throws {
+        var books = try await all()
+        for idx in books.indices {
+            guard let position = books[idx].groups.firstIndex(of: oldName) else { continue }
+            books[idx].groups[position] = newName
+            var seen = Set<String>()
+            books[idx].groups = books[idx].groups.filter { seen.insert($0).inserted }
+        }
+        try await store.save(books)
+    }
+
+    /// Removes one group from every book that has it, preserving each book's other group
+    /// memberships -- matches Legado's own behavior (a group is just a label, not a container the
+    /// books live inside, so deleting it ungroups rather than removing the books).
+    public func removeGroupEverywhere(_ name: String) async throws {
+        var books = try await all()
+        for idx in books.indices {
+            books[idx].groups.removeAll { $0 == name }
         }
         try await store.save(books)
     }

@@ -49,28 +49,134 @@ final class ShelfStoreTests: XCTestCase {
         XCTAssertTrue(all.isEmpty)
     }
 
-    func testSetGroupsAppliesBatchAndSkipsBooksNotInTheMap() async throws {
+    func testSetGroupsForOneBookReplacesItsWholeGroupSet() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.groups = ["旧分组"]
+        try await store.addOrUpdate(book)
+
+        try await store.setGroups(bookUrl: "https://example.com/book/1", to: ["玄幻", "在读"])
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.groups, ["玄幻", "在读"])
+    }
+
+    func testSetGroupsForOneBookCanClearToEmpty() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.groups = ["玄幻"]
+        try await store.addOrUpdate(book)
+
+        try await store.setGroups(bookUrl: "https://example.com/book/1", to: [])
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.groups, [])
+    }
+
+    func testBatchSetGroupsAppliesToListedBooksAndSkipsOthers() async throws {
         let store = ShelfStore(fileURL: tempFileURL())
         try await store.addOrUpdate(sampleBook(url: "https://example.com/book/1"))
         try await store.addOrUpdate(sampleBook(url: "https://example.com/book/2"))
 
-        try await store.setGroups(["https://example.com/book/1": "玄幻"])
+        try await store.setGroups(["https://example.com/book/1": ["玄幻"]])
 
         let all = try await store.all()
-        XCTAssertEqual(all.first { $0.bookUrl == "https://example.com/book/1" }?.group, "玄幻")
-        XCTAssertNil(all.first { $0.bookUrl == "https://example.com/book/2" }?.group)
+        XCTAssertEqual(all.first { $0.bookUrl == "https://example.com/book/1" }?.groups, ["玄幻"])
+        XCTAssertEqual(all.first { $0.bookUrl == "https://example.com/book/2" }?.groups, [])
     }
 
-    func testSetGroupsCanClearAGroupWithExplicitNil() async throws {
+    func testAddGroupToBooksUnionsRatherThanReplaces() async throws {
         let store = ShelfStore(fileURL: tempFileURL())
         var book = sampleBook()
-        book.group = "玄幻"
+        book.groups = ["在读"]
         try await store.addOrUpdate(book)
 
-        try await store.setGroups(["https://example.com/book/1": nil])
+        try await store.addGroupToBooks(["https://example.com/book/1": "玄幻"])
 
         let all = try await store.all()
-        XCTAssertNil(all.first?.group)
+        XCTAssertEqual(all.first?.groups, ["在读", "玄幻"])
+    }
+
+    func testAddGroupToBooksIsANoOpWhenAlreadyPresent() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.groups = ["玄幻"]
+        try await store.addOrUpdate(book)
+
+        try await store.addGroupToBooks(["https://example.com/book/1": "玄幻"])
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.groups, ["玄幻"])
+    }
+
+    func testRenameGroupEverywherePreservesOtherMemberships() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book1 = sampleBook(url: "https://example.com/book/1")
+        book1.groups = ["旧名", "在读"]
+        var book2 = sampleBook(url: "https://example.com/book/2")
+        book2.groups = ["其他分组"]
+        try await store.addOrUpdate(book1)
+        try await store.addOrUpdate(book2)
+
+        try await store.renameGroupEverywhere("旧名", to: "新名")
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first { $0.bookUrl == "https://example.com/book/1" }?.groups, ["新名", "在读"])
+        XCTAssertEqual(all.first { $0.bookUrl == "https://example.com/book/2" }?.groups, ["其他分组"])
+    }
+
+    func testRenameGroupEverywhereDedupesIfBookAlreadyHasBothNames() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.groups = ["旧名", "新名"]
+        try await store.addOrUpdate(book)
+
+        try await store.renameGroupEverywhere("旧名", to: "新名")
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.groups, ["新名"])
+    }
+
+    func testRemoveGroupEverywherePreservesOtherMemberships() async throws {
+        let store = ShelfStore(fileURL: tempFileURL())
+        var book = sampleBook()
+        book.groups = ["玄幻", "在读"]
+        try await store.addOrUpdate(book)
+
+        try await store.removeGroupEverywhere("玄幻")
+
+        let all = try await store.all()
+        XCTAssertEqual(all.first?.groups, ["在读"])
+    }
+
+    /// Real migration-safety case: `shelf.json` written before multi-group support has a single
+    /// `String` under the `"group"` key, not a `[String]` -- must transparently upgrade to a
+    /// one-element array rather than throwing (which `JSONFileStore.load()`'s `try decoder.decode()`
+    /// would turn into a silently-empty shelf for every `try?`-wrapped caller).
+    func testDecodesPreExistingShelfJSONWithSingleStringGroup() throws {
+        let json = """
+        [{
+            "bookSourceUrl": "https://example.com", "bookUrl": "https://example.com/book/1",
+            "name": "My Novel", "tocUrl": "https://example.com/book/1/toc",
+            "addedAt": "2023-11-14T22:13:20Z", "lastReadCharacterOffset": 0, "group": "玄幻"
+        }]
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let books = try decoder.decode([ShelfBook].self, from: Data(json.utf8))
+        XCTAssertEqual(books.first?.groups, ["玄幻"])
+    }
+
+    func testGroupsRoundTripsThroughEncodeDecode() throws {
+        var book = sampleBook()
+        book.groups = ["玄幻", "在读"]
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(book)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ShelfBook.self, from: data)
+        XCTAssertEqual(decoded.groups, ["玄幻", "在读"])
     }
 
     func testUpdateTotalChapterCountPersists() async throws {
@@ -188,5 +294,6 @@ final class ShelfStoreTests: XCTestCase {
         let books = try decoder.decode([ShelfBook].self, from: Data(json.utf8))
         XCTAssertEqual(books.count, 1)
         XCTAssertNil(books.first?.canUpdate)
+        XCTAssertEqual(books.first?.groups, [], "group key entirely absent should decode as no groups, not throw")
     }
 }

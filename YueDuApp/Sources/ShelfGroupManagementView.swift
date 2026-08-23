@@ -75,9 +75,11 @@ struct ShelfGroupManagementView: View {
         var counts: [String: Int] = [:]
         for name in registered { counts[name] = 0 }
         for book in books {
-            let trimmed = book.group?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !trimmed.isEmpty else { continue }
-            counts[trimmed, default: 0] += 1
+            for group in book.groups {
+                let trimmed = group.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                counts[trimmed, default: 0] += 1
+            }
         }
         groupCounts = counts
             .map { (name: $0.key, count: $0.value) }
@@ -94,39 +96,23 @@ struct ShelfGroupManagementView: View {
 
     /// Renames the registry entry and every book currently filed under the old name in one batch --
     /// leaving books behind with a group name that no longer appears anywhere would strand them in
-    /// an orphaned, invisible group.
+    /// an orphaned, invisible group. `renameGroupEverywhere` replaces just this one name within each
+    /// book's `groups`, preserving any other groups that same book also belongs to.
     private func rename(_ oldName: String, to newName: String) async {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != oldName else { return }
         try? await env.shelfGroupStore.rename(oldName, to: trimmed)
-        let books = (try? await env.shelfStore.all()) ?? []
-        let updates = books.filter { $0.group == oldName }.reduce(into: [String: String?]()) { result, book in
-            result[book.bookUrl] = trimmed
-        }
-        if !updates.isEmpty {
-            try? await env.shelfStore.setGroups(updates)
-        }
+        try? await env.shelfStore.renameGroupEverywhere(oldName, to: trimmed)
         await reload()
     }
 
     /// Deleting a group ungroups its books rather than removing them -- matches Legado's own
     /// behavior (a group is just a label, not a container the books live inside).
-    ///
-    /// The cleared value is built as a typed `String?` variable rather than assigning a bare `nil`
-    /// literal to the `[String: String?]` dictionary subscript -- the two behave differently
-    /// (literal `nil` removes the key outright rather than inserting a present-but-nil entry), a
-    /// distinction this project already hit once before in `TagGroupRuleApplier`'s batch write and
-    /// confirmed by test; this reuses that same proven-safe shape instead of re-risking the literal.
+    /// `removeGroupEverywhere` removes just this one name from each book's `groups`, preserving any
+    /// other groups that same book also belongs to.
     private func deleteGroup(_ name: String) async {
         try? await env.shelfGroupStore.remove(name)
-        let books = (try? await env.shelfStore.all()) ?? []
-        let clearedGroup: String? = nil
-        let updates = books.filter { $0.group == name }.reduce(into: [String: String?]()) { result, book in
-            result[book.bookUrl] = clearedGroup
-        }
-        if !updates.isEmpty {
-            try? await env.shelfStore.setGroups(updates)
-        }
+        try? await env.shelfStore.removeGroupEverywhere(name)
         await reload()
     }
 }

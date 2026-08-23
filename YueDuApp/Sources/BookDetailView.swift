@@ -31,7 +31,7 @@ struct BookDetailView: View {
     @State private var errorMessage: String?
     @State private var isInShelf = false
     @State private var shelfCoverUrl: String?
-    @State private var shelfGroup: String?
+    @State private var shelfGroups: [String] = []
     @State private var existingGroupNames: [String] = []
     @State private var isShowingCoverPicker = false
     @State private var isShowingChangeSource = false
@@ -151,8 +151,8 @@ struct BookDetailView: View {
             }
         }
         .sheet(isPresented: $isShowingGroupPicker) {
-            ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
-                await setGroup(newGroup)
+            ShelfGroupPickerView(existingGroups: existingGroupNames, initialGroups: shelfGroups) { newGroups in
+                await setGroups(newGroups)
             }
         }
         .sheet(isPresented: $isShowingExportSheet) {
@@ -311,7 +311,7 @@ struct BookDetailView: View {
                         infoRow(icon: "textformat.123", text: "字数: \(wordCount)")
                     }
                     if isInShelf {
-                        infoRow(icon: "folder", text: "分组: \(shelfGroup?.isEmpty == false ? shelfGroup! : "未分组")") {
+                        infoRow(icon: "folder", text: "分组: \(shelfGroups.isEmpty ? "未分组" : shelfGroups.joined(separator: "、"))") {
                             Button("改分组") { isShowingGroupPicker = true }
                                 .buttonStyle(.pillAction)
                         }
@@ -479,12 +479,11 @@ struct BookDetailView: View {
             let existingShelfBook = allShelfBooks.first { $0.bookUrl == bookUrl }
             isInShelf = existingShelfBook != nil
             shelfCoverUrl = existingShelfBook?.coverUrl
-            shelfGroup = existingShelfBook?.group
+            shelfGroups = existingShelfBook?.groups ?? []
             shelfLastReadTitle = existingShelfBook?.lastReadChapterTitle
             shelfLastReadChapterIndex = existingShelfBook?.lastReadChapterIndex
-            existingGroupNames = Array(Set(allShelfBooks.compactMap {
-                let trimmed = $0.group?.trimmingCharacters(in: .whitespacesAndNewlines)
-                return (trimmed?.isEmpty ?? true) ? nil : trimmed
+            existingGroupNames = Array(Set(allShelfBooks.flatMap {
+                $0.groups.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             })).sorted()
             previewChapters = (try? await TocService.fetchChapterList(
                 source: source, tocURL: info.tocUrl, httpClient: env.httpClient
@@ -593,9 +592,12 @@ struct BookDetailView: View {
         shelfCoverUrl = newCoverUrl
     }
 
-    private func setGroup(_ newGroup: String?) async {
-        try? await env.shelfStore.setGroups([bookUrl: newGroup])
-        shelfGroup = newGroup
+    private func setGroups(_ newGroups: [String]) async {
+        try? await env.shelfStore.setGroups(bookUrl: bookUrl, to: newGroups)
+        for group in newGroups {
+            try? await env.shelfGroupStore.add(group)
+        }
+        shelfGroups = newGroups
     }
 
     /// Toggles shelf membership both ways -- Legado's own detail page button is a real toggle
@@ -654,7 +656,7 @@ struct BookDetailView: View {
                 tocUrl: newInfo.tocUrl,
                 lastChapterTitle: newInfo.lastChapter ?? match.lastChapter,
                 addedAt: existing.addedAt,
-                group: existing.group,
+                groups: existing.groups,
                 lastReadChapterIndex: nil,
                 lastReadChapterTitle: nil,
                 lastReadCharacterOffset: 0,
@@ -664,7 +666,7 @@ struct BookDetailView: View {
             try? await env.shelfStore.remove(bookUrl: oldBookUrl)
             try? await env.shelfStore.addOrUpdate(updated)
             shelfCoverUrl = updated.coverUrl
-            shelfGroup = updated.group
+            shelfGroups = updated.groups
             shelfLastReadTitle = nil
             shelfLastReadChapterIndex = nil
         }

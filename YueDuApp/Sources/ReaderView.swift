@@ -1486,7 +1486,7 @@ struct ReaderView: View {
                 tocUrl: tocUrl,
                 lastChapterTitle: bookInfo?.lastChapter ?? match.lastChapter,
                 addedAt: existing.addedAt,
-                group: existing.group,
+                groups: existing.groups,
                 lastReadChapterIndex: newIndex,
                 lastReadChapterTitle: newChapters[newIndex].title,
                 lastReadCharacterOffset: 0,

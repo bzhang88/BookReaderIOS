@@ -44,7 +44,7 @@
 - [x] 批量启用/禁用自动更新
 - [x] 全选/反选（选择模式下）
 - [x] 批量清除已选书籍的缓存
-- [ ] 多分组归属（目前一本书只能属于一个分组）—— `ShelfBook.swift:18`, `ShelfStore.swift:40-48`
+- [x] 多分组归属（之前一本书只能属于一个分组）—— `ShelfBook.swift`（`groups: [String]`，自定义 Codable 兼容旧的单字符串 `group` 字段）、`ShelfStore.swift`（新增 `setGroups(bookUrl:to:)`/批量版/`addGroupToBooks`/`renameGroupEverywhere`/`removeGroupEverywhere`）、`ShelfGroupPickerView.swift`（改成多选勾选框）、`ShelfView.swift`/`BookDetailView.swift`/`ShelfGroupManagementView.swift` 全部改为多分组语义
 - [ ] 书架显示设置（分组筛选标签页等）
 - [ ] 检查更新时逐本显示进度指示
 - [ ] 通过粘贴网址直接添加书籍

@@ -12,10 +12,15 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
     public var tocUrl: String
     public var lastChapterTitle: String?
     public var addedAt: Date
-    /// Display group assigned by a `TagGroupRule` match (or manually, in a future increment) --
-    /// optional and defaulted so it decodes fine from shelf.json files saved before this field
-    /// existed.
-    public var group: String?
+    /// Display groups this book belongs to -- real gap found comparing against Legado: its own
+    /// `Book.group` is a bitmask (`Long`) so a book can carry several groups' bits at once, while
+    /// this field used to be a single optional `String`, so a book could only ever be filed into one
+    /// group. Kept as a plain `[String]` of names (not a numeric bitmask) to match this app's own
+    /// established string-name convention (`ShelfGroupStore` already only knows names, no numeric
+    /// IDs) rather than inventing a bit-allocation scheme just to mirror Legado's storage detail.
+    /// The custom `Codable` below decodes the old single-string `group` JSON shape transparently
+    /// into a one-element array, so `shelf.json` written before this change keeps working.
+    public var groups: [String]
 
     /// Exact resume position: which chapter, and a character offset within that chapter's
     /// extracted text — coarser than a scroll-position (which needs the actual rendered layout,
@@ -50,7 +55,7 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
     public init(
         bookSourceUrl: String, bookUrl: String, name: String, author: String? = nil,
         coverUrl: String? = nil, intro: String? = nil, tocUrl: String, lastChapterTitle: String? = nil,
-        addedAt: Date = Date(), group: String? = nil, lastReadChapterIndex: Int? = nil,
+        addedAt: Date = Date(), groups: [String] = [], lastReadChapterIndex: Int? = nil,
         lastReadChapterTitle: String? = nil, lastReadCharacterOffset: Int = 0, lastReadAt: Date? = nil,
         totalChapterCount: Int? = nil, canUpdate: Bool? = nil
     ) {
@@ -63,12 +68,71 @@ public struct ShelfBook: Codable, Equatable, Identifiable, Sendable {
         self.tocUrl = tocUrl
         self.lastChapterTitle = lastChapterTitle
         self.addedAt = addedAt
-        self.group = group
+        self.groups = groups
         self.lastReadChapterIndex = lastReadChapterIndex
         self.lastReadChapterTitle = lastReadChapterTitle
         self.lastReadCharacterOffset = lastReadCharacterOffset
         self.lastReadAt = lastReadAt
         self.totalChapterCount = totalChapterCount
         self.canUpdate = canUpdate
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case bookSourceUrl, bookUrl, name, author, coverUrl, intro, tocUrl, lastChapterTitle, addedAt
+        // Still the on-disk key name "group" (singular) -- only the Swift-side type/shape changed,
+        // not the JSON key, so a re-saved file doesn't leave a stale duplicate key behind.
+        case groups = "group"
+        case lastReadChapterIndex, lastReadChapterTitle, lastReadCharacterOffset, lastReadAt
+        case totalChapterCount, canUpdate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bookSourceUrl = try container.decode(String.self, forKey: .bookSourceUrl)
+        bookUrl = try container.decode(String.self, forKey: .bookUrl)
+        name = try container.decode(String.self, forKey: .name)
+        author = try container.decodeIfPresent(String.self, forKey: .author)
+        coverUrl = try container.decodeIfPresent(String.self, forKey: .coverUrl)
+        intro = try container.decodeIfPresent(String.self, forKey: .intro)
+        tocUrl = try container.decode(String.self, forKey: .tocUrl)
+        lastChapterTitle = try container.decodeIfPresent(String.self, forKey: .lastChapterTitle)
+        addedAt = try container.decode(Date.self, forKey: .addedAt)
+        // A pre-existing file's "group" key is a single `String` (or absent/null); a file saved by
+        // this version is a `[String]`. Try the new shape first, and only fall back to the old one
+        // if that fails -- a plain `decodeIfPresent` would throw (not return nil) on a type mismatch,
+        // which is exactly what happens when reading an old file's single-string value.
+        if let multi = try? container.decode([String].self, forKey: .groups) {
+            groups = multi
+        } else if let single = try container.decodeIfPresent(String.self, forKey: .groups), !single.isEmpty {
+            groups = [single]
+        } else {
+            groups = []
+        }
+        lastReadChapterIndex = try container.decodeIfPresent(Int.self, forKey: .lastReadChapterIndex)
+        lastReadChapterTitle = try container.decodeIfPresent(String.self, forKey: .lastReadChapterTitle)
+        lastReadCharacterOffset = try container.decode(Int.self, forKey: .lastReadCharacterOffset)
+        lastReadAt = try container.decodeIfPresent(Date.self, forKey: .lastReadAt)
+        totalChapterCount = try container.decodeIfPresent(Int.self, forKey: .totalChapterCount)
+        canUpdate = try container.decodeIfPresent(Bool.self, forKey: .canUpdate)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(bookSourceUrl, forKey: .bookSourceUrl)
+        try container.encode(bookUrl, forKey: .bookUrl)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(author, forKey: .author)
+        try container.encodeIfPresent(coverUrl, forKey: .coverUrl)
+        try container.encodeIfPresent(intro, forKey: .intro)
+        try container.encode(tocUrl, forKey: .tocUrl)
+        try container.encodeIfPresent(lastChapterTitle, forKey: .lastChapterTitle)
+        try container.encode(addedAt, forKey: .addedAt)
+        try container.encode(groups, forKey: .groups)
+        try container.encodeIfPresent(lastReadChapterIndex, forKey: .lastReadChapterIndex)
+        try container.encodeIfPresent(lastReadChapterTitle, forKey: .lastReadChapterTitle)
+        try container.encode(lastReadCharacterOffset, forKey: .lastReadCharacterOffset)
+        try container.encodeIfPresent(lastReadAt, forKey: .lastReadAt)
+        try container.encodeIfPresent(totalChapterCount, forKey: .totalChapterCount)
+        try container.encodeIfPresent(canUpdate, forKey: .canUpdate)
     }
 }
