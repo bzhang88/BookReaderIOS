@@ -40,6 +40,13 @@ struct ShelfView: View {
     @State private var batchExportItems: [Any] = []
     @State private var isBatchExporting = false
     @State private var isBatchChangingSource = false
+    // Real bug found comparing against Legado: batch 换源 used to search *every* enabled source
+    // independently for each selected book and take whichever matched first -- two books in one
+    // batch could legitimately land on two different new sources. Legado's own batch change-source
+    // always has the user pick exactly one target source up front, then migrates every selected book
+    // onto that same source. `batchSourcePickerOptions` is populated right before showing the sheet.
+    @State private var isShowingBatchSourcePicker = false
+    @State private var batchSourcePickerOptions: [BookSource] = []
     @State private var batchChangeSourceSummary: String?
     @State private var registeredGroupNames: [String] = []
     @State private var isCheckingUpdates = false
@@ -127,6 +134,30 @@ struct ShelfView: View {
             .sheet(isPresented: $isShowingBatchGroupPicker) {
                 ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
                     await batchSetGroup(to: newGroup)
+                }
+            }
+            .sheet(isPresented: $isShowingBatchSourcePicker) {
+                NavigationStack {
+                    List(batchSourcePickerOptions, id: \.bookSourceUrl) { candidate in
+                        Button {
+                            isShowingBatchSourcePicker = false
+                            Task { await batchChangeSource(to: candidate) }
+                        } label: {
+                            Text(candidate.bookSourceName)
+                        }
+                    }
+                    .overlay {
+                        if batchSourcePickerOptions.isEmpty {
+                            ContentUnavailableView("没有可用的书源", systemImage: "tray")
+                        }
+                    }
+                    .navigationTitle("选择目标书源")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("取消") { isShowingBatchSourcePicker = false }
+                        }
+                    }
                 }
             }
             .sheet(isPresented: $isShowingBatchExportSheet) {
@@ -258,7 +289,7 @@ struct ShelfView: View {
             if isBatchChangingSource {
                 ProgressView()
             } else {
-                Button("换源") { batchChangeSource() }
+                Button("换源") { Task { await presentBatchSourcePicker() } }
                     .disabled(selectedBookUrls.isEmpty)
             }
             Spacer()
@@ -632,49 +663,53 @@ struct ShelfView: View {
         await reload()
     }
 
+    /// Loads the enabled-source list for the target picker and shows it -- the user picks exactly
+    /// one source, matching Legado's real batch change-source flow (see `batchChangeSource(to:)`'s
+    /// doc comment for why this replaced the old "search everything, take whatever matches" behavior).
+    private func presentBatchSourcePicker() async {
+        batchSourcePickerOptions = (try? await env.bookSourceStore.enabled()) ?? []
+        isShowingBatchSourcePicker = true
+    }
+
     /// Batch 换源 -- the per-row/swipe 换源 already existed, but selecting multiple books had no
-    /// equivalent, even though 移动分组/导出/删除 all did. Unlike the single-book flow (which opens
-    /// `ChangeSourceView` and lets the user pick among candidates), there's no per-book UI here to
-    /// resolve ambiguity across N books at once, so this only acts on an unambiguous exact name+author
-    /// match on a *different* source and leaves anything less certain alone -- the user can still fix
+    /// equivalent, even though 移动分组/导出/删除 all did.
+    ///
+    /// Real bug found comparing against Legado: this used to search *every* enabled source
+    /// independently per book and take whichever matched first, so two books in one batch could
+    /// legitimately land on two different new sources. Legado's own batch change-source has the user
+    /// pick exactly one target source up front (`presentBatchSourcePicker`), then migrates every
+    /// selected book onto that same source -- mirrored here. Still only acts on an unambiguous exact
+    /// name+author match on `target` and leaves anything less certain alone; the user can still fix
     /// those one at a time afterward.
-    private func batchChangeSource() {
+    private func batchChangeSource(to target: BookSource) async {
         let targets = books.filter { selectedBookUrls.contains($0.bookUrl) }
         guard !targets.isEmpty else { return }
         isBatchChangingSource = true
-        Task {
-            let sources = (try? await env.bookSourceStore.enabled()) ?? []
-            var succeeded = 0
-            var failed = 0
-            for book in targets {
-                if let (newSource, match) = await findExactMatchSource(for: book, in: sources) {
-                    await switchSource(of: book, to: newSource, match: match)
-                    succeeded += 1
-                } else {
-                    failed += 1
-                }
+        var succeeded = 0
+        var failed = 0
+        for book in targets {
+            if let match = await findExactMatchResult(for: book, on: target) {
+                await switchSource(of: book, to: target, match: match)
+                succeeded += 1
+            } else {
+                failed += 1
             }
-            isBatchChangingSource = false
-            isSelecting = false
-            selectedBookUrls.removeAll()
-            batchChangeSourceSummary = failed == 0
-                ? "已为 \(succeeded) 本书换源"
-                : "已为 \(succeeded) 本书换源，\(failed) 本没有找到精确匹配的源（可以在书架里单本手动换源）"
         }
+        isBatchChangingSource = false
+        isSelecting = false
+        selectedBookUrls.removeAll()
+        batchChangeSourceSummary = failed == 0
+            ? "已为 \(succeeded) 本书换源到「\(target.bookSourceName)」"
+            : "已为 \(succeeded) 本书换源到「\(target.bookSourceName)」，\(failed) 本在这个源里没有找到精确匹配（可以在书架里单本手动换源）"
     }
 
-    private func findExactMatchSource(for book: ShelfBook, in sources: [BookSource]) async -> (BookSource, SearchResult)? {
-        guard !sources.isEmpty else { return nil }
-        let stream = MultiSourceSearchService.search(sources: sources, keyword: book.name, httpClient: env.httpClient)
+    private func findExactMatchResult(for book: ShelfBook, on target: BookSource) async -> SearchResult? {
+        let stream = MultiSourceSearchService.search(sources: [target], keyword: book.name, httpClient: env.httpClient)
         var allResults: [SearchResult] = []
         for await outcome in stream {
             allResults.append(contentsOf: outcome.results)
         }
-        guard let match = allResults.first(where: {
-            $0.name == book.name && $0.author == book.author && $0.bookSourceUrl != book.bookSourceUrl
-        }) else { return nil }
-        guard let source = sources.first(where: { $0.bookSourceUrl == match.bookSourceUrl }) else { return nil }
-        return (source, match)
+        return allResults.first { $0.name == book.name && $0.author == book.author }
     }
 }
 
@@ -698,7 +733,7 @@ struct ShelfBookResumeView: View {
             if let source, !chapters.isEmpty {
                 BookOpenerView(
                     source: source, bookUrl: book.bookUrl, tocUrl: book.tocUrl, chapters: chapters,
-                    currentIndex: resumeIndex, bookTitle: book.name,
+                    currentIndex: resumeIndex, bookTitle: book.name, bookAuthor: book.author,
                     resumeCharacterOffset: book.lastReadChapterIndex == resumeIndex ? book.lastReadCharacterOffset : 0
                 )
             } else if let errorMessage {

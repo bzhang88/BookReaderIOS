@@ -278,7 +278,7 @@ struct BookDetailView: View {
                             NavigationLink {
                                 TocView(
                                     source: source, tocURL: bookInfo?.tocUrl ?? "", bookUrl: bookUrl, bookTitle: name,
-                                    currentChapterIndex: shelfLastReadChapterIndex
+                                    bookAuthor: author, currentChapterIndex: shelfLastReadChapterIndex
                                 )
                             } label: {
                                 Text("查看")
@@ -375,7 +375,8 @@ struct BookDetailView: View {
                     // auto-navigate at all -- "阅读" should always actually start reading).
                     TocView(
                         source: source, tocURL: bookInfo.tocUrl, bookUrl: bookUrl, bookTitle: name,
-                        resumeChapterIndex: shelfLastReadChapterIndex ?? 0, currentChapterIndex: shelfLastReadChapterIndex
+                        bookAuthor: author, resumeChapterIndex: shelfLastReadChapterIndex ?? 0,
+                        currentChapterIndex: shelfLastReadChapterIndex
                     )
                 } label: {
                     Text("阅读").frame(maxWidth: .infinity)

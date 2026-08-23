@@ -33,6 +33,11 @@ struct ReaderView: View {
     @State private var tocUrl: String
     @State private var chapters: [BookChapter]
     @State private var bookTitle: String
+    // Real bug found comparing against Legado: this reader never tracked the book's author at all,
+    // so both its own 换源/章节换源 sheets hardcoded `bookAuthor: nil` into `ChangeSourceView` --
+    // weakening its same-book filter to name-only matching only for these two in-reader entry
+    // points (BookDetailView/ShelfView's own change-source flows already passed a real author).
+    @State private var bookAuthor: String?
     @State private var currentIndex: Int
 
     @EnvironmentObject private var env: AppEnvironment
@@ -257,13 +262,14 @@ struct ReaderView: View {
     /// site knows the book's saved position (see `BookOpenerView`).
     init(
         source: BookSource, bookUrl: String, tocUrl: String, chapters: [BookChapter], currentIndex: Int,
-        bookTitle: String, resumeCharacterOffset: Int = 0
+        bookTitle: String, bookAuthor: String? = nil, resumeCharacterOffset: Int = 0
     ) {
         self._source = State(initialValue: source)
         self._bookUrl = State(initialValue: bookUrl)
         self._tocUrl = State(initialValue: tocUrl)
         self._chapters = State(initialValue: chapters)
         self._bookTitle = State(initialValue: bookTitle)
+        self._bookAuthor = State(initialValue: bookAuthor)
         self._currentIndex = State(initialValue: currentIndex)
         self._pendingResumeCharacterOffset = State(initialValue: resumeCharacterOffset > 0 ? resumeCharacterOffset : nil)
     }
@@ -788,7 +794,7 @@ struct ReaderView: View {
         .sheet(isPresented: $isShowingChangeSource) {
             NavigationStack {
                 ChangeSourceView(
-                    currentBookSourceUrl: source.bookSourceUrl, bookName: bookTitle, bookAuthor: nil
+                    currentBookSourceUrl: source.bookSourceUrl, bookName: bookTitle, bookAuthor: bookAuthor
                 ) { newSource, match in
                     await switchSource(to: newSource, match: match)
                 }
@@ -797,7 +803,7 @@ struct ReaderView: View {
         .sheet(isPresented: $isShowingChapterSourceSwitch) {
             NavigationStack {
                 ChangeSourceView(
-                    currentBookSourceUrl: source.bookSourceUrl, bookName: bookTitle, bookAuthor: nil
+                    currentBookSourceUrl: source.bookSourceUrl, bookName: bookTitle, bookAuthor: bookAuthor
                 ) { newSource, match in
                     await switchChapterSource(to: newSource, match: match)
                 }
@@ -806,7 +812,7 @@ struct ReaderView: View {
         .overlay {
             ReaderTocDrawerView(
                 isPresented: $isShowingToc,
-                chapters: chapters.map { ReaderTocDrawerView.ChapterItem(id: $0.index, title: $0.title) },
+                chapters: chapters.map { ReaderTocDrawerView.ChapterItem(id: $0.index, title: $0.title, isVolume: $0.isVolume) },
                 currentIndex: currentIndex,
                 bookIdentifier: bookUrl,
                 bookmarkStore: env.bookmarkStore,

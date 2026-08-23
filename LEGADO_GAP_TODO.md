@@ -17,15 +17,15 @@
 
 ## P1 · 明确的逻辑 / 交互 Bug（18 项，纯 Swift，Windows 可修可测）
 
-- [ ] **[全局搜索] 取消的搜索任务仍会把"搜索中"状态设为 false** —— `GlobalSearchView.swift:314-330`
-- [ ] **[全局搜索] 默认排序按来源数量而非相关度** —— 不符合 Legado 真实排序语义。`GlobalSearchView.swift:30`, `GroupedSearchResult.swift:46-48`
-- [ ] **[全局搜索] "书架同名书籍"提示只在首次搜索前出现，之后永久消失** —— `GlobalSearchView.swift:47-49,307`
-- [ ] **[目录 TOC] 缓存图标逻辑和阅读器内目录抽屉相反，自相矛盾** —— `TocView.swift:84-88`, `ReaderTocDrawer.swift:160-164`
-- [ ] **[目录 TOC] "倒序"只是界面显示，不持久化** —— `TocView.swift:44,62,110-113`
-- [ ] **[目录 TOC] 点击"卷"标题会被当成章节直接打开阅读器** —— 真实行为 bug。`TocView.swift`, `ReaderTocDrawer.swift`, `ContentService.swift:34-36`
-- [ ] **[换源] "完全匹配"用严格字符串相等，会漏掉真正同一本书的源** —— `ChangeSourceView.swift:208-213`
-- [ ] **[换源] 阅读器内换源固定传空作者，弱化同名书过滤** —— `ReaderView.swift:791,800`
-- [ ] **[换源] 批量换源不让用户选目标源，可能分散换到不同源** —— `ShelfView.swift:631-668`
+- [x] **[全局搜索] 取消的搜索任务仍会把"搜索中"状态设为 false** —— `GlobalSearchView.swift:314-330`
+- [x] **[全局搜索] 默认排序按来源数量而非相关度** —— 不符合 Legado 真实排序语义。`GlobalSearchView.swift:30`, `GroupedSearchResult.swift:46-48`
+- [x] **[全局搜索] "书架同名书籍"提示只在首次搜索前出现，之后永久消失** —— `GlobalSearchView.swift:47-49,307`
+- [x] **[目录 TOC] 缓存图标逻辑和阅读器内目录抽屉相反，自相矛盾** —— `TocView.swift:84-88`, `ReaderTocDrawer.swift:160-164`
+- [x] **[目录 TOC] "倒序"只是界面显示，不持久化** —— `TocView.swift:44,62,110-113`
+- [x] **[目录 TOC] 点击"卷"标题会被当成章节直接打开阅读器** —— 真实行为 bug。`TocView.swift`, `ReaderTocDrawer.swift`, `ContentService.swift:34-36`
+- [x] **[换源] "完全匹配"用严格字符串相等，会漏掉真正同一本书的源** —— `ChangeSourceView.swift:208-213`
+- [x] **[换源] 阅读器内换源固定传空作者，弱化同名书过滤** —— `ReaderView.swift:791,800`
+- [x] **[换源] 批量换源不让用户选目标源，可能分散换到不同源** —— `ShelfView.swift:631-668`
 - [ ] **[书架] "检查更新"扫描后不刷新"最新章节"文字** —— `ShelfView.swift:481-514`, `ShelfStore.swift:78-83`
 - [ ] **[书籍详情] 换源失败时静默吞错误，界面显示"新源名字+旧书籍信息"错配状态** —— `BookDetailView.swift:551-587`
 - [ ] **[书籍详情] 上述失败场景下"上次读到"这行显示错误数据** —— `BookDetailView.swift:273-274`

@@ -27,7 +27,12 @@ struct GlobalSearchView: View {
     @State private var isSearching = false
     @State private var hasSearchedOnce = false
     @State private var searchTask: Task<Void, Never>?
-    @State private var sortMode: SearchSortMode = .sourceCount
+    // Real bug found comparing against Legado: `.sourceCount` used to be the default, ranking purely
+    // by how many sources found a title and ignoring relevance entirely -- Legado's real search
+    // (`SearchModel.mergeItems`) always ranks by title-match closeness first, source count only as a
+    // same-tier tiebreaker, unconditionally (not a toggle). `.relevance` mode already implements that
+    // correct ranking; it just wasn't the default.
+    @State private var sortMode: SearchSortMode = .relevance
     @State private var searchHistory: [String] = []
     @State private var shelfKeys: Set<String> = []
     @State private var allShelfBooks: [ShelfBook] = []
@@ -84,6 +89,15 @@ struct GlobalSearchView: View {
             text: $keyword, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索所有已启用的书源"
         )
         .onSubmit(of: .search) { startSearching() }
+        // Real bug found comparing against Legado: `hasSearchedOnce` used to only ever flip to
+        // `true` (set once in `startSearching()`, never reset), so the "书架同名书籍" convenience
+        // section permanently disappeared after the first search in a screen visit -- even after
+        // clearing the field and typing a brand-new query. Legado's own equivalent re-shows this any
+        // time the field is being retyped, regardless of past searches; clearing back to empty is the
+        // natural point to reset here too.
+        .onChange(of: keyword) { _, newValue in
+            if newValue.isEmpty { hasSearchedOnce = false }
+        }
         .toolbar {
             if hasSearchedOnce && !groups.isEmpty {
                 ToolbarItem(placement: .primaryAction) {
@@ -322,6 +336,13 @@ struct GlobalSearchView: View {
                     failedOutcomes.append(outcome)
                 }
             }
+            // Real bug found comparing against Legado: this tail used to run unconditionally even
+            // when the `for await` loop above exited via the `Task.isCancelled` `break` (not natural
+            // completion) -- `startSearching()` cancelling a still-running `searchTask` to start a
+            // *new* search let the just-cancelled task's own tail fire moments later and stomp
+            // `isSearching` back to `false` while the new search was still actively running,
+            // prematurely ending the "searching…" UI state for a search that hadn't finished.
+            guard !Task.isCancelled else { return }
             // Ranking only happens once results settle -- re-sorting on every incremental arrival
             // would make rows jump around mid-search, which reads as broken rather than "ranked."
             applyRanking()

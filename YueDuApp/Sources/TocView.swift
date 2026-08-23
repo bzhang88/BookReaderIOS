@@ -15,6 +15,10 @@ struct TocView: View {
     let tocURL: String
     let bookUrl: String
     let bookTitle: String
+    /// Threaded through to `ReaderView` (via `BookOpenerView`) so its 换源 sheets can filter on a
+    /// real author instead of always matching by title alone -- see `ReaderView.bookAuthor`'s doc
+    /// comment.
+    var bookAuthor: String? = nil
     /// When set (from the shelf's "resume reading" entry point, or `BookDetailView`'s "阅读" button)
     /// and valid once chapters load, auto-navigates straight into the reader at this chapter instead
     /// of leaving the user to re-browse the whole table of contents.
@@ -41,8 +45,18 @@ struct TocView: View {
     // to this view's identity, not to any one call of `load()`.
     @State private var hasAutoNavigatedOnce = false
     @State private var searchKeyword = ""
+    // Real bug found comparing against Legado: this used to be plain unpersisted `@State`, resetting
+    // to normal order every time this view was recreated (e.g. leaving and reopening TOC). Legado's
+    // own `reverseToc` persists by physically rewriting every `BookChapter.index` in its database --
+    // deliberately not replicated here, since bookmarks/reading-progress in this app key off
+    // `chapterIndex` values that assume the source's original ordering, and reindexing everything
+    // that references a chapter by index is a much larger, riskier change than what this bug
+    // actually needs. Persisting just the display preference (keyed per book) fixes the "resets on
+    // reopen" bug without touching how chapters are identified anywhere else.
     @State private var isReversed = false
     @State private var downloadedIndices: Set<Int> = []
+
+    private var reversedPreferenceKey: String { "toc.isReversed.\(bookUrl)" }
 
     /// A plain nominal type, not a `(index: Int, chapter: BookChapter)` tuple -- `List(_:id:)` needs
     /// a real `KeyPath`, and Swift key paths can't be formed to tuple labels the way they can to a
@@ -66,29 +80,7 @@ struct TocView: View {
     var body: some View {
         ScrollViewReader { proxy in
             List(displayedChapters) { item in
-                NavigationLink {
-                    BookOpenerView(
-                        source: source, bookUrl: bookUrl, tocUrl: tocURL, chapters: chapters, currentIndex: item.index,
-                        bookTitle: bookTitle
-                    )
-                } label: {
-                    HStack {
-                        Text(item.chapter.title)
-                            .fontWeight(item.index == currentChapterIndex ? .semibold : .regular)
-                            .foregroundStyle(item.index == currentChapterIndex ? Color.accentColor : .primary)
-                        Spacer(minLength: 8)
-                        // Real usage feedback, same pass: `ReaderTocDrawerView` already shows this
-                        // (a small cloud-vs-plain distinction) for the in-reader drawer; this
-                        // standalone screen had no equivalent even though the same
-                        // `chapterCacheStore` data was one call away.
-                        if downloadedIndices.contains(item.index) {
-                            Image(systemName: "checkmark.icloud")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .id(item.index)
+                tocRow(item)
             }
             .searchable(text: $searchKeyword, prompt: "搜索章节")
             .overlay {
@@ -108,6 +100,7 @@ struct TocView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         isReversed.toggle()
+                        UserDefaults.standard.set(isReversed, forKey: reversedPreferenceKey)
                     } label: {
                         Label(isReversed ? "倒序" : "正序", systemImage: isReversed ? "arrow.up" : "arrow.down")
                     }
@@ -121,10 +114,11 @@ struct TocView: View {
             .navigationDestination(isPresented: $shouldPresentResume) {
                 BookOpenerView(
                     source: source, bookUrl: bookUrl, tocUrl: tocURL, chapters: chapters,
-                    currentIndex: resumeChapterIndex ?? 0, bookTitle: bookTitle
+                    currentIndex: resumeChapterIndex ?? 0, bookTitle: bookTitle, bookAuthor: bookAuthor
                 )
             }
             .task {
+                isReversed = UserDefaults.standard.bool(forKey: reversedPreferenceKey)
                 await load()
                 // Same pattern `LocalReaderView` already uses for its own scroll-to-position:
                 // `List`/`ScrollViewReader` needs its rows to have actually laid out before
@@ -134,6 +128,47 @@ struct TocView: View {
                     scrollToCurrent(proxy: proxy, animated: false)
                 }
             }
+        }
+    }
+
+    /// Real bug found comparing against Legado: a volume/section header row (`BookChapter.isVolume`)
+    /// used to be a plain `NavigationLink` identical to a real chapter -- tapping it opened the
+    /// reader on a synthetic "chapter" whose body is just the volume's own title/tag. Legado never
+    /// lets a volume be "opened" as a chapter (it only toggles collapse/expand); rendering it as
+    /// plain non-navigable text here is the minimal fix for that -- full collapse/expand grouping is
+    /// a separate, larger feature, not this bug.
+    @ViewBuilder
+    private func tocRow(_ item: DisplayedChapter) -> some View {
+        if item.chapter.isVolume {
+            Text(item.chapter.title)
+                .font(.subheadline.bold())
+                .foregroundStyle(.secondary)
+                .id(item.index)
+        } else {
+            NavigationLink {
+                BookOpenerView(
+                    source: source, bookUrl: bookUrl, tocUrl: tocURL, chapters: chapters, currentIndex: item.index,
+                    bookTitle: bookTitle, bookAuthor: bookAuthor
+                )
+            } label: {
+                HStack {
+                    Text(item.chapter.title)
+                        .fontWeight(item.index == currentChapterIndex ? .semibold : .regular)
+                        .foregroundStyle(item.index == currentChapterIndex ? Color.accentColor : .primary)
+                    Spacer(minLength: 8)
+                    // Real bug found comparing against Legado: this used to show the cloud glyph on
+                    // *downloaded* chapters, backwards from `ReaderTocDrawerView.tocList`'s own
+                    // (correct, Legado-matching) rendering of the exact same `downloadedIndices` data
+                    // one screen over -- already-cached rows should read clean, only chapters that
+                    // would still need a network fetch get the glyph.
+                    if !downloadedIndices.contains(item.index) {
+                        Image(systemName: "icloud")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .id(item.index)
         }
     }
 

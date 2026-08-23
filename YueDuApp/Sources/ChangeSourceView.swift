@@ -212,11 +212,32 @@ struct ChangeSourceView: View {
         hasSearchedOnce = true
     }
 
+    /// Real bug found comparing against Legado: this used to require raw string equality (`==`) on
+    /// author after only whitespace trimming, so a source reporting "金庸 著" or "作者：金庸" failed
+    /// the check and a genuinely valid alternate source got bucketed into "其他相关结果". Legado
+    /// normalizes author via `AppPattern.authorRegex` (`^\s*作\s*者[:：\s]+|\s+著`) then matches with
+    /// substring containment, not equality -- mirrored here on both sides (not just one), since
+    /// either the known book's author or the search result's could carry the decoration depending on
+    /// which source it originally came from.
+    private static func normalizedAuthor(_ text: String) -> String {
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = result.range(of: #"^\s*作\s*者[:：\s]+"#, options: .regularExpression) {
+            result.removeSubrange(range)
+        }
+        if let range = result.range(of: #"\s+著$"#, options: .regularExpression) {
+            result.removeSubrange(range)
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func isExactMatch(_ group: GroupedSearchResult) -> Bool {
         let nameMatches = group.name.trimmingCharacters(in: .whitespacesAndNewlines)
             == bookName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let bookAuthor, !bookAuthor.isEmpty else { return nameMatches }
-        return nameMatches && group.author?.trimmingCharacters(in: .whitespacesAndNewlines) == bookAuthor
+        guard let groupAuthor = group.author, !groupAuthor.isEmpty else { return false }
+        let cleanedGroup = Self.normalizedAuthor(groupAuthor)
+        let cleanedTarget = Self.normalizedAuthor(bookAuthor)
+        return nameMatches && (cleanedGroup.contains(cleanedTarget) || cleanedTarget.contains(cleanedGroup))
     }
 
     private func switchTo(_ match: SearchResult) {

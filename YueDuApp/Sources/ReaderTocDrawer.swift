@@ -21,6 +21,10 @@ struct ReaderTocDrawerView: View {
     struct ChapterItem: Identifiable {
         let id: Int  // chapter index
         let title: String
+        /// Defaults to `false` -- a local `.txt` book's chapters never carry this (`TxtChapterSplitter`
+        /// treats every heading as a flat, equal-weight chapter with no volume concept), so
+        /// `LocalReaderView` never needs to pass it explicitly.
+        var isVolume: Bool = false
     }
 
     @Binding var isPresented: Bool
@@ -140,32 +144,44 @@ struct ReaderTocDrawerView: View {
     private var tocList: some View {
         ScrollViewReader { proxy in
             List(chapters) { item in
-                Button {
-                    onSelectChapter(item.id, nil)
-                    isPresented = false
-                } label: {
-                    // No `.lineLimit` -- real usage feedback, with a reference screenshot, pointed out
-                    // a long chapter title just vanished (clipped to one line with no ellipsis given
-                    // the plain `HStack` layout) instead of wrapping to a second line the way the
-                    // reference app shows it.
-                    HStack(alignment: .top) {
-                        Text(item.title)
-                            .foregroundStyle(chapterTextColor(for: item.id))
-                            .fontWeight(item.id == currentIndex ? .semibold : .regular)
-                        Spacer(minLength: 8)
-                        // Real usage feedback, same screenshot: chapters already saved to disk (read,
-                        // or simply prefetched ahead of where you are) show nothing extra; chapters
-                        // that would still need a network fetch get a small cloud glyph, so you can
-                        // tell at a glance how far ahead you can keep reading offline.
-                        if let downloadedIndices, !downloadedIndices.contains(item.id) {
-                            Image(systemName: "icloud")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                // Real bug found comparing against Legado: a volume/section header row used to be a
+                // plain `Button` identical to a real chapter -- tapping it navigated into the reader
+                // on a synthetic "chapter" whose body is just the volume's own title. Legado never
+                // lets a volume be "opened" this way; rendering it as plain non-navigable text is the
+                // minimal fix -- full collapse/expand grouping is a separate, larger feature.
+                if item.isVolume {
+                    Text(item.title)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.secondary)
+                        .id(item.id)
+                } else {
+                    Button {
+                        onSelectChapter(item.id, nil)
+                        isPresented = false
+                    } label: {
+                        // No `.lineLimit` -- real usage feedback, with a reference screenshot, pointed
+                        // out a long chapter title just vanished (clipped to one line with no ellipsis
+                        // given the plain `HStack` layout) instead of wrapping to a second line the
+                        // way the reference app shows it.
+                        HStack(alignment: .top) {
+                            Text(item.title)
+                                .foregroundStyle(chapterTextColor(for: item.id))
+                                .fontWeight(item.id == currentIndex ? .semibold : .regular)
+                            Spacer(minLength: 8)
+                            // Real usage feedback, same screenshot: chapters already saved to disk
+                            // (read, or simply prefetched ahead of where you are) show nothing extra;
+                            // chapters that would still need a network fetch get a small cloud glyph,
+                            // so you can tell at a glance how far ahead you can keep reading offline.
+                            if let downloadedIndices, !downloadedIndices.contains(item.id) {
+                                Image(systemName: "icloud")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
+                    .id(item.id)
                 }
-                .buttonStyle(.plain)
-                .id(item.id)
             }
             .listStyle(.plain)
             .onAppear { proxy.scrollTo(currentIndex, anchor: .center) }
