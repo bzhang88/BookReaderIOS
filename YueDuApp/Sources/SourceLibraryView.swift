@@ -107,106 +107,7 @@ struct SourceLibraryView: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(displayedSources) { source in
-                    Button {
-                        toggleEnabled(source)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 4) {
-                                    Text(source.bookSourceName)
-                                        .font(.headline)
-                                        .foregroundStyle(source.enabled ? .primary : .secondary)
-                                    if let report = capabilityReports[source.bookSourceUrl], !report.isFullyCompatible {
-                                        Text("\(report.issues.count) 项不支持")
-                                            .font(.caption2)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(.orange.opacity(0.2), in: Capsule())
-                                            .foregroundStyle(.orange)
-                                    }
-                                    if loggedInSourceUrls.contains(source.bookSourceUrl) {
-                                        Image(systemName: "person.crop.circle.badge.checkmark")
-                                            .font(.caption2)
-                                            .foregroundStyle(Color.green)
-                                    }
-                                }
-                                Text(source.bookSourceUrl)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                // Written by `SourceCheckView`'s own check results (respondTime for
-                                // speed, a failure annotation here) -- matches Legado's real source
-                                // list, which keeps a failing/slow source visibly flagged without
-                                // needing to re-run a check to remember why.
-                                if let comment = source.bookSourceComment, !comment.isEmpty {
-                                    Text(comment)
-                                        .font(.caption2)
-                                        .foregroundStyle(.red)
-                                        .lineLimit(1)
-                                }
-                                if let respondTime = source.respondTime {
-                                    Text("响应 \(respondTime) 毫秒")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Image(systemName: source.enabled ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(source.enabled ? .green : .secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            editingSource = source
-                        } label: {
-                            Label("编辑", systemImage: "pencil")
-                        }
-                        .tint(.blue)
-                        Button {
-                            groupPickerTarget = source
-                        } label: {
-                            Label("分组", systemImage: "folder")
-                        }
-                        .tint(.orange)
-                    }
-                    .contextMenu {
-                        Button {
-                            editingSource = source
-                        } label: {
-                            Label("编辑", systemImage: "pencil")
-                        }
-                        Button {
-                            groupPickerTarget = source
-                        } label: {
-                            Label("设置分组", systemImage: "folder")
-                        }
-                        Button {
-                            debuggingSource = source
-                        } label: {
-                            Label("调试", systemImage: "ladybug")
-                        }
-                        if let loginUrl = source.loginUrl, !loginUrl.isEmpty {
-                            Button {
-                                loggingInSource = source
-                            } label: {
-                                Label(
-                                    loggedInSourceUrls.contains(source.bookSourceUrl) ? "已登录（重新登录）" : "登录",
-                                    systemImage: "person.crop.circle"
-                                )
-                            }
-                        }
-                        Button {
-                            verifyingSource = source
-                        } label: {
-                            Label("手动验证（过验证码等）", systemImage: "checkmark.shield")
-                        }
-                        NavigationLink {
-                            SourceVariableAndCookieView(source: source)
-                        } label: {
-                            Label("变量与 Cookie", systemImage: "key")
-                        }
-                    }
+                    sourceRow(source)
                 }
                 .onDelete(perform: delete)
             }
@@ -243,7 +144,7 @@ struct SourceLibraryView: View {
                 BookSourceEditView(source: source)
             }
             .sheet(item: $groupPickerTarget) { source in
-                ShelfGroupPickerView(existingGroups: existingGroupNames) { newGroup in
+                BookSourceGroupPickerView(existingGroups: existingGroupNames) { newGroup in
                     await setGroup(of: source, to: newGroup)
                 }
             }
@@ -291,6 +192,120 @@ struct SourceLibraryView: View {
             }
             .task { await reload() }
             .refreshable { await reload() }
+        }
+    }
+
+    // Broken out of `body`'s `ForEach` into its own `@ViewBuilder` -- same
+    // "compiler unable to type-check this expression in reasonable time" CI failure class this
+    // session has now hit three times today, this time in the row itself (several conditional
+    // badges nested inside the Button/HStack/VStack the search/sort work added alongside) rather
+    // than a toolbar Menu. `sourceRowLabel` is split out further for the same reason.
+    @ViewBuilder
+    private func sourceRow(_ source: BookSource) -> some View {
+        Button {
+            toggleEnabled(source)
+        } label: {
+            sourceRowLabel(source)
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .leading) {
+            Button {
+                editingSource = source
+            } label: {
+                Label("编辑", systemImage: "pencil")
+            }
+            .tint(.blue)
+            Button {
+                groupPickerTarget = source
+            } label: {
+                Label("分组", systemImage: "folder")
+            }
+            .tint(.orange)
+        }
+        .contextMenu {
+            Button {
+                editingSource = source
+            } label: {
+                Label("编辑", systemImage: "pencil")
+            }
+            Button {
+                groupPickerTarget = source
+            } label: {
+                Label("设置分组", systemImage: "folder")
+            }
+            Button {
+                debuggingSource = source
+            } label: {
+                Label("调试", systemImage: "ladybug")
+            }
+            if let loginUrl = source.loginUrl, !loginUrl.isEmpty {
+                Button {
+                    loggingInSource = source
+                } label: {
+                    Label(
+                        loggedInSourceUrls.contains(source.bookSourceUrl) ? "已登录（重新登录）" : "登录",
+                        systemImage: "person.crop.circle"
+                    )
+                }
+            }
+            Button {
+                verifyingSource = source
+            } label: {
+                Label("手动验证（过验证码等）", systemImage: "checkmark.shield")
+            }
+            NavigationLink {
+                SourceVariableAndCookieView(source: source)
+            } label: {
+                Label("变量与 Cookie", systemImage: "key")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sourceRowLabel(_ source: BookSource) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(source.bookSourceName)
+                        .font(.headline)
+                        .foregroundStyle(source.enabled ? .primary : .secondary)
+                    if let report = capabilityReports[source.bookSourceUrl], !report.isFullyCompatible {
+                        Text("\(report.issues.count) 项不支持")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.orange.opacity(0.2), in: Capsule())
+                            .foregroundStyle(.orange)
+                    }
+                    if loggedInSourceUrls.contains(source.bookSourceUrl) {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                            .font(.caption2)
+                            .foregroundStyle(Color.green)
+                    }
+                }
+                Text(source.bookSourceUrl)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                // Written by `SourceCheckView`'s own check results (respondTime for speed, a
+                // failure annotation here) -- matches Legado's real source list, which keeps a
+                // failing/slow source visibly flagged without needing to re-run a check to
+                // remember why.
+                if let comment = source.bookSourceComment, !comment.isEmpty {
+                    Text(comment)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
+                if let respondTime = source.respondTime {
+                    Text("响应 \(respondTime) 毫秒")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Image(systemName: source.enabled ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(source.enabled ? .green : .secondary)
         }
     }
 
@@ -457,6 +472,63 @@ struct SourceLibraryView: View {
 #Preview {
     SourceLibraryView()
         .environmentObject(AppEnvironment())
+}
+
+/// Single-select group picker for `BookSource.bookSourceGroup` (still a single optional `String`,
+/// unlike `ShelfBook.groups` -- Legado's own book-source grouping was never a multi-membership
+/// bitmask the way its shelf `Book.group` is, so this deliberately doesn't reuse the now-multi-select
+/// `ShelfGroupPickerView`). Same plain single-select-button-list shape that view used before it
+/// became a checklist.
+private struct BookSourceGroupPickerView: View {
+    let existingGroups: [String]
+    let onSelect: (String?) async -> Void
+
+    @State private var newGroupName = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Button("无分组") {
+                        select(nil)
+                    }
+                }
+                if !existingGroups.isEmpty {
+                    Section("已有分组") {
+                        ForEach(existingGroups, id: \.self) { group in
+                            Button(group) {
+                                select(group)
+                            }
+                        }
+                    }
+                }
+                Section("新建分组") {
+                    TextField("分组名称", text: $newGroupName)
+                    Button("创建并使用") {
+                        select(newGroupName)
+                    }
+                    .disabled(newGroupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .navigationTitle("设置分组")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func select(_ group: String?) {
+        let trimmed = group?.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            await onSelect(trimmed?.isEmpty == true ? nil : trimmed)
+            dismiss()
+        }
+    }
 }
 
 /// Mirrors Legado's own `BookSourceSort` options (`BookSourceActivity`'s sort submenu) minus
