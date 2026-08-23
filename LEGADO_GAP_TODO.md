@@ -9,9 +9,9 @@
 ## P0 · 安全 / 严重问题（4 项）
 
 - [x] **[局域网 Web 服务] 密码留空时鉴权静默失效** —— UI 显示已开启鉴权，实际因空字符串被当 nil 处理而完全不设防。`LANWebServiceView.swift:87-91`, `LANWebServer.swift:56-58`, `LANWebAuth.swift:15-18`
-- [ ] **[换源] 换源前不检查书源类型（文本/音频/漫画）** —— 可能让文本阅读器渲染错误内容类型。`ChangeSourceView.swift:189-206`, `ReaderView.swift:1412-1481`, `ShelfView.swift:603-623`, `BookDetailView.swift:551-586`
-- [ ] **[书架] 批量删除没有二次确认** —— 误触无法挽回。`ShelfView.swift:265`
-- [ ] **[书源管理] 改书源网址后产生重复条目而不是替换旧的** —— `BookSourceEditView.swift:72-86`, `BookSourceStore.swift:27-46`
+- [x] **[换源] 换源前不检查书源类型（文本/音频/漫画）** —— 可能让文本阅读器渲染错误内容类型。`ChangeSourceView.swift:189-206`, `ReaderView.swift:1412-1481`, `ShelfView.swift:603-623`, `BookDetailView.swift:551-586`
+- [x] **[书架] 批量删除没有二次确认** —— 误触无法挽回。`ShelfView.swift:265`
+- [x] **[书源管理] 改书源网址后产生重复条目而不是替换旧的** —— `BookSourceEditView.swift:72-86`, `BookSourceStore.swift:27-46`
 
 ---
 

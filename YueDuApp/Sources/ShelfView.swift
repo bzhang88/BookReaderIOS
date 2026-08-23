@@ -35,6 +35,7 @@ struct ShelfView: View {
     @State private var isSelecting = false
     @State private var selectedBookUrls: Set<String> = []
     @State private var isShowingBatchGroupPicker = false
+    @State private var isShowingBatchDeleteConfirm = false
     @State private var isShowingBatchExportSheet = false
     @State private var batchExportItems: [Any] = []
     @State private var isBatchExporting = false
@@ -130,6 +131,15 @@ struct ShelfView: View {
             }
             .sheet(isPresented: $isShowingBatchExportSheet) {
                 ShareSheet(items: batchExportItems)
+            }
+            .confirmationDialog(
+                "确定要删除选中的 \(selectedBookUrls.count) 本书吗？", isPresented: $isShowingBatchDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("删除 \(selectedBookUrls.count) 本书", role: .destructive) { batchDelete() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后无法恢复，阅读进度和分组也会一起丢失。")
             }
             .alert("批量换源", isPresented: Binding(
                 get: { batchChangeSourceSummary != nil }, set: { if !$0 { batchChangeSourceSummary = nil } }
@@ -262,7 +272,7 @@ struct ShelfView: View {
                     .disabled(selectedBookUrls.isEmpty)
             }
             Spacer()
-            Button("删除", role: .destructive) { batchDelete() }
+            Button("删除", role: .destructive) { isShowingBatchDeleteConfirm = true }
                 .disabled(selectedBookUrls.isEmpty)
         }
     }

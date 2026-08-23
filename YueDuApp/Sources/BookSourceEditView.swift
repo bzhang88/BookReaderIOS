@@ -77,6 +77,14 @@ struct BookSourceEditView: View {
         do {
             let decoded = try JSONDecoder().decode(BookSource.self, from: data)
             Task {
+                // Real bug found comparing against Legado: `importSources` upserts strictly by the
+                // *new* bookSourceUrl, so editing an existing source and changing its URL here used
+                // to leave the old entry behind as an orphaned duplicate instead of renaming it in
+                // place. Legado's own BookSourceEditViewModel.save() explicitly deletes the old URL
+                // first when it changed -- same fix here.
+                if let source, source.bookSourceUrl != decoded.bookSourceUrl {
+                    try? await env.bookSourceStore.remove(bookSourceUrl: source.bookSourceUrl)
+                }
                 try? await env.bookSourceStore.importSources([decoded])
                 dismiss()
             }

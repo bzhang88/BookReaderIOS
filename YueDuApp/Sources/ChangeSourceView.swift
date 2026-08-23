@@ -189,7 +189,14 @@ struct ChangeSourceView: View {
     private func search() async {
         let all = (try? await env.bookSourceStore.enabled()) ?? []
         sources = all
-        let candidates = all.filter { $0.bookSourceUrl != currentBookSourceUrl }
+        // Real bug found comparing against Legado: candidates used to be filtered only by URL, so a
+        // same-titled result on an audio (`bookSourceType == 1`) or manga (`== 2`) source could be
+        // offered as a "换源" target for a book still open in the text reader -- switching would feed
+        // that source's rule output straight into `ReaderView` as prose. `?? 0` (text) is the safe
+        // fallback if `currentBookSourceUrl` somehow isn't found among enabled sources: every current
+        // caller of this view (reader/detail/shelf) only ever opens it for a text book.
+        let currentType = all.first(where: { $0.bookSourceUrl == currentBookSourceUrl })?.bookSourceType ?? 0
+        let candidates = all.filter { $0.bookSourceUrl != currentBookSourceUrl && $0.bookSourceType == currentType }
         guard !candidates.isEmpty else {
             hasSearchedOnce = true
             return
